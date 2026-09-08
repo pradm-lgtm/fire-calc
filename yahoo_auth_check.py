@@ -16,6 +16,13 @@ Checks, in order:
 Exit codes: 0 = read/write confirmed, 1 = unexpected error,
             2 = refresh token dead (full re-auth needed), 3 = read-only.
 
+First-time setup (no access/refresh token yet): fill in only
+YAHOO_CLIENT_ID and YAHOO_CLIENT_SECRET in .env, then run
+
+    python3 yahoo_auth_check.py --auth-url        # prints the consent URL
+    python3 yahoo_auth_check.py --exchange CODE   # trades the code for tokens,
+                                                  # saves them to .env, runs check
+
 Stdlib only — no pip installs needed. Requires Python 3.8+.
 """
 
@@ -28,6 +35,7 @@ import urllib.request
 from pathlib import Path
 
 TOKEN_URL = "https://api.login.yahoo.com/oauth2/get_token"
+AUTH_URL = "https://api.login.yahoo.com/oauth2/request_auth"
 API_BASE = "https://fantasysports.yahooapis.com/fantasy/v2"
 
 REQUIRED_VARS = [
@@ -76,17 +84,31 @@ def api_get(path, access_token):
     )
 
 
-# ---------------------------------------------------------------- OAuth refresh
+def save_env(path: Path, env: dict):
+    """Rewrite the .env file with the four YAHOO_* keys (preserving others)."""
+    lines, seen = [], set()
+    if path.exists():
+        for line in path.read_text().splitlines():
+            stripped = line.strip()
+            if stripped and not stripped.startswith("#") and "=" in stripped:
+                key = stripped.partition("=")[0].strip()
+                if key in env:
+                    lines.append(f"{key}={env[key]}")
+                    seen.add(key)
+                    continue
+            lines.append(line)
+    for key in REQUIRED_VARS:
+        if key in env and key not in seen:
+            lines.append(f"{key}={env[key]}")
+    path.write_text("\n".join(lines) + "\n")
 
-def refresh_access_token(env):
+
+# ---------------------------------------------------------------- OAuth
+
+def token_request(env, params):
     basic = base64.b64encode(
         f"{env['YAHOO_CLIENT_ID']}:{env['YAHOO_CLIENT_SECRET']}".encode()
     ).decode()
-    body = urllib.parse.urlencode({
-        "grant_type": "refresh_token",
-        "refresh_token": env["YAHOO_REFRESH_TOKEN"],
-        "redirect_uri": "oob",
-    }).encode()
     status, text = http_request(
         TOKEN_URL,
         method="POST",
@@ -94,13 +116,44 @@ def refresh_access_token(env):
             "Authorization": f"Basic {basic}",
             "Content-Type": "application/x-www-form-urlencoded",
         },
-        body=body,
+        body=urllib.parse.urlencode(params).encode(),
     )
     try:
         data = json.loads(text)
     except json.JSONDecodeError:
         data = {}
     return status, text, data
+
+
+def exchange_code(env, code, env_path):
+    """One-time: trade a consent-screen code for access + refresh tokens."""
+    status, text, data = token_request(env, {
+        "grant_type": "authorization_code",
+        "code": code.strip(),
+        "redirect_uri": "oob",
+    })
+    if status != 200 or "access_token" not in data:
+        print(f"Code exchange FAILED (HTTP {status}):")
+        print(text)
+        print()
+        print("Codes are single-use and expire after a few minutes — get a fresh")
+        print("one with:  python3 yahoo_auth_check.py --auth-url")
+        return False
+    env["YAHOO_ACCESS_TOKEN"] = data["access_token"]
+    env["YAHOO_REFRESH_TOKEN"] = data["refresh_token"]
+    save_env(env_path, env)
+    print(f"Code exchange OK — tokens saved to {env_path}")
+    if data.get("scope"):
+        print(f"Token response scope: {data['scope']!r}")
+    return True
+
+
+def refresh_access_token(env):
+    return token_request(env, {
+        "grant_type": "refresh_token",
+        "refresh_token": env["YAHOO_REFRESH_TOKEN"],
+        "redirect_uri": "oob",
+    })
 
 
 # ---------------------------------------------------------------- Yahoo JSON helpers
@@ -176,10 +229,41 @@ def looks_like_scope_denial(status, body):
 def main():
     env_path = Path(__file__).resolve().parent / ".env"
     env = load_env(env_path)
-    missing = [v for v in REQUIRED_VARS if not env.get(v)]
+
+    args = sys.argv[1:]
+    needs_tokens = True
+    if args[:1] == ["--auth-url"] or args[:1] == ["--exchange"]:
+        needs_tokens = False
+    required = REQUIRED_VARS if needs_tokens else REQUIRED_VARS[:2]
+    missing = [v for v in required if not env.get(v)]
     if missing:
         print(f"ERROR: missing in {env_path}: {', '.join(missing)}")
         print("Copy .env.example to .env and fill in your Yahoo app credentials.")
+        return 1
+
+    if args[:1] == ["--auth-url"]:
+        print("Open this URL in a browser, allow access, and copy the code shown:")
+        print(f"{AUTH_URL}?" + urllib.parse.urlencode({
+            "client_id": env["YAHOO_CLIENT_ID"],
+            "redirect_uri": "oob",
+            "response_type": "code",
+        }))
+        print()
+        print("Then run:  python3 yahoo_auth_check.py --exchange <code>")
+        return 0
+
+    if args[:1] == ["--exchange"]:
+        if len(args) < 2:
+            print("Usage: python3 yahoo_auth_check.py --exchange <code>")
+            return 1
+        if not exchange_code(env, args[1], env_path):
+            return 2
+        env = load_env(env_path)
+        print()
+        # fall through to the normal check, exercising the new refresh token
+    elif args:
+        print(f"Unknown arguments: {' '.join(args)}")
+        print("Usage: python3 yahoo_auth_check.py [--auth-url | --exchange <code>]")
         return 1
 
     # ---- Step 1: refresh the access token -------------------------------
