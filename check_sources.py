@@ -55,6 +55,10 @@ def check(url, players, gazetteer):
         print("  VERDICT: marginal — very little text; likely a teaser.")
     elif len(recs) < 4:
         print("  VERDICT: marginal — few recommendations found.")
+    elif not with_faab:
+        print("  VERDICT: names only — no bid guidance parsed. Often means a")
+        print("  listing/hub page rather than an analyst article. Useful for")
+        print("  finding candidates, but it cannot tell you what to spend.")
     else:
         print("  VERDICT: usable.")
     return True

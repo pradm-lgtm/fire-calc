@@ -143,8 +143,11 @@ def find_mentions(text, gazetteer):
 # Words that mark a nearby percentage as a BID. Articles that give FAAB
 # guidance nearly always say so explicitly.
 _FAAB_CUE = re.compile(
-    r"\b(?:faab|bid|bids|bidding|budget|spend|spending|blind|acquisition|"
-    r"waiver\s+(?:dollars|money|budget))\b", re.IGNORECASE)
+    # "fab" matters as much as "faab": Yahoo writes Free-Agent Budget as FAB,
+    # and without it every Yahoo bid reads as an unexplained bare number.
+    r"\b(?:faab|fab|bid|bids|bidding|budget|spend|spending|blind|acquisition|"
+    r"free[\s-]?agent[\s-]?budget|waiver\s+(?:dollars|money|budget))\b",
+    re.IGNORECASE)
 
 # Words that mark a nearby percentage as a STAT, never a bid. This is the
 # important half: article pages are dense with "rostered in 73% of leagues",
