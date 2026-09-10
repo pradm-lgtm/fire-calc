@@ -96,7 +96,12 @@ def check(url, players, gazetteer, debug=False):
             print(f"        {row['sentence']!r}")
         print("  --- end ---\n")
 
-    if transcript:
+    if transcript and len(with_faab) >= 2:
+        # Plenty of real articles embed a video at the top. Stated bids are
+        # proof there is written advice here, and outrank the heuristic.
+        print("  VERDICT: usable — video markers present, but it carries")
+        print("  written recommendations with stated bids.")
+    elif transcript:
         print("  VERDICT: unusable — this is a video/podcast page, not a")
         print("  written article. Spoken advice has no headings and no stated")
         print("  bids, and transcription mangles names. Find this site's")
