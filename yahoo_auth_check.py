@@ -2,6 +2,15 @@
 """
 Yahoo Fantasy Sports auth + scope checker (step 1 of the fantasy agent).
 
+STATUS (Sept 2026): Yahoo has closed off self-serve Fantasy Sports API
+access. The permission no longer appears on the app-creation form, and
+legacy apps still showing the checkbox return 403 on every Fantasy
+endpoint. Access now requires a reviewed application at
+https://sports.yahoo.com/developer/access/ and grants READ ONLY — Yahoo
+states write access is unavailable. So the write probe below cannot
+succeed today; it is kept so this script re-confirms the situation if
+Yahoo restores write access later.
+
 Checks, in order:
   1. Loads YAHOO_* credentials from a local .env file (never hardcoded).
   2. Refreshes the OAuth2 access token via Yahoo's token endpoint.
@@ -411,16 +420,16 @@ def main():
                 print("no Fantasy endpoint works for it, not even one needing no user")
                 print("data. The dashboard checkbox is not in effect.")
                 print()
-                print("Yahoo often fails to apply Fantasy Sports permission ADDED to an")
-                print("app after creation: the box shows ticked but no grant is issued.")
-                print("The reliable fix is a NEW app with Fantasy Sports Read/Write")
-                print("selected at creation time:")
-                print("  1. https://developer.yahoo.com/apps/create/")
-                print("  2. OAuth Client Type: Confidential Client")
-                print("  3. Redirect URI: https://localhost:8080/")
-                print("  4. API Permissions: tick Fantasy Sports -> Read/Write")
-                print("  5. Put the NEW Client ID/Secret in .env, then redo")
-                print("     --auth-url / --exchange.")
+                print("As of 2025-26 Yahoo no longer grants Fantasy Sports access via")
+                print("the self-serve app form: the permission is absent from the app")
+                print("creation page, and legacy apps that still display the checkbox")
+                print("get 403s. Access is now gated behind a reviewed application:")
+                print("  https://sports.yahoo.com/developer/access/")
+                print()
+                print("Note that approval grants READ access only — Yahoo states write")
+                print("access is not available at this time. Lineup changes and waiver")
+                print("claims therefore CANNOT be done through the Yahoo API by anyone")
+                print("right now; they need browser automation.")
             return 1
         print("RESULT: token refreshed but the read call failed — see raw error above.")
         return 1
