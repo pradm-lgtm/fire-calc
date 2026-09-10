@@ -45,6 +45,17 @@ REQUIRED_VARS = [
     "YAHOO_REFRESH_TOKEN",
 ]
 
+# Must match a Redirect URI registered on the Yahoo app exactly. Yahoo's legacy
+# "oob" (show-the-code-on-screen) value still mints tokens for apps registered
+# with a real redirect URI, but those tokens come back with no API scopes
+# attached — every Fantasy endpoint then 403s "not authorized to perform this
+# action" even though the app has Fantasy Sports Read/Write.
+DEFAULT_REDIRECT_URI = "https://localhost:8080/"
+
+
+def redirect_uri(env):
+    return env.get("YAHOO_REDIRECT_URI") or DEFAULT_REDIRECT_URI
+
 
 # ---------------------------------------------------------------- .env
 
@@ -125,12 +136,23 @@ def token_request(env, params):
     return status, text, data
 
 
+def normalize_code(raw):
+    """Accept a bare code or the whole redirect URL pasted from the address bar."""
+    raw = raw.strip().strip("<>\"'")
+    if "code=" in raw:
+        query = urllib.parse.urlparse(raw).query or raw.partition("?")[2] or raw
+        codes = urllib.parse.parse_qs(query).get("code")
+        if codes:
+            return codes[0]
+    return raw
+
+
 def exchange_code(env, code, env_path):
     """One-time: trade a consent-screen code for access + refresh tokens."""
     status, text, data = token_request(env, {
         "grant_type": "authorization_code",
-        "code": code.strip(),
-        "redirect_uri": "oob",
+        "code": normalize_code(code),
+        "redirect_uri": redirect_uri(env),
     })
     if status != 200 or "access_token" not in data:
         print(f"Code exchange FAILED (HTTP {status}):")
@@ -152,7 +174,7 @@ def refresh_access_token(env):
     return token_request(env, {
         "grant_type": "refresh_token",
         "refresh_token": env["YAHOO_REFRESH_TOKEN"],
-        "redirect_uri": "oob",
+        "redirect_uri": redirect_uri(env),
     })
 
 
@@ -242,14 +264,24 @@ def main():
         return 1
 
     if args[:1] == ["--auth-url"]:
-        print("Open this URL in a browser, allow access, and copy the code shown:")
+        uri = redirect_uri(env)
+        print("1. Open this URL in a browser and click Agree:")
+        print()
         print(f"{AUTH_URL}?" + urllib.parse.urlencode({
             "client_id": env["YAHOO_CLIENT_ID"],
-            "redirect_uri": "oob",
+            "redirect_uri": uri,
             "response_type": "code",
         }))
         print()
-        print("Then run:  python3 yahoo_auth_check.py --exchange <code>")
+        print(f"2. Yahoo redirects you to {uri} — the page will FAIL TO LOAD")
+        print("   ('can't connect' / privacy warning). That is expected; nothing")
+        print("   is listening there. The code is in the browser's ADDRESS BAR:")
+        print(f"   {uri}?code=THIS_PART")
+        print()
+        print("3. Run:  python3 yahoo_auth_check.py --exchange THIS_PART")
+        print()
+        print(f"(Redirect URI in use: {uri} — it must match one registered on the")
+        print(" Yahoo app exactly. Override with YAHOO_REDIRECT_URI in .env.)")
         return 0
 
     if args[:1] == ["--exchange"]:
@@ -324,6 +356,29 @@ def main():
         print(f"Read call FAILED (HTTP {status}). Raw response:")
         print(body)
         print()
+        if status == 403 and "not authorized" in body.lower():
+            print("RESULT: the TOKEN carries no Fantasy Sports permission.")
+            print()
+            print("The token is valid (it refreshed fine) — Yahoo just won't let it")
+            print("touch Fantasy endpoints. In order of likelihood:")
+            print()
+            print(f"  1. Redirect URI mismatch. This run used {redirect_uri(env)!r}.")
+            print("     It must exactly match a Redirect URI registered on the app.")
+            print("     Yahoo's legacy 'oob' value mints scopeless tokens for apps")
+            print("     that have a real redirect URI registered — which produces")
+            print("     exactly this error. Set YAHOO_REDIRECT_URI in .env to match")
+            print("     the dashboard, then redo --auth-url / --exchange.")
+            print()
+            print("  2. Tokens predate the permission. If Fantasy Sports Read/Write")
+            print("     was ticked (or re-saved) after these tokens were minted, they")
+            print("     don't carry it. Redo --auth-url / --exchange.")
+            print()
+            print("  3. Client ID mismatch — .env may hold a different app's key than")
+            print("     the one showing Fantasy Sports Read/Write. Compare .env's")
+            print("     YAHOO_CLIENT_ID against the dashboard.")
+            print()
+            print("  4. Brand-new app: Yahoo can take a while to propagate. Retry later.")
+            return 1
         print("RESULT: token refreshed but the read call failed — see raw error above.")
         return 1
 
