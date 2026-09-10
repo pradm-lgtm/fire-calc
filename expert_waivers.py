@@ -78,17 +78,26 @@ def load_article_files(directory):
     return out
 
 
-def fetch_url(url):
+def fetch_raw(url, quiet=False):
+    """Fetch a page verbatim. Link discovery needs the markup intact."""
     req = urllib.request.Request(url, headers={
         "User-Agent": "Mozilla/5.0 (personal fantasy tool; single user)",
-        "Accept": "text/html,application/xhtml+xml",
+        "Accept": "text/html,application/xhtml+xml,application/rss+xml,"
+                  "application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.9",
     })
     try:
         with urllib.request.urlopen(req, timeout=30) as resp:
-            return strip_html(resp.read().decode("utf-8", "replace"))
+            return resp.read().decode("utf-8", "replace")
     except (urllib.error.HTTPError, urllib.error.URLError) as e:
-        print(f"  ! could not fetch {url}: {e}")
+        if not quiet:
+            print(f"  ! could not fetch {url}: {e}")
         return None
+
+
+def fetch_url(url):
+    body = fetch_raw(url)
+    return strip_html(body) if body else None
 
 
 # ---------------------------------------------------------------- roster shape
