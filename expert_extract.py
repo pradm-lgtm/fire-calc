@@ -34,8 +34,10 @@ _SUFFIXES = {"jr", "sr", "ii", "iii", "iv", "v"}
 # Words that, near a player mention, indicate the article is recommending an
 # ADD rather than merely discussing the player.
 ADD_VERBS = (
-    "add", "adds", "pickup", "pick up", "picking up", "claim", "target",
-    "grab", "stash", "waiver", "priority", "bid", "spend", "scoop",
+    "add", "adds", "adding", "addition", "pickup", "pick up", "picking up",
+    "claim", "claims", "target", "grab", "grabbing", "stash", "stashing",
+    "waiver", "priority", "bid", "spend", "scoop", "stream", "streaming",
+    "streamer", "start", "starter",
 )
 
 # Words indicating the article is telling you to DROP or avoid the player,
@@ -130,6 +132,29 @@ def find_mentions(text, gazetteer):
     return sorted(found, key=lambda row: row[1])
 
 
+# Words that mark a nearby percentage as a BID. Articles that give FAAB
+# guidance nearly always say so explicitly.
+_FAAB_CUE = re.compile(
+    r"\b(?:faab|bid|bids|bidding|budget|spend|spending|blind|acquisition|"
+    r"waiver\s+(?:dollars|money|budget))\b", re.IGNORECASE)
+
+# Words that mark a nearby percentage as a STAT, never a bid. This is the
+# important half: article pages are dense with "rostered in 73% of leagues",
+# "36% of snaps" and "85% route share", and reading any of those as a bid
+# produces confident, badly wrong advice.
+_STAT_CUE = re.compile(
+    r"\b(?:roster|rostered|rostership|own|owned|ownership|available|start|"
+    r"started|snap|snaps|route|routes|target|targets|share|catch|catches|"
+    r"reception|red\s*zone|carries|touch|touches|usage|success|completion|"
+    r"efficiency|rate|percentage|drafted|adds|added|leagues)\b", re.IGNORECASE)
+
+# A percentage with no cue either way is only believed if it is a plausible
+# bid size; big bare numbers are overwhelmingly stats.
+_BARE_PCT_CEILING = 40
+
+# How far before a player's name a FAAB figure may sit and still be his.
+BACKWARD_FAAB_LIMIT = 40
+
 _PCT_RANGE = re.compile(r"(\d{1,3})\s*(?:-|–|—|to)\s*(\d{1,3})\s*%")
 _PCT_SINGLE = re.compile(r"(\d{1,3})\s*%")
 _DOLLAR_RANGE = re.compile(r"\$\s*(\d{1,3})\s*(?:-|–|—|to)\s*\$?\s*(\d{1,3})")
@@ -149,6 +174,15 @@ def extract_faab(context, anchor=0):
     for pattern, is_range in ((_PCT_RANGE, True), (_DOLLAR_RANGE, True),
                               (_PCT_SINGLE, False), (_DOLLAR_SINGLE, False)):
         for m in pattern.finditer(context):
+            # Decide what this number IS before deciding whose it is.
+            near = context[max(0, m.start() - 55):m.end() + 55]
+            if _STAT_CUE.search(near):
+                continue
+            is_dollar = pattern in (_DOLLAR_RANGE, _DOLLAR_SINGLE)
+            if not (_FAAB_CUE.search(near) or is_dollar):
+                head = int(m.group(1))
+                if head > _BARE_PCT_CEILING:
+                    continue
             if is_range:
                 lo, hi = int(m.group(1)), int(m.group(2))
                 if not (lo <= hi <= 100):
@@ -167,14 +201,89 @@ def extract_faab(context, anchor=0):
             #  2. Then nearest to the name.
             #  3. Then ranges over the bare numbers inside them ("20-25%"
             #     should read as 22.5, not 25).
-            candidates.append((0 if m.start() >= anchor else 1,
-                               abs(m.start() - anchor),
-                               0 if is_range else 1,
-                               m.start(), value))
+            before = m.start() < anchor
+            distance = abs(m.start() - anchor)
+            # A figure sitting before the name belongs to it only in tight
+            # layouts like "FAAB: 15% - Player". Anything further back is the
+            # previous player's bid, and inheriting it invents a number.
+            if before and distance > BACKWARD_FAAB_LIMIT:
+                continue
+            candidates.append((1 if before else 0, distance,
+                               0 if is_range else 1, m.start(), value))
     if not candidates:
         return None
     candidates.sort()
     return candidates[0][4]
+
+
+def find_faab_figures(text):
+    """[(position, value)] for every number in `text` that reads as a bid."""
+    out = []
+    for pattern, is_range in ((_PCT_RANGE, True), (_DOLLAR_RANGE, True),
+                              (_PCT_SINGLE, False), (_DOLLAR_SINGLE, False)):
+        for m in pattern.finditer(text):
+            # An explicit bid word anywhere close settles it. Otherwise a
+            # stat word must be TIGHT to the number to disqualify it -
+            # "36% of snaps" binds, but "target share" a sentence away in
+            # the next player's blurb does not.
+            wide = text[max(0, m.start() - 55):m.end() + 55]
+            tight = text[max(0, m.start() - 25):m.end() + 25]
+            is_dollar = pattern in (_DOLLAR_RANGE, _DOLLAR_SINGLE)
+            if not _FAAB_CUE.search(wide):
+                if _STAT_CUE.search(tight):
+                    continue
+            if is_range:
+                lo, hi = int(m.group(1)), int(m.group(2))
+                if not (lo <= hi <= 100):
+                    continue
+                value = round((lo + hi) / 2, 1)
+            else:
+                value = float(m.group(1))
+                if not 0 <= value <= 100:
+                    continue
+            if not (_FAAB_CUE.search(wide) or is_dollar):
+                if int(m.group(1)) > _BARE_PCT_CEILING:
+                    continue
+            out.append((m.start(), m.end(), value, 0 if is_range else 1))
+    # Ranges subsume the bare number inside them ("20-25%" also matches "25%").
+    out.sort(key=lambda r: (r[0], r[3]))
+    kept = []
+    for start, end, value, rank in out:
+        if kept and start < kept[-1][1]:
+            continue
+        kept.append((start, end, value, rank))
+    return [(start, value) for start, _, value, _ in kept]
+
+
+def assign_faab(mentions, figures):
+    """{mention_index: value} giving each figure to exactly one player.
+
+    A bid belongs to the name it follows ("Bigsby - spend 20%"), so each
+    figure goes to the closest preceding mention, falling back to a closely
+    following one for "FAAB: 20% - Bigsby" layouts. Assigning globally is
+    what stops one player's bid from being inherited by the next.
+    """
+    owners = {}
+    for pos, value in figures:
+        best, best_dist = None, None
+        for i, (_, start, end) in enumerate(mentions):
+            if end <= pos:
+                dist = pos - end
+                limit = CONTEXT_WINDOW
+            else:
+                dist = start - pos
+                limit = BACKWARD_FAAB_LIMIT
+            if dist < 0 or dist > limit:
+                continue
+            # Following a name outranks merely being near one: in
+            # "Sampson ... 10% of FAAB. The Cowboys ...", the bid is
+            # Sampson's even though "Cowboys" sits fewer characters away.
+            key = (0 if end <= pos else 1, dist)
+            if best_dist is None or key < best_dist:
+                best, best_dist = i, key
+        if best is not None and best not in owners:
+            owners[best] = value
+    return owners
 
 
 def _paragraph_bounds(text, index):
@@ -224,6 +333,7 @@ def extract_recommendations(text, gazetteer, source=None):
     """
     results = {}
     mentions = find_mentions(text, gazetteer)
+    faab_by_mention = assign_faab(mentions, find_faab_figures(text))
     for i, (pid, idx, end_idx) in enumerate(mentions):
         # Bound the context to this player's own text. Without this, a FAAB
         # figure or a "drop him" aimed at a neighbouring player gets read as
@@ -244,7 +354,7 @@ def extract_recommendations(text, gazetteer, source=None):
         sent_lo, sent_hi = _sentence_bounds(text, idx)
         if _NEG_RE.search(text[sent_lo:sent_hi]):
             continue
-        faab = extract_faab(context, anchor)
+        faab = faab_by_mention.get(i)
         if faab is None and not _ADD_RE.search(context):
             continue
 

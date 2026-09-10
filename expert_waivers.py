@@ -279,15 +279,35 @@ def analyze_league(league, user_id, players, trending, per_source_text, max_move
     print()
     print(f"SUGGESTED MOVES (top {max_moves} — for your approval, nothing submitted):")
     protect, spent, made = set(), 0, 0
+    budget_left = remaining
     for pid, info in ordered:
         if made >= max_moves:
             break
         drops = choose_drop(mine, players, trending, depth, protect)
         if not drops:
-            print("  (no droppable bench players left)")
+            print("  (no droppable bench players left — stopping here rather than"
+                  " emptying your bench)")
             break
         _, drop_score, drop_pid, drop_player, drop_label = drops[0]
         add_pos = (players.get(pid) or {}).get("position", "?")
+
+        # Never trade down. Once the cheapest remaining drop is clearly better
+        # than the player being added, every later move is a downgrade — which
+        # is exactly what happens when earlier moves have eaten the bench.
+        add_score = wa.score_player(players.get(pid, {}), trending.get(pid, 0))
+        if drop_score > add_score * 1.5:
+            print(f"  (stopping: the weakest player left on your bench, "
+                  f"{sc.player_label(players, drop_pid)}, rates better than "
+                  f"the next recommended add)")
+            break
+
+        bid = None
+        if budget_left and info["faab_median"] is not None:
+            bid = max(1, round(remaining * info["faab_median"] / 100))
+            if bid > budget_left:
+                print(f"  (stopping: next bid needs {bid} FAAB but only "
+                      f"{budget_left} is left)")
+                break
 
         made += 1
         print()
@@ -301,21 +321,18 @@ def analyze_league(league, user_id, players, trending, per_source_text, max_move
         print(f"    DROP  {sc.player_label(players, drop_pid)}")
         print(f"          weakest expendable bench piece; "
               f"{drop_player.get('position','?')} is {drop_label} for you")
-        if remaining and info["faab_median"] is not None:
-            bid = max(1, round(remaining * info["faab_median"] / 100))
+        if bid is not None:
             spent += bid
-            print(f"    BID   {bid} FAAB ({info['faab_median']}% of {remaining} left)"
-                  + (f"   running total {spent}" if made > 1 else ""))
+            budget_left -= bid
+            print(f"    BID   {bid} FAAB ({info['faab_median']}% of {remaining})"
+                  f"   spent {spent}, {budget_left} left")
         elif remaining:
-            print("    BID   no analyst figure — 1-2 FAAB is a reasonable flier")
+            print("    BID   no analyst FAAB figure given — 1-2 FAAB is a"
+                  " reasonable flier")
         if add_pos in FLEX_ELIGIBLE and depth.get(add_pos, (0, 0, ""))[2] == "thin":
             print(f"    NOTE  fills a thin spot at {add_pos}")
         protect.add(drop_pid)
 
-    if spent > remaining > 0:
-        print()
-        print(f"  ! These bids total {spent} but you only have {remaining} FAAB.")
-        print("    Take them in order and stop when the budget runs out.")
 
     for pid, info in ordered[:3]:
         for source, ctx in info["contexts"][:1]:
