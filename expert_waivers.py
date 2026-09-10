@@ -205,7 +205,8 @@ def analyze_league(league, user_id, players, trending, per_source_text, max_move
     wide_gaz = ex.build_gazetteer(players, wide_ids)
     wide_per_source = {}
     for source, text in per_source_text.items():
-        recs = ex.extract_recommendations(text, wide_gaz, source=source)
+        recs = ex.extract_recommendations(text, wide_gaz, source=source,
+                                         players=players)
         if recs:
             wide_per_source[source] = recs
     wide_consensus = ex.merge_sources(wide_per_source)
@@ -214,7 +215,8 @@ def analyze_league(league, user_id, players, trending, per_source_text, max_move
     gazetteer = ex.build_gazetteer(players, available_ids)
     per_source = {}
     for source, text in per_source_text.items():
-        recs = ex.extract_recommendations(text, gazetteer, source=source)
+        recs = ex.extract_recommendations(text, gazetteer, source=source,
+                                         players=players)
         if recs:
             per_source[source] = recs
     consensus = ex.merge_sources(per_source)

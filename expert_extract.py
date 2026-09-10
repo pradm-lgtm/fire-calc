@@ -37,8 +37,16 @@ ADD_VERBS = (
     "add", "adds", "adding", "addition", "pickup", "pick up", "picking up",
     "claim", "claims", "target", "grab", "grabbing", "stash", "stashing",
     "waiver", "priority", "bid", "spend", "scoop", "stream", "streaming",
-    "streamer", "start", "starter",
+    "streamer",
+    # Deliberately NOT "start"/"starter"/"started": in football prose those
+    # describe depth charts far more often than waiver advice, and they turn
+    # every team mentioned in passing into a recommendation.
 )
+
+# A team name in prose ("against the Titans") is not a recommendation of that
+# team's defense. Defenses need an explicit defensive cue nearby.
+_DEF_CUE = re.compile(r"\b(?:defen[cs]e|defensive|d/?st|dst|def)\b",
+                      re.IGNORECASE)
 
 # Words indicating the article is telling you to DROP or avoid the player,
 # which must not be read as a recommendation to add him.
@@ -324,7 +332,7 @@ def _sentence_bounds(text, index):
     return start, end
 
 
-def extract_recommendations(text, gazetteer, source=None):
+def extract_recommendations(text, gazetteer, source=None, players=None):
     """{player_id: {faab, context, source}} for players this article recommends.
 
     A mention counts only if an add-cue or FAAB figure sits near it and no
@@ -354,6 +362,10 @@ def extract_recommendations(text, gazetteer, source=None):
         sent_lo, sent_hi = _sentence_bounds(text, idx)
         if _NEG_RE.search(text[sent_lo:sent_hi]):
             continue
+
+        if players and (players.get(pid) or {}).get("position") == "DEF":
+            if not _DEF_CUE.search(context):
+                continue
         faab = faab_by_mention.get(i)
         if faab is None and not _ADD_RE.search(context):
             continue
