@@ -2,9 +2,10 @@
 """
 Place approved waiver claims in Sleeper, then prove they landed.
 
-    python3 submitter.py pradm7 --login          # log in once, by hand
+    python3 submitter.py pradm7 --login          # how to attach to your Chrome
     python3 submitter.py pradm7                  # DRY RUN (default)
-    python3 submitter.py pradm7 --submit         # actually place claims
+    python3 submitter.py pradm7 --prepare        # fill it, you press Confirm
+    python3 submitter.py pradm7 --submit         # fully automatic
     python3 submitter.py pradm7 --audit          # what is queued right now
     python3 submitter.py pradm7 --inspect LEAGUE # open a page to read selectors
 
@@ -60,26 +61,71 @@ def chromium_path():
     return None
 
 
+CDP_URL = "http://127.0.0.1:9222"
+
+CHROME_MAC = ("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")
+CHROME_PROFILE = Path.home() / ".fantasy-chrome"
+
+
+def launch_hint():
+    return (f'"{CHROME_MAC}" \\\n'
+            f'  --remote-debugging-port=9222 \\\n'
+            f'  --user-data-dir="{CHROME_PROFILE}"')
+
+
+def attach(pw):
+    """Attach to a Chrome you launched and logged into yourself.
+
+    Sleeper challenges automated logins, and rightly: a browser started by
+    Playwright is identifiable. Rather than trying to look otherwise, do the
+    login as a person in an ordinary Chrome window and let this attach to
+    that live session afterwards. The authentication is genuinely human; only
+    the form-filling is automated.
+    """
+    browser = pw.chromium.connect_over_cdp(CDP_URL)
+    ctx = browser.contexts[0] if browser.contexts else browser.new_context()
+    return ctx
+
+
 def browser_context(pw, headed=True):
-    """A persistent context, so the login you do by hand survives runs."""
+    """Attach to your Chrome if it is listening; otherwise launch our own."""
+    try:
+        return attach(pw)
+    except Exception:
+        pass
     PROFILE_DIR.mkdir(exist_ok=True)
     kwargs = dict(user_data_dir=str(PROFILE_DIR), headless=not headed,
                   viewport={"width": 1280, "height": 900})
     exe = chromium_path()
     if exe:
         kwargs["executable_path"] = exe
+    else:
+        kwargs["channel"] = "chrome"  # real Chrome beats bundled Chromium
     return pw.chromium.launch_persistent_context(**kwargs)
 
 
 def do_login(pw):
-    ctx = browser_context(pw, headed=True)
-    page = ctx.pages[0] if ctx.pages else ctx.new_page()
-    page.goto("https://sleeper.com/login", wait_until="domcontentloaded")
-    print("A browser window is open. Log in to Sleeper there.")
-    print("The session is saved to .browser-profile and reused from now on.")
-    input("Press Enter here once you are logged in and can see your leagues... ")
-    ctx.close()
-    print("Saved.")
+    """Explain the attach flow rather than driving a login itself."""
+    print("Do not let this tool log in for you — Sleeper challenges automated")
+    print("logins, and a browser it starts is detectable as one.")
+    print()
+    print("Instead, start your own Chrome with a debugging port and log in")
+    print("there as yourself. Paste this into a terminal and leave it running:")
+    print()
+    print(launch_hint())
+    print()
+    print("In the Chrome window that opens: go to sleeper.com, log in, solve")
+    print("any challenge as a person, and leave that window open.")
+    print()
+    try:
+        browser = pw.chromium.connect_over_cdp(CDP_URL)
+        pages = [p.url for c in browser.contexts for p in c.pages]
+        print(f"Attached to your Chrome. {len(pages)} tab(s) open.")
+        print("Run the submitter now; it will reuse this session.")
+        browser.close()
+    except Exception:
+        print("(Nothing is listening on port 9222 yet — start Chrome as above,")
+        print(" then re-run this to confirm the attach works.)")
 
 
 def do_inspect(pw, league_id):
@@ -148,7 +194,7 @@ def clean_name(label):
     return str(label).split("(")[0].split("[")[0].strip()
 
 
-def run(conn, user_id, week, dry_run, limit):
+def run(conn, user_id, week, dry_run, limit, mode='auto'):
     rows = st.approved_unsubmitted(conn)
     if not rows:
         print("Nothing approved and waiting. Approve proposals on the page first.")
@@ -176,25 +222,41 @@ def run(conn, user_id, week, dry_run, limit):
     placed = 0
     with sync_playwright() as pw:
         ctx = browser_context(pw, headed=True)
+        attached = ctx.browser is not None and not str(
+            getattr(ctx, "_user_data_dir", "") or "")
         page = ctx.pages[0] if ctx.pages else ctx.new_page()
         for r in checked:
             print(f"\n{clean_name(r['add_player_name'])} in {r['league_name']}:")
-            ok, detail = place_claim(page, sel, r, dry_run=dry_run)
+            # In prepare mode the form is filled but you press Confirm, so the
+            # only automated action is data entry - the part where a human
+            # makes mistakes - and the irreversible click stays yours.
+            ok, detail = place_claim(page, sel, r,
+                                     dry_run=dry_run or mode == "prepare")
             print(f"  {detail}")
-            if dry_run:
+
+            if mode == "prepare" and ok:
+                print("  The claim is filled in the browser. Check it, then")
+                print("  click Confirm there yourself.")
+                answer = input("  Pressed Confirm? [y]es / [s]kip: ").strip().lower()
+                if not answer.startswith("y"):
+                    st.log(conn, "skipped", "left unconfirmed", r["id"])
+                    conn.commit()
+                    continue
+            elif dry_run:
                 st.log(conn, "dry_run", detail, r["id"])
                 conn.commit()
                 continue
-            if not ok:
+            elif not ok:
                 st.mark_submitted(conn, r["id"], False, detail)
                 continue
+
             # The browser says it worked; the league is what decides.
             found, vdetail = cs.verify_submitted(conn, r, user_id, week)
             print(f"  verification: {vdetail}")
-            st.mark_submitted(conn, r["id"], found,
-                              f"{detail}; {vdetail}")
+            st.mark_submitted(conn, r["id"], found, f"{detail}; {vdetail}")
             placed += 1 if found else 0
-        ctx.close()
+        if not attached:
+            ctx.close()  # never close a Chrome window the user owns
 
     if dry_run:
         print("\nDry run only. Nothing was submitted. Re-run with --submit "
@@ -229,7 +291,9 @@ def main():
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("username", help="your Sleeper username")
     ap.add_argument("--submit", action="store_true",
-                    help="actually place claims (default is a dry run)")
+                    help="place claims fully automatically")
+    ap.add_argument("--prepare", action="store_true",
+                    help="fill each claim and let you press Confirm (recommended)")
     ap.add_argument("--login", action="store_true")
     ap.add_argument("--inspect", metavar="LEAGUE_ID")
     ap.add_argument("--audit", action="store_true")
@@ -265,7 +329,9 @@ def main():
     try:
         if args.audit:
             return do_audit(conn, user["user_id"], week)
-        return run(conn, user["user_id"], week, not args.submit, args.limit)
+        mode = "prepare" if args.prepare else "auto"
+        return run(conn, user["user_id"], week, not (args.submit or args.prepare),
+                   args.limit, mode)
     finally:
         conn.close()
 
