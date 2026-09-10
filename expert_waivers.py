@@ -7,7 +7,10 @@ recommended players are actually available in each of your leagues, checks
 those against your roster's positional gaps, and proposes specific
 add/drop pairs with FAAB bids.
 
-    # Save articles as .txt or .html, then:
+    # Easiest on macOS - copy the article text, then pipe the clipboard:
+    pbpaste | python3 expert_waivers.py pradm7 --stdin
+
+    # Or save articles as .txt/.html in a folder and read them all:
     python3 expert_waivers.py pradm7 --articles ~/waiver-articles/
 
     # Or fetch pages directly:
@@ -307,13 +310,28 @@ def main():
         except (IndexError, ValueError):
             print("--moves needs a number")
             return 1
-    if not urls and not directory:
-        print("Give me something to read: --articles <dir> and/or --url <url>")
-        print("Saving articles to a folder is more reliable than fetching —")
-        print("many fantasy sites block automated requests.")
+    use_stdin = "--stdin" in args
+    if not urls and not directory and not use_stdin:
+        print("Give me something to read:")
+        print("  pbpaste | python3 expert_waivers.py <user> --stdin")
+        print("  python3 expert_waivers.py <user> --articles <dir>")
+        print("  python3 expert_waivers.py <user> --url <url>")
+        print()
+        print("Pasting or saving text is more reliable than fetching - many")
+        print("fantasy sites block automated requests.")
         return 1
 
     texts = {}
+    if use_stdin:
+        if sys.stdin.isatty():
+            print("--stdin expects piped text, e.g.:")
+            print("  pbpaste | python3 expert_waivers.py <user> --stdin")
+            return 1
+        pasted = sys.stdin.read().strip()
+        if not pasted:
+            print("Nothing arrived on stdin - is the clipboard empty?")
+            return 1
+        texts["pasted"] = strip_html(pasted) if "<" in pasted[:400] else pasted
     if directory:
         texts.update(load_article_files(directory))
     for url in urls:
