@@ -32,6 +32,7 @@ import sys
 import urllib.error
 import urllib.parse
 import urllib.request
+import webbrowser
 from pathlib import Path
 
 TOKEN_URL = "https://api.login.yahoo.com/oauth2/get_token"
@@ -265,13 +266,23 @@ def main():
 
     if args[:1] == ["--auth-url"]:
         uri = redirect_uri(env)
-        print("1. Open this URL in a browser and click Agree:")
-        print()
-        print(f"{AUTH_URL}?" + urllib.parse.urlencode({
+        url = f"{AUTH_URL}?" + urllib.parse.urlencode({
             "client_id": env["YAHOO_CLIENT_ID"],
             "redirect_uri": uri,
             "response_type": "code",
-        }))
+        })
+        opened = False
+        try:
+            opened = webbrowser.open(url)
+        except Exception:
+            opened = False
+        if opened:
+            print("1. A browser window just opened — click Agree there.")
+            print("   (If nothing opened, use the URL at the bottom of this output.)")
+        else:
+            print("1. Open this URL in a browser and click Agree:")
+            print()
+            print(url)
         print()
         print(f"2. Yahoo redirects you to {uri} — the page will FAIL TO LOAD")
         print("   ('can't connect' / privacy warning). That is expected; nothing")
@@ -279,9 +290,14 @@ def main():
         print(f"   {uri}?code=THIS_PART")
         print()
         print("3. Run:  python3 yahoo_auth_check.py --exchange THIS_PART")
+        print("   (pasting the whole address-bar URL instead also works)")
         print()
-        print(f"(Redirect URI in use: {uri} — it must match one registered on the")
-        print(" Yahoo app exactly. Override with YAHOO_REDIRECT_URI in .env.)")
+        print(f"Redirect URI in use: {uri} — must match one registered on the")
+        print("Yahoo app exactly. Override with YAHOO_REDIRECT_URI in .env.")
+        if opened:
+            print()
+            print("Consent URL, if the browser did not open:")
+            print(url)
         return 0
 
     if args[:1] == ["--exchange"]:
