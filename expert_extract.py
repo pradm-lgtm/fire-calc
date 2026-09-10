@@ -335,7 +335,8 @@ def _sentence_bounds(text, index):
     return start, end
 
 
-def extract_recommendations(text, gazetteer, source=None, players=None):
+def extract_recommendations(text, gazetteer, source=None, players=None,
+                            trace=None):
     """{player_id: {faab, context, source}} for players this article recommends.
 
     A mention counts only if an add-cue or FAAB figure sits near it and no
@@ -363,15 +364,40 @@ def extract_recommendations(text, gazetteer, source=None, players=None):
         anchor = idx - lo
 
         sent_lo, sent_hi = _sentence_bounds(text, idx)
-        if _NEG_RE.search(text[sent_lo:sent_hi]):
+        sentence = text[sent_lo:sent_hi]
+
+        def note(verdict, why, _pid=pid, _sent=sentence):
+            if trace is not None:
+                trace.append({"player_id": _pid, "verdict": verdict,
+                              "reason": why,
+                              "sentence": " ".join(_sent.split())[:140]})
+
+        neg = _NEG_RE.search(sentence)
+        if neg:
+            note("rejected", f"negative cue {neg.group(0)!r} in its sentence")
             continue
 
         if players and (players.get(pid) or {}).get("position") == "DEF":
             if not _DEF_CUE.search(context):
+                note("rejected", "team named without a defensive cue")
                 continue
+        # An add-verb only counts for the player the passage is ABOUT. A
+        # write-up's first name owns its paragraph ("Bigsby, RB - my top
+        # add"); anyone named later in that paragraph is background
+        # ("the Browns drafted Judkins and Sampson") and needs a cue in his
+        # own sentence to count.
+        para_lo, para_hi = _paragraph_bounds(text, idx)
+        first_in_para = not any(
+            para_lo <= m_start < idx for _, m_start, _ in mentions)
+        cue_zone = context if first_in_para else sentence
+
         faab = faab_by_mention.get(i)
-        if faab is None and not _ADD_RE.search(context):
+        if faab is None and not _ADD_RE.search(cue_zone):
+            note("rejected", "no bid figure, and no add-verb in "
+                 + ("its passage" if first_in_para else "its own sentence"))
             continue
+        note("accepted", f"bid {faab}%" if faab is not None
+             else "add-verb nearby, but no bid figure")
 
         prior = results.get(pid)
         if prior and prior.get("faab") is not None and faab is None:

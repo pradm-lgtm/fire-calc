@@ -7,7 +7,8 @@ does it fetch at all, does it carry readable article text, and does that text
 actually yield player recommendations? A page can pass the first two and
 still be useless — a paywall teaser fetches fine and parses to nothing.
 
-    python3 check_sources.py <url> [<url> ...]
+    python3 check_sources.py URL [URL ...]
+    python3 check_sources.py URL --debug     (show every player named)
 
 Prefer STABLE section URLs (a site's waiver-wire hub) over per-week article
 URLs: the scheduled job needs a link that is still right next Tuesday.
@@ -21,7 +22,7 @@ import sleeper_client as sc
 import waiver_analyzer as wa
 
 
-def check(url, players, gazetteer):
+def check(url, players, gazetteer, debug=False):
     print(f"\n{'=' * 70}\n{url}\n{'=' * 70}")
     text = ew.fetch_url(url)
     if not text:
@@ -34,8 +35,9 @@ def check(url, players, gazetteer):
     print(f"  fetched OK — {len(text):,} chars, ~{words:,} words")
     print(f"  starts: {' '.join(text.split())[:100]!r}")
 
+    trace = [] if debug else None
     recs = ex.extract_recommendations(text, gazetteer, source=url,
-                                      players=players)
+                                      players=players, trace=trace)
     with_faab = {k: v for k, v in recs.items() if v.get("faab") is not None}
     print(f"  parsed {len(recs)} recommendation(s), "
           f"{len(with_faab)} with a FAAB figure")
@@ -50,6 +52,15 @@ def check(url, players, gazetteer):
         print(f"    - {sc.player_label(players, pid):<34} FAAB {faab}")
     if len(recs) > 8:
         print(f"    ... and {len(recs) - 8} more")
+
+    if debug and trace:
+        print(f"\n  --- every player named ({len(trace)} mentions) ---")
+        for row in trace:
+            mark = "KEEP" if row["verdict"] == "accepted" else "skip"
+            print(f"  {mark}  {sc.player_label(players, row['player_id']):<32} "
+                  f"{row['reason']}")
+            print(f"        {row['sentence']!r}")
+        print("  --- end ---\n")
 
     if words < 400:
         print("  VERDICT: marginal — very little text; likely a teaser.")
@@ -80,7 +91,8 @@ def main():
     )
     print(f"{len(gazetteer):,} matchable player names.")
 
-    usable = sum(1 for u in urls if check(u, players, gazetteer))
+    debug = "--debug" in sys.argv
+    usable = sum(1 for u in urls if check(u, players, gazetteer, debug))
     print(f"\n{'=' * 70}")
     print(f"{usable} of {len(urls)} source(s) usable for the weekly job.")
     print("=" * 70)
