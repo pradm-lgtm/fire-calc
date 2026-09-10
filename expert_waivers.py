@@ -198,15 +198,30 @@ def analyze_league(league, user_id, players, trending, per_source_text, max_move
         pid for pid, p in players.items()
         if pid not in taken and wa.is_rosterable(p)
     ]
+    # Two passes. The wide one (every rosterable NFL player) exists only to
+    # explain an empty result: without it, "nothing available" cannot be told
+    # apart from "the text parsed to nothing", and those need opposite fixes.
+    wide_ids = [pid for pid, p in players.items() if wa.is_rosterable(p)]
+    wide_gaz = ex.build_gazetteer(players, wide_ids)
+    wide_per_source = {}
+    for source, text in per_source_text.items():
+        recs = ex.extract_recommendations(text, wide_gaz, source=source)
+        if recs:
+            wide_per_source[source] = recs
+    wide_consensus = ex.merge_sources(wide_per_source)
+
     # Scoping the gazetteer to free agents is what makes name matching safe.
     gazetteer = ex.build_gazetteer(players, available_ids)
-
     per_source = {}
     for source, text in per_source_text.items():
         recs = ex.extract_recommendations(text, gazetteer, source=source)
         if recs:
             per_source[source] = recs
     consensus = ex.merge_sources(per_source)
+
+    blocked = [pid for pid in wide_consensus if pid in taken]
+    print(f"Parsed {len(wide_consensus)} recommended player(s) from your "
+          f"source(s): {len(consensus)} free here, {len(blocked)} already rostered.")
 
     depth = positional_depth(league, mine, players)
     print("Your depth: " + "  ".join(
@@ -216,8 +231,29 @@ def analyze_league(league, user_id, players, trending, per_source_text, max_move
 
     if not consensus:
         print()
-        print("None of the players recommended in your articles are available")
-        print("here — they are already rostered in this league.")
+        if blocked:
+            print("Every recommended player is already rostered in this league:")
+            for pid in blocked[:12]:
+                owner = next((r for r in rosters
+                              if pid in (r.get("players") or [])), {})
+                mine_flag = " (yours)" if owner is mine else ""
+                print(f"  {sc.player_label(players, pid)}{mine_flag}")
+            print()
+            print("Nothing to do here — try a deeper-cut waiver article.")
+        elif wide_consensus:
+            print("Recommended players were found, but none are rosterable")
+            print("(no NFL team, or a non-fantasy position).")
+        else:
+            print("No player recommendations were parsed from the text at all.")
+            print()
+            print("Most likely causes, in order:")
+            print("  1. The copied text was not the article body (a paywall")
+            print("     page, a cookie banner, or an empty clipboard).")
+            print("  2. The article lists players only in a table or image,")
+            print("     which carries no readable sentence structure.")
+            print("  3. Names are written differently than Sleeper spells them.")
+            print()
+            print("Check what actually got copied with:  pbpaste | head -40")
         return
 
     def sort_key(item):
