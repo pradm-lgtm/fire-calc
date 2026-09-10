@@ -379,6 +379,12 @@ def main():
         print("No article text could be loaded.")
         return 1
     print(f"Loaded {len(texts)} source(s): {', '.join(texts)}")
+    for label, body in texts.items():
+        preview = " ".join(body.split())[:90]
+        print(f"  {label}: {len(body):,} chars | starts: {preview!r}")
+        if len(body) < 300:
+            print(f"  ! {label} is very short for an article — if this is not"
+                  " the article body, re-copy it.")
 
     try:
         state = sc.current_state()
