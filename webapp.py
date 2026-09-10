@@ -27,51 +27,72 @@ from urllib.parse import parse_qs, urlparse
 import store as st
 
 CSS = """
-:root { color-scheme: light dark; --bg:#f6f7f9; --card:#fff; --ink:#12141a;
-        --muted:#5c6370; --line:#e3e6ea; --ok:#0a7d28; --no:#b3261e;
-        --accent:#1a56db; }
+:root { color-scheme: light dark; --bg:#f4f5f7; --card:#fff; --ink:#12141a;
+        --muted:#5c6370; --line:#e3e6ea; --ok:#0a7d28; --ok-ink:#fff;
+        --no:#b3261e; --accent:#1a56db;
+        --qb:#7c3aed; --rb:#0a7d28; --wr:#1a56db; --te:#c2410c; --def:#475569; }
 @media (prefers-color-scheme: dark) {
   :root { --bg:#0f1115; --card:#181b21; --ink:#e8eaed; --muted:#9aa2ad;
-          --line:#272b33; --ok:#4ade80; --no:#f87171; --accent:#7aa2f7; }
+          --line:#272b33; --ok:#15803d; --ok-ink:#fff; --no:#f87171;
+          --accent:#7aa2f7;
+          --qb:#a78bfa; --rb:#4ade80; --wr:#7aa2f7; --te:#fb923c; --def:#94a3b8; }
 }
-* { box-sizing:border-box; }
-body { margin:0; padding:16px; background:var(--bg); color:var(--ink);
-       font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }
-.wrap { max-width:760px; margin:0 auto; }
-h1 { font-size:20px; margin:0 0 4px; }
-.sub { color:var(--muted); font-size:13px; margin-bottom:20px; }
-h2 { font-size:16px; margin:26px 0 10px; padding-bottom:6px;
-     border-bottom:1px solid var(--line); }
+* { box-sizing:border-box; -webkit-text-size-adjust:100%; }
+body { margin:0; padding:14px; background:var(--bg); color:var(--ink);
+       font:16px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }
+.wrap { max-width:720px; margin:0 auto; }
+h1 { font-size:21px; margin:0 0 4px; letter-spacing:-.01em; }
+.sub { color:var(--muted); font-size:13px; margin-bottom:18px; }
+h2 { font-size:17px; margin:24px 0 8px; display:flex; justify-content:space-between;
+     align-items:baseline; gap:8px; }
 .meta { color:var(--muted); font-size:12px; font-weight:normal; }
-.card { background:var(--card); border:1px solid var(--line); border-radius:10px;
+.card { background:var(--card); border:1px solid var(--line); border-radius:12px;
         padding:14px; margin-bottom:12px; }
-.move { display:flex; gap:10px; align-items:baseline; flex-wrap:wrap; }
-.tag { font-size:11px; font-weight:700; letter-spacing:.04em; padding:2px 6px;
+.move { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+.move + .move { margin-top:6px; }
+.tag { font-size:10px; font-weight:800; letter-spacing:.06em; padding:3px 6px;
        border-radius:4px; background:var(--line); color:var(--muted); }
-.add { font-weight:650; }
+.pos { font-size:10px; font-weight:800; letter-spacing:.04em; padding:3px 6px;
+       border-radius:4px; color:#fff; }
+.pos.QB{background:var(--qb)} .pos.RB{background:var(--rb)}
+.pos.WR{background:var(--wr)} .pos.TE{background:var(--te)}
+.pos.DEF,.pos.K{background:var(--def)}
+.add { font-weight:650; font-size:17px; }
 .drop { color:var(--muted); }
-.why { color:var(--muted); font-size:13px; margin:8px 0 0; }
+.why { color:var(--muted); font-size:13px; margin:10px 0 0; }
 .quote { border-left:3px solid var(--line); padding-left:10px; margin:8px 0 0;
          color:var(--muted); font-size:13px; font-style:italic; }
-form.row { display:flex; gap:8px; align-items:center; margin-top:12px;
+form.row { display:flex; gap:8px; align-items:center; margin-top:14px;
            flex-wrap:wrap; }
-input[type=number] { width:74px; padding:7px; border:1px solid var(--line);
-                     border-radius:6px; background:var(--bg); color:var(--ink); }
-select { padding:7px; border:1px solid var(--line); border-radius:6px;
-         background:var(--bg); color:var(--ink); max-width:100%; }
-button { padding:8px 14px; border-radius:6px; border:1px solid transparent;
-         font-weight:600; cursor:pointer; font-size:14px; }
-.approve { background:var(--ok); color:#fff; }
-.decline { background:transparent; color:var(--no); border-color:var(--line); }
-.state { font-size:13px; font-weight:600; }
-.state.approved { color:var(--ok); }
-.state.declined { color:var(--no); }
+.bidwrap { display:flex; align-items:center; gap:6px; }
+input[type=number] { width:84px; min-height:46px; padding:10px; font-size:16px;
+                     border:1px solid var(--line); border-radius:8px;
+                     background:var(--bg); color:var(--ink); }
+button { min-height:46px; padding:10px 18px; border-radius:8px;
+         border:1px solid transparent; font-weight:650; cursor:pointer;
+         font-size:16px; touch-action:manipulation; }
+.approve { background:var(--ok); color:var(--ok-ink); flex:1; }
+.decline { background:transparent; color:var(--no); border-color:var(--line);
+           flex:1; }
+.state { font-size:14px; font-weight:650; margin:12px 0 0; }
+.state.approved { color:var(--ok); } .state.declined { color:var(--no); }
 .state.submitted { color:var(--accent); }
 .empty { color:var(--muted); padding:24px 0; }
 .bar { background:var(--card); border:1px solid var(--line); border-radius:8px;
-       padding:10px 12px; font-size:13px; color:var(--muted); margin-bottom:8px; }
-.warn { color:var(--no); font-weight:600; }
+       padding:9px 12px; font-size:13px; color:var(--muted); margin-bottom:10px; }
+.warn { color:var(--no); font-weight:650; }
+.counts { display:flex; gap:14px; font-size:13px; color:var(--muted);
+          margin-bottom:16px; flex-wrap:wrap; }
+.counts b { color:var(--ink); }
 label { font-size:13px; color:var(--muted); }
+@media (max-width:520px) {
+  body { padding:10px; }
+  .add { font-size:16px; }
+  form.row { gap:6px; }
+  .bidwrap { width:100%; }
+  input[type=number] { flex:1; width:auto; }
+  .approve, .decline { flex:1 1 45%; }
+}
 """
 
 
@@ -94,10 +115,20 @@ def render(conn):
     for r in rows:
         by_league.setdefault((r["league_id"], r["league_name"]), []).append(r)
 
+    tally = {}
+    for r in rows:
+        tally[r["status"]] = tally.get(r["status"], 0) + 1
+    counts = " ".join(
+        f"<span><b>{tally.get(k, 0)}</b> {label}</span>"
+        for k, label in ((st.PENDING, "to review"), (st.APPROVED, "approved"),
+                         (st.DECLINED, "declined"), (st.SUBMITTED, "submitted"))
+        if tally.get(k))
+
     out = [f"<h1>Waiver proposals</h1>"
-           f"<div class='sub'>Week {e(run['week'])} &middot; generated "
-           f"{e(run['created_at'])} &middot; nothing is submitted until you "
-           f"approve it</div>"]
+           f"<div class='sub'>Week {e(run['week'])} &middot; "
+           f"{e(run['created_at'][:10])} &middot; nothing is submitted until "
+           f"you approve it</div>"
+           f"<div class='counts'>{counts}</div>"]
 
     for (lid, lname), items in by_league.items():
         budget = items[0]["max_bid"] or 0
@@ -106,8 +137,10 @@ def render(conn):
                f"{f' of {budget}' if budget else ''}")
         if budget and committed > budget:
             bar += " <span class='warn'>— over budget</span>"
-        out.append(f"<h2>{e(lname)} <span class='meta'>{len(items)} proposed"
-                   f"</span></h2><div class='bar'>{bar}</div>")
+        pending = sum(1 for i in items if i["status"] == st.PENDING)
+        out.append(f"<h2><span>{e(lname)}</span><span class='meta'>"
+                   f"{pending} of {len(items)} to review</span></h2>"
+                   f"<div class='bar'>{bar}</div>")
         for r in items:
             out.append(card(r))
     return page("".join(out), "Waiver proposals")
@@ -119,14 +152,14 @@ def card(r):
     bits = [f"<div class='card'>",
             "<div class='move'>",
             "<span class='tag'>ADD</span>",
-            f"<span class='add'>{e(r['add_player_name'])}</span>",
-            f"<span class='meta'>{e(r['add_position'] or '')}</span>",
+            pos_chip(r["add_position"]),
+            f"<span class='add'>{e(strip_paren(r['add_player_name']))}</span>",
             "</div>"]
     if r["drop_player_name"]:
-        bits += ["<div class='move' style='margin-top:6px'>",
+        bits += ["<div class='move'>",
                  "<span class='tag'>DROP</span>",
-                 f"<span class='drop'>{e(r['drop_player_name'])}</span>",
-                 f"<span class='meta'>{e(r['drop_position'] or '')}</span>",
+                 pos_chip(r["drop_position"]),
+                 f"<span class='drop'>{e(strip_paren(r['drop_player_name']))}</span>",
                  "</div>"]
     bits.append(f"<p class='why'>{e(r['consensus'])} source(s): {e(src_txt)}"
                 + (f" &middot; {e(r['rationale'])}" if r["rationale"] else "")
@@ -138,9 +171,10 @@ def card(r):
         bits.append(
             "<form class='row' method='post' action='/decide'>"
             f"<input type='hidden' name='id' value='{e(r['id'])}'>"
-            "<label>Bid</label>"
-            f"<input type='number' name='bid' min='0' max='{e(r['max_bid'] or 100)}'"
-            f" value='{e(r['bid'] if r['bid'] is not None else 0)}'>"
+            "<span class='bidwrap'><label>Bid</label>"
+            f"<input type='number' name='bid' inputmode='numeric' min='0'"
+            f" max='{e(r['max_bid'] or 100)}'"
+            f" value='{e(r['bid'] if r['bid'] is not None else 0)}'></span>"
             "<button class='approve' name='action' value='approve'>Approve</button>"
             "<button class='decline' name='action' value='decline'>Decline</button>"
             "</form>")
@@ -160,6 +194,26 @@ def card(r):
         bits.append(line)
     bits.append("</div>")
     return "".join(bits)
+
+
+def pos_chip(pos):
+    """Position badge. Colour is the fastest thing to scan on a phone."""
+    p = (pos or "").upper()
+    cls = p if p in ("QB", "RB", "WR", "TE", "DEF", "K") else ""
+    return f"<span class='pos {cls}'>{e(p or '?')}</span>"
+
+
+def strip_paren(name):
+    """'Dylan Sampson (CLE RB)' -> 'Dylan Sampson' - the chip carries position."""
+    text = str(name or "")
+    if "(" in text:
+        head, _, tail = text.partition("(")
+        keep = head.strip()
+        # Preserve an injury flag, which matters to the decision.
+        if "[" in tail:
+            keep += " " + tail[tail.index("["):].strip()
+        return keep
+    return text
 
 
 def short_source(url):
