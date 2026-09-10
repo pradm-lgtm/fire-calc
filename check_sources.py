@@ -22,6 +22,36 @@ import sleeper_client as sc
 import waiver_analyzer as wa
 
 
+# Video and podcast pages carry player names in an auto-transcript: no
+# headings, no "spend 15%", and speech artefacts that mangle names ("Isaiah,
+# likely"). They fetch fine and read as articles, so they need naming.
+VIDEO_MARKERS = ("now playing", "paused ad", "ad playing", "watch the full",
+                 "subscribe on apple", "listen now", "episode", "transcript")
+_TIMESTAMP = __import__("re").compile(r"\b\d{1,2}:\d{2}\b")
+_SPEECH = __import__("re").compile(
+    r"\b(?:uh|um|yeah|gonna|wanna|you know|i mean|let's go to)\b", __import__("re").I)
+
+
+def looks_like_transcript(text):
+    """(is_transcript, why) - video pages masquerading as articles."""
+    low = text.lower()
+    hits = [m for m in VIDEO_MARKERS if m in low]
+    stamps = len(_TIMESTAMP.findall(text))
+    speech = len(_SPEECH.findall(text))
+    points, reasons = 0, []
+    if hits:
+        points += len(hits)
+        reasons.append(f"player-UI text ({', '.join(hits[:3])})")
+    if stamps >= 3:
+        points += 1
+        reasons.append(f"{stamps} video timestamps")
+    if speech >= 5:
+        points += 1
+        reasons.append(f"{speech} spoken-filler phrases")
+    # Any one signal can appear innocently; three is a video page.
+    return points >= 3, "; ".join(reasons)
+
+
 def check(url, players, gazetteer, debug=False):
     print(f"\n{'=' * 70}\n{url}\n{'=' * 70}")
     text = ew.fetch_url(url)
@@ -36,6 +66,10 @@ def check(url, players, gazetteer, debug=False):
     print(f"  starts: {' '.join(text.split())[:100]!r}")
 
     trace = [] if debug else None
+    transcript, why = looks_like_transcript(text)
+    if transcript:
+        print(f"  LOOKS LIKE A VIDEO/PODCAST PAGE — {why}")
+
     recs = ex.extract_recommendations(text, gazetteer, source=url,
                                       players=players, trace=trace)
     with_faab = {k: v for k, v in recs.items() if v.get("faab") is not None}
@@ -62,7 +96,12 @@ def check(url, players, gazetteer, debug=False):
             print(f"        {row['sentence']!r}")
         print("  --- end ---\n")
 
-    if words < 400:
+    if transcript:
+        print("  VERDICT: unusable — this is a video/podcast page, not a")
+        print("  written article. Spoken advice has no headings and no stated")
+        print("  bids, and transcription mangles names. Find this site's")
+        print("  WRITTEN waiver column instead.")
+    elif words < 400:
         print("  VERDICT: marginal — very little text; likely a teaser.")
     elif len(recs) < 4:
         print("  VERDICT: marginal — few recommendations found.")
