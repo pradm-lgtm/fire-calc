@@ -10,6 +10,10 @@ lerna-debug.log*
 # Credentials
 .env
 
+# Cached Sleeper player database
+.cache/
+__pycache__/
+
 # Python
 __pycache__/
 
