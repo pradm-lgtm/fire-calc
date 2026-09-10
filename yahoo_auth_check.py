@@ -28,6 +28,7 @@ Stdlib only — no pip installs needed. Requires Python 3.8+.
 
 import base64
 import json
+import re
 import sys
 import urllib.error
 import urllib.parse
@@ -56,6 +57,18 @@ DEFAULT_REDIRECT_URI = "https://localhost:8080/"
 
 def redirect_uri(env):
     return env.get("YAHOO_REDIRECT_URI") or DEFAULT_REDIRECT_URI
+
+
+def app_id_from_client_id(env):
+    """Yahoo client IDs are base64 of 'v=2&i=..&d=<base64 ai=APPID..>&..'."""
+    def b64(s):
+        return base64.b64decode(s + "=" * (-len(s) % 4)).decode("utf-8", "replace")
+
+    try:
+        inner = re.search(r"d=([^&]+)", b64(env["YAHOO_CLIENT_ID"]))
+        return re.search(r"ai=([^&]+)", b64(inner.group(1))).group(1)
+    except Exception:
+        return None
 
 
 # ---------------------------------------------------------------- .env
@@ -373,27 +386,41 @@ def main():
         print(body)
         print()
         if status == 403 and "not authorized" in body.lower():
-            print("RESULT: the TOKEN carries no Fantasy Sports permission.")
+            print("Narrowing it down — the app ID embedded in your client ID, and")
+            print("whether ANY Fantasy endpoint works for this app:")
             print()
-            print("The token is valid (it refreshed fine) — Yahoo just won't let it")
-            print("touch Fantasy endpoints. In order of likelihood:")
+            print(f"  App ID in YAHOO_CLIENT_ID: {app_id_from_client_id(env) or '(unparsable)'}")
+            print("  (must match the App ID on the Yahoo dashboard page)")
+
+            # /game/nfl needs no user data — it only needs the app to hold the
+            # Fantasy Sports permission. That splits an app-level problem from a
+            # user-grant problem, which the user-scoped 403 above can't do alone.
+            pub_status, pub_body = api_get("/game/nfl?format=json", access_token)
+            print(f"  Public Fantasy endpoint /game/nfl: HTTP {pub_status}")
             print()
-            print(f"  1. Redirect URI mismatch. This run used {redirect_uri(env)!r}.")
-            print("     It must exactly match a Redirect URI registered on the app.")
-            print("     Yahoo's legacy 'oob' value mints scopeless tokens for apps")
-            print("     that have a real redirect URI registered — which produces")
-            print("     exactly this error. Set YAHOO_REDIRECT_URI in .env to match")
-            print("     the dashboard, then redo --auth-url / --exchange.")
-            print()
-            print("  2. Tokens predate the permission. If Fantasy Sports Read/Write")
-            print("     was ticked (or re-saved) after these tokens were minted, they")
-            print("     don't carry it. Redo --auth-url / --exchange.")
-            print()
-            print("  3. Client ID mismatch — .env may hold a different app's key than")
-            print("     the one showing Fantasy Sports Read/Write. Compare .env's")
-            print("     YAHOO_CLIENT_ID against the dashboard.")
-            print()
-            print("  4. Brand-new app: Yahoo can take a while to propagate. Retry later.")
+
+            if pub_status == 200:
+                print("RESULT: the app HAS Fantasy access, but your user grant did not")
+                print("attach. The authorization didn't actually grant Fantasy Sports.")
+                print("Redo --auth-url and READ THE CONSENT SCREEN: it must mention")
+                print("managing your Fantasy Sports teams. If it only mentions basic")
+                print("profile info, the grant isn't being offered — revoke this app at")
+                print("https://login.yahoo.com/account/connected-apps and re-authorize.")
+            else:
+                print("RESULT: this APP has no working Fantasy Sports permission —")
+                print("no Fantasy endpoint works for it, not even one needing no user")
+                print("data. The dashboard checkbox is not in effect.")
+                print()
+                print("Yahoo often fails to apply Fantasy Sports permission ADDED to an")
+                print("app after creation: the box shows ticked but no grant is issued.")
+                print("The reliable fix is a NEW app with Fantasy Sports Read/Write")
+                print("selected at creation time:")
+                print("  1. https://developer.yahoo.com/apps/create/")
+                print("  2. OAuth Client Type: Confidential Client")
+                print("  3. Redirect URI: https://localhost:8080/")
+                print("  4. API Permissions: tick Fantasy Sports -> Read/Write")
+                print("  5. Put the NEW Client ID/Secret in .env, then redo")
+                print("     --auth-url / --exchange.")
             return 1
         print("RESULT: token refreshed but the read call failed — see raw error above.")
         return 1
