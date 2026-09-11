@@ -21,6 +21,9 @@ it comes from web pages and is not to be trusted as markup.
 import argparse
 import html
 import json
+import os
+import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
@@ -422,6 +425,51 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
 
 
+def _scheduler_loop(username, when, db_path):
+    """Run the weekly job on the host, at a fixed local time each week.
+
+    The job has to run where the database lives. Running it on the Mac would
+    file proposals into a file the hosted page cannot see, so on a deployment
+    the host runs it itself and the Mac only ever submits.
+    """
+    import run_weekly
+
+    day_names = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
+    try:
+        day_txt, _, hhmm = when.strip().lower().partition(" ")
+        want_day = day_names.index(day_txt[:3])
+        want_hour, _, want_min = hhmm.partition(":")
+        want_hour, want_min = int(want_hour), int(want_min or 0)
+    except (ValueError, IndexError):
+        print(f"[scheduler] cannot read FANTASY_SCHEDULE={when!r}; expected "
+              "something like 'tue 08:30'")
+        return
+
+    print(f"[scheduler] weekly job for {username} at {when}")
+    last_run = None
+    while True:
+        now = time.localtime()
+        stamp = (now.tm_year, now.tm_yday)
+        if (now.tm_wday == want_day and now.tm_hour == want_hour
+                and now.tm_min >= want_min and stamp != last_run):
+            last_run = stamp
+            print(f"[scheduler] running the weekly job ({time.asctime()})")
+            try:
+                run_weekly.main_for(username, db_path)
+            except Exception as exc:
+                print(f"[scheduler] job failed: {type(exc).__name__}: {exc}")
+        time.sleep(30)
+
+
+def start_scheduler(db_path):
+    username = os.environ.get("FANTASY_USER", "")
+    when = os.environ.get("FANTASY_SCHEDULE", "")
+    if not (username and when):
+        return
+    threading.Thread(target=_scheduler_loop,
+                     args=(username, when, db_path), daemon=True).start()
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--host", default="127.0.0.1")
@@ -430,6 +478,7 @@ def main():
     args = ap.parse_args()
 
     Handler.db_path = args.db
+    start_scheduler(args.db)
     server = ThreadingHTTPServer((args.host, args.port), Handler)
     shown = "127.0.0.1" if args.host in ("127.0.0.1", "0.0.0.0") else args.host
     print(f"Approval page: http://{shown}:{args.port}")

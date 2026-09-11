@@ -140,6 +140,11 @@ def proposals_for_league(league, user_id, players, trending, texts, max_moves):
     return out
 
 
+def main_for(username, db_path, moves=3):
+    """Run the job programmatically, for the host's own scheduler."""
+    return _run(username, [], moves, False, db_path)
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("username", nargs="?", default=None,
@@ -154,14 +159,17 @@ def main():
     if not username:
         print("Give a Sleeper username: python3 run_weekly.py YOUR_USERNAME")
         return 1
+    return _run(username, args.url, args.moves, args.dry_run, args.db)
 
+
+def _run(username, urls, moves, dry_run, db_path):
     try:
         state = sc.current_state()
         season, week = state.get("season"), state.get("week") or 1
         print(f"NFL {season}, week {week}")
 
         print("Finding this week's articles...")
-        texts = gather_articles(args.url, week)
+        texts = gather_articles(urls, week)
         if not texts:
             print("No articles could be read. Nothing proposed.")
             return 1
@@ -175,7 +183,7 @@ def main():
         all_proposals = []
         for league in leagues:
             rows = proposals_for_league(league, user["user_id"], players,
-                                        trending, texts, args.moves)
+                                        trending, texts, moves)
             print(f"  {league.get('name')}: {len(rows)} proposal(s)")
             all_proposals.extend(rows)
 
@@ -183,7 +191,7 @@ def main():
             print("No moves worth proposing this week.")
             return 0
 
-        if args.dry_run:
+        if dry_run:
             print("\n--- dry run, nothing written ---")
             for p in all_proposals:
                 print(f"  [{p['league_name']}] ADD {p['add_player_name']}"
@@ -191,7 +199,7 @@ def main():
                       f"  ({p['consensus']} src)")
             return 0
 
-        conn = st.connect(args.db)
+        conn = st.connect(db_path)
         run_id = st.start_run(conn, season, week, sorted(texts))
         written = sum(1 for p in all_proposals
                       if st.add_proposal(conn, run_id, **p) is not None)

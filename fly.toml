@@ -8,9 +8,11 @@ primary_region = "iad"
 [http_service]
   internal_port = 8777
   force_https = true
-  auto_stop_machines = "suspend"
+  auto_stop_machines = "off"
   auto_start_machines = true
-  min_machines_running = 0
+  # Stays up: the weekly job runs in this process, and a suspended
+  # machine would sleep straight through Tuesday morning.
+  min_machines_running = 1
 
   [http_service.http_options.response]
     pristine = true

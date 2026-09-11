@@ -117,13 +117,30 @@ HTTPS, so it works behind any router with no VPN, no open ports and no fixed
 address.
 
 ```bash
+brew install flyctl && fly auth login
+
 fly launch --no-deploy          # uses the included fly.toml and Dockerfile
-fly volumes create fantasy_data --size 1
-fly secrets set FANTASY_PASSWORD='something long' \
-               FANTASY_SECRET="$(python3 -c 'import secrets;print(secrets.token_hex(32))')" \
-               FANTASY_API_TOKEN="$(python3 -c 'import secrets;print(secrets.token_urlsafe(32))')"
+fly volumes create fantasy_data --size 1 --region iad
+
+fly secrets set \
+  FANTASY_PASSWORD='pick something long' \
+  FANTASY_SECRET="$(python3 -c 'import secrets;print(secrets.token_hex(32))')" \
+  FANTASY_API_TOKEN="$(python3 -c 'import secrets;print(secrets.token_urlsafe(32))')" \
+  FANTASY_USER=YOUR_SLEEPER_USERNAME \
+  FANTASY_SCHEDULE='tue 08:30'
+
 fly deploy
+fly open                        # your URL, reachable from anywhere
 ```
+
+`FANTASY_USER` and `FANTASY_SCHEDULE` make the host run the weekly job
+itself. Without them the page works but stays empty, because the job would be
+filing proposals into a database on your Mac that the host cannot see. The
+machine is configured not to suspend for the same reason - a sleeping one
+would pass straight through Tuesday morning.
+
+Read the token back for the local half with `fly secrets list` (it shows
+digests only, so keep the value when you generate it).
 
 Then point the local half at it, using the same token:
 
