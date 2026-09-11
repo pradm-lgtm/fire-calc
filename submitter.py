@@ -187,7 +187,7 @@ PROBE_JS = """
 () => {
   const vis = el => {
     const r = el.getBoundingClientRect();
-    return r.width > 0 && r.height > 0;
+    return r.width > 0 && r.height > 0 && r.top < innerHeight + 800;
   };
   const attrs = el => {
     const keep = ['id','name','type','placeholder','aria-label','role',
@@ -195,27 +195,65 @@ PROBE_JS = """
     const out = {};
     for (const k of keep) {
       const v = el.getAttribute(k);
-      if (v) out[k] = v.length > 90 ? v.slice(0, 90) + '...' : v;
+      if (v) out[k] = v.length > 70 ? v.slice(0, 70) + '...' : v;
     }
     return out;
   };
   const inputs = [...document.querySelectorAll('input,textarea,select')]
     .filter(vis).map(el => ({tag: el.tagName.toLowerCase(), ...attrs(el)}));
-  const buttons = [...document.querySelectorAll(
-      'button,[role=button],a[href*=claim],[class*=btn],[class*=Button]')]
-    .filter(vis)
+
+  // Sleeper renders no <button> elements: its controls are divs that merely
+  // look and behave like buttons. Find them by the pointer cursor and short
+  // leaf text instead of by tag, role or class name.
+  const clickable = [...document.querySelectorAll('div,span,a,button,li')]
+    .filter(el => {
+      if (!vis(el)) return false;
+      if (getComputedStyle(el).cursor !== 'pointer') return false;
+      const t = (el.innerText || '').trim();
+      return t && t.length <= 40 && el.querySelectorAll('*').length <= 4;
+    })
     .map(el => ({tag: el.tagName.toLowerCase(),
-                 text: (el.innerText || '').trim().slice(0, 40),
-                 ...attrs(el)}))
-    .filter(b => b.text);
-  return {url: location.href, title: document.title,
-          inputs, buttons: buttons.slice(0, 40)};
+                 text: (el.innerText || '').trim().replace(/\s+/g, ' '),
+                 ...attrs(el)}));
+
+  const seen = new Set();
+  const uniq = clickable.filter(c => {
+    const k = c.tag + '|' + c.text;
+    if (seen.has(k)) return false;
+    seen.add(k);
+    return true;
+  });
+  return {url: location.href, title: document.title, inputs,
+          clickable: uniq.slice(0, 60)};
 }
 """
 
 
-def do_probe(pw, league_id):
-    """Report the page's real inputs and buttons, so selectors stop being guesses."""
+def dump(page, label):
+    data = page.evaluate(PROBE_JS)
+    print("")
+    print("=" * 66)
+    print(label)
+    print("=" * 66)
+    print("url: " + str(data["url"]))
+    print("")
+    print("inputs (%d):" % len(data["inputs"]))
+    for i in data["inputs"]:
+        print("  %r" % (i,))
+    print("")
+    print("clickable elements (%d):" % len(data["clickable"]))
+    for c in data["clickable"]:
+        print("  %r" % (c,))
+    return data
+
+
+def do_probe(pw, league_id, player=None):
+    """Walk the claim flow, reporting the real controls at each step.
+
+    A single snapshot of the players page is not enough: the claim controls
+    only exist after searching for a player and opening him, so the probe has
+    to take the same steps the submitter will.
+    """
     sel = load_selectors()
     ctx = browser_context(pw, headed=True)
     page = ctx.pages[0] if ctx.pages else ctx.new_page()
@@ -224,31 +262,43 @@ def do_probe(pw, league_id):
     page.goto(url, wait_until="domcontentloaded", timeout=45000)
     page.wait_for_timeout(4000)
 
-    data = page.evaluate(PROBE_JS)
-    print("")
-    print("Page: " + str(data["title"]))
-    print("URL:  " + str(data["url"]))
-    if "login" in str(data["url"]).lower():
+    if "login" in page.url.lower():
         print("")
-        print("That redirected to a login page — the attached Chrome is not")
-        print("signed in. Log in in that window, then re-run.")
+        print("Redirected to login — the attached Chrome is not signed in.")
+        return
+    dump(page, "STEP 1 - players page")
+
+    if not player:
+        print("")
+        print("Re-run with a player name to walk the claim flow, e.g.")
+        print("  python3 submitter.py USER --probe %s --player 'Dylan Sampson'"
+              % league_id)
         return
 
-    print("")
-    print("--- %d visible input(s) ---" % len(data["inputs"]))
-    for i in data["inputs"]:
-        print("  %r" % (i,))
-    print("")
-    print("--- %d visible button(s) ---" % len(data["buttons"]))
-    for b in data["buttons"]:
-        print("  %r" % (b,))
+    box = sel.get("search_box")
+    try:
+        page.fill(box, player, timeout=10000)
+    except Exception:
+        print("")
+        print("Could not fill %r; trying the first visible text input." % box)
+        page.fill("input[type=text]", player, timeout=10000)
+    page.wait_for_timeout(2500)
+    dump(page, "STEP 2 - after searching for %s" % player)
 
-    shot = HERE / "logs" / "probe-players.png"
+    try:
+        page.click("text=%s" % player, timeout=8000)
+        page.wait_for_timeout(2500)
+        dump(page, "STEP 3 - after opening the player")
+    except Exception as exc:
+        print("")
+        print("Could not open the player row: %s" % str(exc).splitlines()[0][:120])
+
+    shot = HERE / "logs" / "probe-flow.png"
     shot.parent.mkdir(parents=True, exist_ok=True)
-    page.screenshot(path=str(shot), full_page=False)
+    page.screenshot(path=str(shot))
     print("")
     print("Screenshot: " + str(shot))
-    print("Paste everything above and I can write selectors.json for you.")
+    print("Paste all of the above and I can write selectors.json.")
 
 
 def do_inspect(pw, league_id):
@@ -424,7 +474,9 @@ def main():
     ap.add_argument("--inspect", metavar="LEAGUE_ID",
                     help="open the page so you can read selectors yourself")
     ap.add_argument("--probe", metavar="LEAGUE_ID",
-                    help="dump the page's real inputs and buttons")
+                    help="dump the page's real inputs and clickable controls")
+    ap.add_argument("--player", metavar="NAME",
+                    help="with --probe, walk the claim flow for this player")
     ap.add_argument("--audit", action="store_true")
     ap.add_argument("--limit", type=int, default=0)
     ap.add_argument("--db", default=str(st.DB_PATH))
@@ -445,7 +497,7 @@ def main():
         return 0
     if args.probe:
         with sync_playwright() as pw:
-            do_probe(pw, args.probe)
+            do_probe(pw, args.probe, args.player)
         return 0
     if args.inspect:
         with sync_playwright() as pw:
