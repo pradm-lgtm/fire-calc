@@ -12,16 +12,18 @@
     "search_box": "input[placeholder*='Find player' i]",
     "player_row": "div.scrolled-name:text-is('{abbrev}')",
     "claim_button": "a.player-action-button.waiver",
-    "drop_select": "select[name*='drop' i]",
-    "drop_option": "option:has-text('{drop_name}')",
-    "bid_input": "input[type='number'], input[name*='bid' i]",
-    "confirm_button": "button:has-text('Confirm'), button:has-text('Submit')",
+    "drop_select": "",
+    "drop_option": "span.name-text:text-is('{drop_name}')",
+    "bid_input": "input[type='number'][placeholder*='Bid' i]",
+    "confirm_button": "",
     "success_marker": "text=/claim (placed|submitted)/i",
     "_comment": [
-      "Confirmed against the live site: Sleeper uses no <button> elements,",
-      "rows abbreviate first names, and the claim entry point is the waiver",
-      "link in a player's row.",
-      "Re-check after any redesign with:",
+      "Confirmed against the live site. Sleeper uses no <button> elements",
+      "and no <select>: controls are clickable divs, and the drop is chosen",
+      "by clicking a roster row inside the claim dialog.",
+      "Note the asymmetry: the players table abbreviates first names",
+      "(T. Ferguson) while the dialog's roster list does not (Dak Prescott).",
+      "confirm_button is still unknown - fill it from a probe.",
       "  python3 submitter.py USER --probe LEAGUE_ID --player 'Full Name'"
     ]
   }

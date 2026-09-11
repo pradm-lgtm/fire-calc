@@ -243,7 +243,13 @@ def dump(page, label):
     for i in data["inputs"]:
         print("  %r" % (i,))
     print("")
-    print("clickable elements (%d):" % len(data["clickable"]))
+    actions = data.get("actions") or []
+    if actions:
+        print("ACTION-LIKE controls (%d) - the ones that matter:" % len(actions))
+        for a in actions:
+            print("  %r" % (a,))
+        print("")
+    print("all clickable elements (%d):" % len(data["clickable"]))
     for c in data["clickable"]:
         print("  %r" % (c,))
     return data
@@ -356,20 +362,27 @@ def place_claim(page, sel, proposal, dry_run=True):
         page.wait_for_timeout(1500)
 
         if drop_name:
-            try:
-                page.select_option(sel["drop_select"], label=drop_name,
-                                   timeout=8000)
-            except Exception:
-                page.click(sel["drop_option"].format(drop_name=drop_name),
-                           timeout=8000)
+            # No dropdown: the dialog lists your roster and you click one.
+            # It shows full names here, unlike the abbreviated players table.
+            target = sel["drop_option"].format(drop_name=drop_name)
+            found = page.locator(target).count()
+            if found != 1:
+                return False, ("expected one roster row for %r in the claim "
+                               "dialog, found %d" % (drop_name, found))
+            page.locator(target).first.click(timeout=8000)
+            page.wait_for_timeout(600)
         if proposal["bid"] is not None:
             page.fill(sel["bid_input"], str(proposal["bid"]), timeout=8000)
+            page.wait_for_timeout(300)
 
         page.screenshot(path=str(shot))
         if dry_run:
             return True, (f"DRY RUN — form filled but not confirmed "
                           f"(screenshot {shot.name})")
 
+        if not sel.get("confirm_button"):
+            return False, ("confirm_button is not set in selectors.json - "
+                           "run --probe and fill it in before submitting")
         page.click(sel["confirm_button"], timeout=15000)
         page.wait_for_timeout(2000)
         page.screenshot(path=str(shot))
