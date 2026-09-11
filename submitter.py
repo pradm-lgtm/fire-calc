@@ -334,6 +334,53 @@ def do_inspect(pw, league_id):
     ctx.close()
 
 
+DROP_WARNING = "text=/please select a player to drop/i"
+
+
+def select_drop(page, sel, drop_name):
+    """Pick the drop, and prove it took. Returns (ok, detail).
+
+    Clicking the player's name may only open his detail view, so the click is
+    retried up the ancestor chain until Sleeper's "select a player to drop"
+    warning clears. That warning disappearing is the only reliable evidence
+    the selection registered - without checking it, a claim can reach the
+    submit button with no drop chosen at all.
+    """
+    if page.locator(DROP_WARNING).count() == 0:
+        return True, "no drop needed (roster has space)"
+
+    target = sel["drop_option"].format(drop_name=drop_name)
+    base = page.locator(target)
+    found = base.count()
+    if found != 1:
+        return False, ("expected one roster row for %r in the claim dialog, "
+                       "found %d" % (drop_name, found))
+
+    attempts = [("the name cell", base.first)]
+    for depth in range(1, 4):
+        attempts.append(("ancestor %d" % depth,
+                         base.first.locator("xpath=" + "/".join([".."] * depth))))
+
+    for label, loc in attempts:
+        # A normal click lands at the element's centre, which on a row lands
+        # on the name cell inside it - and that child may stop the event. So
+        # try the real click first, then dispatch one directly on the element,
+        # which fires its handler regardless of what sits on top.
+        for how, action in (("click", lambda l=loc: l.click(timeout=4000)),
+                            ("js-dispatch",
+                             lambda l=loc: l.evaluate("el => el.click()"))):
+            try:
+                action()
+            except Exception:
+                continue
+            page.wait_for_timeout(700)
+            if page.locator(DROP_WARNING).count() == 0:
+                return True, ("drop %s selected via %s on %s"
+                              % (drop_name, how, label))
+    return False, ("clicked %r but Sleeper still says a drop is needed - the "
+                   "selection did not register" % drop_name)
+
+
 def place_claim(page, sel, proposal, dry_run=True):
     """Drive the UI for one claim. Returns (ok, detail)."""
     league_id = proposal["league_id"]
@@ -366,13 +413,10 @@ def place_claim(page, sel, proposal, dry_run=True):
         if drop_name:
             # No dropdown: the dialog lists your roster and you click one.
             # It shows full names here, unlike the abbreviated players table.
-            target = sel["drop_option"].format(drop_name=drop_name)
-            found = page.locator(target).count()
-            if found != 1:
-                return False, ("expected one roster row for %r in the claim "
-                               "dialog, found %d" % (drop_name, found))
-            page.locator(target).first.click(timeout=8000)
-            page.wait_for_timeout(600)
+            ok, why = select_drop(page, sel, drop_name)
+            if not ok:
+                page.screenshot(path=str(shot))
+                return False, why
         if proposal["bid"] is not None:
             page.fill(sel["bid_input"], str(proposal["bid"]), timeout=8000)
             page.wait_for_timeout(300)
@@ -382,6 +426,10 @@ def place_claim(page, sel, proposal, dry_run=True):
             return True, (f"DRY RUN — form filled but not confirmed "
                           f"(screenshot {shot.name})")
 
+        if page.locator(DROP_WARNING).count() > 0:
+            page.screenshot(path=str(shot))
+            return False, ("refusing to submit: Sleeper still says a drop is "
+                           "required")
         if not sel.get("confirm_button"):
             return False, ("confirm_button is not set in selectors.json - "
                            "run --probe and fill it in before submitting")
