@@ -183,6 +183,74 @@ def do_login(pw):
         print(" then re-run this to confirm the attach works.)")
 
 
+PROBE_JS = """
+() => {
+  const vis = el => {
+    const r = el.getBoundingClientRect();
+    return r.width > 0 && r.height > 0;
+  };
+  const attrs = el => {
+    const keep = ['id','name','type','placeholder','aria-label','role',
+                  'data-testid','class'];
+    const out = {};
+    for (const k of keep) {
+      const v = el.getAttribute(k);
+      if (v) out[k] = v.length > 90 ? v.slice(0, 90) + '...' : v;
+    }
+    return out;
+  };
+  const inputs = [...document.querySelectorAll('input,textarea,select')]
+    .filter(vis).map(el => ({tag: el.tagName.toLowerCase(), ...attrs(el)}));
+  const buttons = [...document.querySelectorAll(
+      'button,[role=button],a[href*=claim],[class*=btn],[class*=Button]')]
+    .filter(vis)
+    .map(el => ({tag: el.tagName.toLowerCase(),
+                 text: (el.innerText || '').trim().slice(0, 40),
+                 ...attrs(el)}))
+    .filter(b => b.text);
+  return {url: location.href, title: document.title,
+          inputs, buttons: buttons.slice(0, 40)};
+}
+"""
+
+
+def do_probe(pw, league_id):
+    """Report the page's real inputs and buttons, so selectors stop being guesses."""
+    sel = load_selectors()
+    ctx = browser_context(pw, headed=True)
+    page = ctx.pages[0] if ctx.pages else ctx.new_page()
+    url = sel["players_url"].format(league_id=league_id)
+    print("Opening " + url)
+    page.goto(url, wait_until="domcontentloaded", timeout=45000)
+    page.wait_for_timeout(4000)
+
+    data = page.evaluate(PROBE_JS)
+    print("")
+    print("Page: " + str(data["title"]))
+    print("URL:  " + str(data["url"]))
+    if "login" in str(data["url"]).lower():
+        print("")
+        print("That redirected to a login page — the attached Chrome is not")
+        print("signed in. Log in in that window, then re-run.")
+        return
+
+    print("")
+    print("--- %d visible input(s) ---" % len(data["inputs"]))
+    for i in data["inputs"]:
+        print("  %r" % (i,))
+    print("")
+    print("--- %d visible button(s) ---" % len(data["buttons"]))
+    for b in data["buttons"]:
+        print("  %r" % (b,))
+
+    shot = HERE / "logs" / "probe-players.png"
+    shot.parent.mkdir(parents=True, exist_ok=True)
+    page.screenshot(path=str(shot), full_page=False)
+    print("")
+    print("Screenshot: " + str(shot))
+    print("Paste everything above and I can write selectors.json for you.")
+
+
 def do_inspect(pw, league_id):
     sel = load_selectors()
     ctx = browser_context(pw, headed=True)
@@ -353,7 +421,10 @@ def main():
                     help="start Chrome for login and confirm the attach")
     ap.add_argument("--start-chrome", action="store_true",
                     help="just launch the browser and exit")
-    ap.add_argument("--inspect", metavar="LEAGUE_ID")
+    ap.add_argument("--inspect", metavar="LEAGUE_ID",
+                    help="open the page so you can read selectors yourself")
+    ap.add_argument("--probe", metavar="LEAGUE_ID",
+                    help="dump the page's real inputs and buttons")
     ap.add_argument("--audit", action="store_true")
     ap.add_argument("--limit", type=int, default=0)
     ap.add_argument("--db", default=str(st.DB_PATH))
@@ -371,6 +442,10 @@ def main():
     if args.login:
         with sync_playwright() as pw:
             do_login(pw)
+        return 0
+    if args.probe:
+        with sync_playwright() as pw:
+            do_probe(pw, args.probe)
         return 0
     if args.inspect:
         with sync_playwright() as pw:
