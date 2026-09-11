@@ -1,8 +1,12 @@
 #!/usr/bin/env bash
 # Move the fantasy agent out of the fire-calc repo into its own.
 #
-#   1. Create an EMPTY repo at https://github.com/new named fantasy-agent
-#      (no README, no .gitignore, no licence)
+#   1. At https://github.com/new create a repo named waiver-agent.
+#      Leave "Add a README file", "Add .gitignore" and "Choose a license"
+#      UNCHECKED - an initialised repo already has a commit, which this
+#      push would then collide with.
+#      (pradm-lgtm/fantasy-agent holds an older version of this project and
+#       is being kept as an archive, hence the new name.)
 #   2. bash migrate_to_own_repo.sh
 #
 # Copies only the agent's files - the calculator's package.json, src/ and so
@@ -12,8 +16,8 @@
 set -euo pipefail
 
 SRC="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-DEST="${1:-$HOME/fantasy-agent}"
-REMOTE="${2:-https://github.com/pradm-lgtm/fantasy-agent.git}"
+DEST="${1:-$HOME/waiver-agent}"
+REMOTE="${2:-https://github.com/pradm-lgtm/waiver-agent.git}"
 
 FILES=(
   check_sources.py claim_safety.py expert_extract.py expert_waivers.py
