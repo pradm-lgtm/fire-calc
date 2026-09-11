@@ -21,20 +21,38 @@ import store as st
 
 
 def pending_claims(league_id, week):
-    """Waiver claims that exist but have not processed yet, from the API."""
-    rows = sc.get(f"/league/{league_id}/transactions/{week}") or []
+    """Waiver claims that exist but have not processed yet, from the API.
+
+    Sleeper indexes transactions by the week they belong to, and a claim
+    placed today belongs to the week it will process in - which is the next
+    one, not the current one. Checking only the current week reports a claim
+    that plainly exists as missing, so look either side of it.
+    """
     out = []
-    for t in rows:
-        if t.get("type") != "waiver" or t.get("status") != "pending":
+    try:
+        current = int(week)
+    except (TypeError, ValueError):
+        current = 1
+    for wk in (current, current + 1, max(1, current - 1)):
+        rows = sc.get(f"/league/{league_id}/transactions/{wk}") or []
+        for t in rows:
+            if t.get("type") != "waiver" or t.get("status") != "pending":
+                continue
+            out.append({
+                "week": wk,
+                "transaction_id": t.get("transaction_id"),
+                "roster_ids": t.get("roster_ids") or [],
+                "adds": t.get("adds") or {},
+                "drops": t.get("drops") or {},
+                "bid": (t.get("settings") or {}).get("waiver_bid"),
+            })
+    seen, uniq = set(), []
+    for c in out:
+        if c["transaction_id"] in seen:
             continue
-        out.append({
-            "transaction_id": t.get("transaction_id"),
-            "roster_ids": t.get("roster_ids") or [],
-            "adds": t.get("adds") or {},
-            "drops": t.get("drops") or {},
-            "bid": (t.get("settings") or {}).get("waiver_bid"),
-        })
-    return out
+        seen.add(c["transaction_id"])
+        uniq.append(c)
+    return uniq
 
 
 def my_roster_id(league_id, user_id):
@@ -117,8 +135,20 @@ def verify_submitted(conn, proposal, user_id, week):
                      if proposal["drop_player_id"] else None)
         if want_drop and want_drop not in drops:
             detail += "; drop does not match what was approved"
-        return True, detail
-    return False, "no matching pending claim found in the league"
+        return True, detail + " (week %s)" % claim["week"]
+
+    # Say what IS queued, so a mismatch can be told from nothing at all.
+    everything = pending_claims(league_id, week)
+    if not everything:
+        return False, ("no pending waiver claims at all in this league "
+                       "(checked weeks around %s)" % week)
+    lines = []
+    for c in everything:
+        mine_flag = "yours" if roster_id in c["roster_ids"] else "another team"
+        lines.append("week %s %s adds=%s bid=%s"
+                     % (c["week"], mine_flag, list(c["adds"]), c["bid"]))
+    return False, ("no claim for this player; %d pending claim(s) exist: %s"
+                   % (len(everything), "; ".join(lines[:6])))
 
 
 def audit(conn, user_id, week):
