@@ -225,7 +225,7 @@ PROBE_JS = r"""
     seen.add(k);
     return true;
   });
-  const ACTION = /^(confirm|submit|place|claim|cancel|done|save|bid|waiver|continue|next|ok|yes)\b/i;
+  const ACTION = /\b(confirm|submit|place|claim|cancel|done|save|bid|waiver|continue|next)\b/i;
   return {url: location.href, title: document.title, inputs,
           actions: uniq.filter(c => ACTION.test(c.text)),
           clickable: uniq.slice(0, 150)};

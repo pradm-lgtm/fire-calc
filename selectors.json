@@ -13,17 +13,19 @@
     "player_row": "div.scrolled-name:text-is('{abbrev}')",
     "claim_button": "a.player-action-button.waiver",
     "drop_select": "",
-    "drop_option": "span.name-text:text-is('{drop_name}')",
+    "drop_option": "div.player-name-with-position:has(span.name-text:text-is('{drop_name}'))",
     "bid_input": "input[type='number'][placeholder*='Bid' i]",
-    "confirm_button": "",
-    "success_marker": "text=/claim (placed|submitted)/i",
+    "confirm_button": "button:has-text('MAKE WAIVER BID')",
+    "success_marker": "",
     "_comment": [
-      "Confirmed against the live site. Sleeper uses no <button> elements",
-      "and no <select>: controls are clickable divs, and the drop is chosen",
-      "by clicking a roster row inside the claim dialog.",
-      "Note the asymmetry: the players table abbreviates first names",
-      "(T. Ferguson) while the dialog's roster list does not (Dak Prescott).",
-      "confirm_button is still unknown - fill it from a probe.",
+      "All confirmed against the live site.",
+      "Sleeper uses almost no semantic HTML: controls are clickable divs,",
+      "there is no <select>, and the ONLY <button> on the page is the final",
+      "MAKE WAIVER BID.",
+      "Name forms differ by context: the players table abbreviates",
+      "(T. Ferguson) while the claim dialog's roster list does not",
+      "(Woody Marks).",
+      "Re-check after a redesign with:",
       "  python3 submitter.py USER --probe LEAGUE_ID --player 'Full Name'"
     ]
   }
