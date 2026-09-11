@@ -54,7 +54,11 @@ class Connection:
             import psycopg2
             import psycopg2.extras
             self._mod = psycopg2
-            self._raw = psycopg2.connect(os.environ["DATABASE_URL"])
+            url = os.environ["DATABASE_URL"]
+            # Hosted Postgres wants TLS, and Supabase refuses without it.
+            if "sslmode=" not in url:
+                url += ("&" if "?" in url else "?") + "sslmode=require"
+            self._raw = psycopg2.connect(url)
             self._factory = psycopg2.extras.RealDictCursor
         else:
             import sqlite3

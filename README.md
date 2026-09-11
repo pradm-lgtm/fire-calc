@@ -123,8 +123,16 @@ Three parts, because a serverless host cannot do all of it:
 
 ### Deploying
 
-Create a Postgres database (Vercel Postgres or Neon, both have free tiers)
-and note its connection string, then:
+Create a Postgres database - Supabase, Neon and Vercel Postgres all have
+free tiers and all work unchanged, since this only needs plain Postgres.
+
+On Supabase, take the **Transaction pooler** connection string (port 6543),
+not the direct one. A serverless function opens a connection per request and
+throws it away; direct connections are limited and would be exhausted, while
+the pooler is built for exactly this. TLS is required and is added
+automatically if the string does not specify it.
+
+Then:
 
 ```bash
 npm i -g vercel && vercel login

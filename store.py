@@ -78,11 +78,31 @@ def now():
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
+_schema_ready = set()
+
+
 def connect(path=None):
-    """SQLite when run from a directory, Postgres when DATABASE_URL is set."""
+    """SQLite when run from a directory, Postgres when DATABASE_URL is set.
+
+    The schema is applied once per process rather than per connection. On a
+    serverless host the same warm instance serves many requests, and running
+    a dozen CREATE TABLE IF NOT EXISTS statements before each one is pure
+    latency against a database that is a network hop away.
+    """
+    conn = db.Connection(path or DB_PATH)
+    key = db.backend(), str(path or DB_PATH)
+    if key not in _schema_ready:
+        conn.executescript(SCHEMA)
+        _schema_ready.add(key)
+    return conn
+
+
+def ensure_schema(path=None):
+    """Apply the schema regardless, for a fresh database."""
     conn = db.Connection(path or DB_PATH)
     conn.executescript(SCHEMA)
-    return conn
+    conn.close()
+    _schema_ready.add((db.backend(), str(path or DB_PATH)))
 
 
 def log(conn, kind, detail="", proposal_id=None):
