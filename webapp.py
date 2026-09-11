@@ -24,6 +24,7 @@ import json
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
+import cloud_auth as auth
 import store as st
 
 CSS = """
@@ -98,6 +99,45 @@ label { font-size:13px; color:var(--muted); }
 
 def e(v):
     return html.escape("" if v is None else str(v), quote=True)
+
+
+LOGIN_HTML = """<form method='post' action='/login' class='card'
+      style='max-width:340px;margin:12vh auto'>
+  <h1>Waiver proposals</h1>
+  <p class='why'>%s</p>
+  <input type='password' name='password' placeholder='Password'
+         autofocus autocomplete='current-password'
+         style='width:100%%;min-height:46px;padding:10px;font-size:16px;
+                border:1px solid var(--line);border-radius:8px;
+                background:var(--bg);color:var(--ink);margin-bottom:10px'>
+  <button class='approve' style='width:100%%'>Sign in</button>
+</form>"""
+
+
+def claims_json(conn, include_submitted=False):
+    """What the submitter may see: approved and awaiting submission.
+
+    With include_submitted, recently submitted ones come too - the audit
+    needs them to tell "we placed this" from "the league has this".
+    """
+    if include_submitted:
+        run = st.latest_run(conn)
+        rows = [r for r in st.proposals_for_run(conn, run["id"])
+                if r["status"] in (st.APPROVED, st.SUBMITTED)] if run else []
+    else:
+        rows = st.approved_unsubmitted(conn)
+    return [{
+        "id": r["id"], "platform": r["platform"],
+        "league_id": r["league_id"], "league_name": r["league_name"],
+        "add_player_id": r["add_player_id"],
+        "add_player_name": r["add_player_name"],
+        "add_position": r["add_position"],
+        "drop_player_id": r["drop_player_id"],
+        "drop_player_name": r["drop_player_name"],
+        "drop_position": r["drop_position"],
+        "bid": r["bid"], "max_bid": r["max_bid"],
+        "status": r["status"],
+    } for r in rows]
 
 
 def render(conn):
@@ -240,9 +280,59 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):
         pass  # keep the terminal readable
 
+    def _cookie(self, name):
+        raw = self.headers.get("Cookie") or ""
+        for part in raw.split(";"):
+            k, _, v = part.strip().partition("=")
+            if k == name:
+                return v
+        return ""
+
+    def _authed(self):
+        return (not auth.auth_required()
+                or auth.valid_session(self._cookie(auth.COOKIE)))
+
+    def _send(self, code, body, ctype="text/html; charset=utf-8", headers=()):
+        if isinstance(body, str):
+            body = body.encode()
+        self.send_response(code)
+        self.send_header("Content-Type", ctype)
+        self.send_header("Content-Length", str(len(body)))
+        for k, v in headers:
+            self.send_header(k, v)
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _json(self, code, obj):
+        self._send(code, json.dumps(obj), "application/json")
+
     def do_GET(self):
-        if urlparse(self.path).path != "/":
+        path = urlparse(self.path).path
+        if path == "/healthz":
+            self._send(200, "ok", "text/plain")
+            return
+        if path == "/login":
+            self._send(200, page(LOGIN_HTML % "Sign in to review this week's"
+                                 " waiver proposals.", "Sign in"))
+            return
+        if path == "/api/claims":
+            if not auth.check_api_token(self.headers.get("Authorization")):
+                self._json(401, {"error": "bad or missing API token"})
+                return
+            want_all = "include=submitted" in (urlparse(self.path).query or "")
+            conn = self._conn()
+            try:
+                self._json(200, {"claims": claims_json(conn, want_all)})
+            finally:
+                conn.close()
+            return
+        if path != "/":
             self.send_error(404)
+            return
+        if not self._authed():
+            self.send_response(303)
+            self.send_header("Location", "/login")
+            self.end_headers()
             return
         conn = self._conn()
         try:
@@ -256,10 +346,59 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def do_POST(self):
-        if urlparse(self.path).path != "/decide":
+        path = urlparse(self.path).path
+        length = int(self.headers.get("Content-Length") or 0)
+
+        if path == "/login":
+            form = parse_qs(self.rfile.read(length).decode("utf-8"))
+            if auth.check_password((form.get("password") or [""])[0]):
+                cookie = (f"{auth.COOKIE}={auth.make_session()}; Path=/; "
+                          "HttpOnly; SameSite=Lax; Max-Age="
+                          f"{auth.SESSION_DAYS * 86400}")
+                if self.headers.get("X-Forwarded-Proto") == "https":
+                    cookie += "; Secure"
+                self.send_response(303)
+                self.send_header("Location", "/")
+                self.send_header("Set-Cookie", cookie)
+                self.end_headers()
+            else:
+                self._send(401, page(LOGIN_HTML % "That password was not "
+                                     "right. Try again.", "Sign in"))
+            return
+
+        if path.startswith("/api/claims/"):
+            if not auth.check_api_token(self.headers.get("Authorization")):
+                self._json(401, {"error": "bad or missing API token"})
+                return
+            try:
+                pid = int(path.rsplit("/", 2)[-2])
+            except (ValueError, IndexError):
+                self._json(400, {"error": "bad claim id"})
+                return
+            body = json.loads(self.rfile.read(length) or b"{}")
+            conn = self._conn()
+            try:
+                if body.get("submitted"):
+                    st.mark_submitted(conn, pid, bool(body.get("ok")),
+                                      str(body.get("detail", ""))[:500])
+                else:
+                    # Nothing reached the league, so keep it retryable.
+                    st.log(conn, "attempt_failed",
+                           str(body.get("detail", ""))[:500], pid)
+                    conn.commit()
+                self._json(200, {"ok": True})
+            finally:
+                conn.close()
+            return
+
+        if path != "/decide":
             self.send_error(404)
             return
-        length = int(self.headers.get("Content-Length") or 0)
+        if not self._authed():
+            self.send_response(303)
+            self.send_header("Location", "/login")
+            self.end_headers()
+            return
         form = parse_qs(self.rfile.read(length).decode("utf-8"))
         pid = (form.get("id") or [None])[0]
         action = (form.get("action") or [""])[0]

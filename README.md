@@ -103,3 +103,41 @@ requires a bid cue and rejects stat cues.
   it before approving.
 - Video and podcast pages are unusable as sources; `check_sources.py`
   identifies them.
+
+## Running the page in the cloud
+
+The page and database can run on a small always-on host while the submitter
+stays on your Mac, where the logged-in browser session lives. That is what
+lets you approve from anywhere, and it decouples the two halves: approving is
+time-sensitive and happens wherever you are, submitting can happen any time
+before waivers process.
+
+The Mac is never reached from outside. The submitter polls the host over
+HTTPS, so it works behind any router with no VPN, no open ports and no fixed
+address.
+
+```bash
+fly launch --no-deploy          # uses the included fly.toml and Dockerfile
+fly volumes create fantasy_data --size 1
+fly secrets set FANTASY_PASSWORD='something long' \
+               FANTASY_SECRET="$(python3 -c 'import secrets;print(secrets.token_hex(32))')" \
+               FANTASY_API_TOKEN="$(python3 -c 'import secrets;print(secrets.token_urlsafe(32))')"
+fly deploy
+```
+
+Then point the local half at it, using the same token:
+
+```bash
+export FANTASY_API_URL=https://your-app.fly.dev
+export FANTASY_API_TOKEN=...        # the value set above
+python3 submitter.py YOUR_USERNAME --submit
+```
+
+`run_weekly.py` also needs to write to the host rather than a local file. Run
+it on the host itself (a scheduled machine), or keep it on the Mac and point
+`--db` at a copy you sync — the first is simpler.
+
+Two credentials, deliberately separate: `FANTASY_PASSWORD` is what you type
+in a browser, `FANTASY_API_TOKEN` is what the submitter sends. Either can be
+rotated without disturbing the other. Sessions are signed rather than stored,
+so a redeploy does not log you out.

@@ -38,6 +38,7 @@ import sys
 from pathlib import Path
 
 import claim_safety as cs
+import cloud_client as cloud
 import sleeper_client as sc
 import store as st
 
@@ -508,7 +509,16 @@ def clean_name(label):
 
 
 def run(conn, user_id, week, dry_run, limit, mode='auto'):
-    rows = st.approved_unsubmitted(conn)
+    remote = cloud.configured()
+    if remote:
+        print(f"Reading approved claims from {cloud.base_url()}")
+        try:
+            rows = cloud.approved_unsubmitted()
+        except cloud.RemoteError as e:
+            print(f"ERROR: {e}")
+            return 1
+    else:
+        rows = st.approved_unsubmitted(conn)
     if not rows:
         print("Nothing approved and waiting. Approve proposals on the page first.")
         return 0
@@ -547,30 +557,41 @@ def run(conn, user_id, week, dry_run, limit, mode='auto'):
                 page, sel, r, dry_run=dry_run or mode == "prepare")
             print(f"  {detail}")
 
+            def record(submitted, succeeded, text, _r=r):
+                if remote:
+                    try:
+                        cloud.report(_r["id"], submitted, succeeded, text)
+                    except cloud.RemoteError as exc:
+                        print(f"  ! could not report to the host: {exc}")
+                elif submitted:
+                    st.mark_submitted(conn, _r["id"], succeeded, text)
+                else:
+                    st.log(conn, "attempt_failed", text, _r["id"])
+                    conn.commit()
+
             if mode == "prepare" and ok:
                 print("  The claim is filled in the browser. Check it, then")
                 print("  click Confirm there yourself.")
                 answer = input("  Pressed Confirm? [y]es / [s]kip: ").strip().lower()
                 if not answer.startswith("y"):
-                    st.log(conn, "skipped", "left unconfirmed", r["id"])
-                    conn.commit()
+                    record(False, False, "left unconfirmed")
                     continue
             elif dry_run:
-                st.log(conn, "dry_run", detail, r["id"])
-                conn.commit()
+                if not remote:
+                    st.log(conn, "dry_run", detail, r["id"])
+                    conn.commit()
                 continue
             elif not ok:
                 # Nothing was submitted, so the claim stays approved and can
                 # be retried once the cause is fixed. Retiring it here is how
                 # a selector timeout silently ate a whole week's claim.
-                st.log(conn, "attempt_failed", detail, r["id"])
-                conn.commit()
+                record(False, False, detail)
                 continue
 
             # The browser says it worked; the league is what decides.
             found, vdetail = cs.verify_submitted(conn, r, user_id, week)
             print(f"  verification: {vdetail}")
-            st.mark_submitted(conn, r["id"], found, f"{detail}; {vdetail}")
+            record(True, found, f"{detail}; {vdetail}")
             placed += 1 if found else 0
         if not attached:
             ctx.close()  # never close a Chrome window the user owns
