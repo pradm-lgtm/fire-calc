@@ -2,7 +2,7 @@
 """
 Place approved waiver claims in Sleeper, then prove they landed.
 
-    python3 submitter.py pradm7 --login          # how to attach to your Chrome
+    python3 submitter.py pradm7 --login          # start Chrome, log in there
     python3 submitter.py pradm7                  # DRY RUN (default)
     python3 submitter.py pradm7 --prepare        # fill it, you press Confirm
     python3 submitter.py pradm7 --submit         # fully automatic
@@ -73,6 +73,65 @@ def launch_hint():
             f'  --user-data-dir="{CHROME_PROFILE}"')
 
 
+def chrome_app():
+    """The user's real Chrome, whatever it is called on this machine."""
+    for path in (CHROME_MAC,
+                 "/Applications/Chromium.app/Contents/MacOS/Chromium",
+                 "/usr/bin/google-chrome", "/usr/bin/chromium",
+                 "/usr/bin/chromium-browser"):
+        if Path(path).exists():
+            return path
+    return None
+
+
+def cdp_alive(timeout=0.7):
+    import urllib.request
+    try:
+        urllib.request.urlopen(f"{CDP_URL}/json/version", timeout=timeout)
+        return True
+    except Exception:
+        return False
+
+
+def start_chrome():
+    """Launch Chrome in the background with a debugging port.
+
+    Run detached on purpose: told to paste the raw command, you end up with a
+    terminal that never returns and no obvious way forward.
+    """
+    import subprocess
+    import time
+
+    if cdp_alive():
+        print(f"Chrome is already listening on {CDP_URL} — nothing to do.")
+        return True
+    app = chrome_app()
+    if not app:
+        print("Could not find Chrome. Install it, or launch any Chromium with")
+        print("  --remote-debugging-port=9222 --user-data-dir=<some dir>")
+        return False
+
+    CHROME_PROFILE.mkdir(exist_ok=True)
+    subprocess.Popen(
+        [app, "--remote-debugging-port=9222",
+         f"--user-data-dir={CHROME_PROFILE}", "https://sleeper.com"],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        start_new_session=True)
+    for _ in range(40):
+        if cdp_alive():
+            print("Chrome is running in the background, on sleeper.com.")
+            print("Log in there as yourself and solve any challenge — then")
+            print("leave the window open and come back here.")
+            print()
+            print("Next:  python3 submitter.py YOUR_USERNAME --prepare")
+            return True
+        time.sleep(0.5)
+    print("Chrome started but is not answering on port 9222 yet. Give it a")
+    print("moment and re-run, or check whether a Chrome is already running")
+    print("with a different profile.")
+    return False
+
+
 def attach(pw):
     """Attach to a Chrome you launched and logged into yourself.
 
@@ -105,18 +164,14 @@ def browser_context(pw, headed=True):
 
 
 def do_login(pw):
-    """Explain the attach flow rather than driving a login itself."""
-    print("Do not let this tool log in for you — Sleeper challenges automated")
-    print("logins, and a browser it starts is detectable as one.")
+    """Start Chrome for the user and confirm the attach works."""
+    print("This tool never logs in for you: Sleeper challenges automated")
+    print("logins, and a browser it starts is detectable as one. You log in")
+    print("as yourself, and only the form-filling is automated.")
     print()
-    print("Instead, start your own Chrome with a debugging port and log in")
-    print("there as yourself. Paste this into a terminal and leave it running:")
-    print()
-    print(launch_hint())
-    print()
-    print("In the Chrome window that opens: go to sleeper.com, log in, solve")
-    print("any challenge as a person, and leave that window open.")
-    print()
+    if not cdp_alive():
+        start_chrome()
+        return
     try:
         browser = pw.chromium.connect_over_cdp(CDP_URL)
         pages = [p.url for c in browser.contexts for p in c.pages]
@@ -294,7 +349,10 @@ def main():
                     help="place claims fully automatically")
     ap.add_argument("--prepare", action="store_true",
                     help="fill each claim and let you press Confirm (recommended)")
-    ap.add_argument("--login", action="store_true")
+    ap.add_argument("--login", action="store_true",
+                    help="start Chrome for login and confirm the attach")
+    ap.add_argument("--start-chrome", action="store_true",
+                    help="just launch the browser and exit")
     ap.add_argument("--inspect", metavar="LEAGUE_ID")
     ap.add_argument("--audit", action="store_true")
     ap.add_argument("--limit", type=int, default=0)
@@ -308,6 +366,8 @@ def main():
         print("  pip3 install playwright && python3 -m playwright install chromium")
         return 1
 
+    if args.start_chrome:
+        return 0 if start_chrome() else 1
     if args.login:
         with sync_playwright() as pw:
             do_login(pw)
