@@ -337,6 +337,41 @@ def do_inspect(pw, league_id):
 DROP_WARNING = "text=/please select a player to drop/i"
 
 
+ROW_SHAPE_JS = r"""
+(el) => {
+  const chain = [];
+  let node = el;
+  for (let i = 0; node && i < 6; i++, node = node.parentElement) {
+    chain.push({
+      depth: i,
+      tag: node.tagName.toLowerCase(),
+      cls: (node.getAttribute('class') || '').slice(0, 80),
+      cursor: getComputedStyle(node).cursor,
+      text: (node.innerText || '').trim().replace(/\s+/g, ' ').slice(0, 60),
+    });
+  }
+  return chain;
+}
+"""
+
+
+def drop_still_required(page):
+    """Is Sleeper still asking for a drop? Visibility, not mere presence.
+
+    The warning may be hidden rather than removed once a player is chosen, in
+    which case counting DOM matches reports it forever and a successful
+    selection looks like a failure.
+    """
+    loc = page.locator(DROP_WARNING)
+    try:
+        for i in range(loc.count()):
+            if loc.nth(i).is_visible():
+                return True
+    except Exception:
+        return False
+    return False
+
+
 def select_drop(page, sel, drop_name):
     """Pick the drop, and prove it took. Returns (ok, detail).
 
@@ -346,7 +381,7 @@ def select_drop(page, sel, drop_name):
     the selection registered - without checking it, a claim can reach the
     submit button with no drop chosen at all.
     """
-    if page.locator(DROP_WARNING).count() == 0:
+    if not drop_still_required(page):
         return True, "no drop needed (roster has space)"
 
     target = sel["drop_option"].format(drop_name=drop_name)
@@ -374,9 +409,20 @@ def select_drop(page, sel, drop_name):
             except Exception:
                 continue
             page.wait_for_timeout(700)
-            if page.locator(DROP_WARNING).count() == 0:
+            if not drop_still_required(page):
                 return True, ("drop %s selected via %s on %s"
                               % (drop_name, how, label))
+    # Nothing worked: report what the row actually looks like, so the right
+    # thing to click can be identified without another blind round trip.
+    try:
+        chain = base.first.evaluate(ROW_SHAPE_JS)
+        print("      row structure around %r:" % drop_name)
+        for node in chain:
+            print("        depth %d  <%s class=%r cursor=%s>  %r"
+                  % (node["depth"], node["tag"], node["cls"], node["cursor"],
+                     node["text"]))
+    except Exception:
+        pass
     return False, ("clicked %r but Sleeper still says a drop is needed - the "
                    "selection did not register" % drop_name)
 
@@ -426,7 +472,7 @@ def place_claim(page, sel, proposal, dry_run=True):
             return True, (f"DRY RUN — form filled but not confirmed "
                           f"(screenshot {shot.name})"), False
 
-        if page.locator(DROP_WARNING).count() > 0:
+        if drop_still_required(page):
             page.screenshot(path=str(shot))
             return False, ("refusing to submit: Sleeper still says a drop is "
                            "required"), False
