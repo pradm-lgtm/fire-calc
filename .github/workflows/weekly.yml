@@ -1,0 +1,26 @@
+# Triggers the weekly job. Kept here rather than inside the host so the host
+# can sleep all week: this request is what wakes it, and it goes back to
+# sleep once the job is done.
+name: weekly waiver job
+
+on:
+  schedule:
+    # 08:30 US Eastern. GitHub runs cron in UTC and does not follow daylight
+    # saving, so both offsets are listed; the endpoint ignores a second call
+    # in the same week.
+    - cron: "30 12 * * 2"   # 08:30 EDT
+    - cron: "30 13 * * 2"   # 08:30 EST
+  workflow_dispatch:        # lets you run it by hand from the Actions tab
+
+jobs:
+  trigger:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ask the host to run this week's job
+        run: |
+          code=$(curl -sS -o /tmp/out.txt -w '%{http_code}' \
+            -X POST "${{ secrets.FANTASY_API_URL }}/cron/weekly" \
+            -H "Authorization: Bearer ${{ secrets.FANTASY_API_TOKEN }}" \
+            --max-time 300)
+          echo "HTTP $code"; cat /tmp/out.txt
+          test "$code" = "200"

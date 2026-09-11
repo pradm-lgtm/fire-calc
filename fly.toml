@@ -8,11 +8,12 @@ primary_region = "iad"
 [http_service]
   internal_port = 8777
   force_https = true
-  auto_stop_machines = "off"
+  # The machine sleeps when nobody is using it and wakes on a request,
+  # including the weekly one that triggers the job. Keeping it running all
+  # week to serve a few minutes of work is most of what it would cost.
+  auto_stop_machines = "suspend"
   auto_start_machines = true
-  # Stays up: the weekly job runs in this process, and a suspended
-  # machine would sleep straight through Tuesday morning.
-  min_machines_running = 1
+  min_machines_running = 0
 
   [http_service.http_options.response]
     pristine = true

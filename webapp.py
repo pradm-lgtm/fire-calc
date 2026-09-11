@@ -24,6 +24,7 @@ import json
 import os
 import threading
 import time
+from datetime import datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
@@ -369,6 +370,33 @@ class Handler(BaseHTTPRequestHandler):
                                      "right. Try again.", "Sign in"))
             return
 
+        if path == "/cron/weekly":
+            if not auth.check_api_token(self.headers.get("Authorization")):
+                self._json(401, {"error": "bad or missing API token"})
+                return
+            self.rfile.read(length)
+            conn = self._conn()
+            try:
+                already = already_ran_this_week(conn)
+            finally:
+                conn.close()
+            if already:
+                # Firing twice must not double-propose: the idempotency key
+                # includes the run, so a second run would look entirely new.
+                self._json(200, {"ok": True, "skipped": "already ran this week"})
+                return
+            username = os.environ.get("FANTASY_USER", "")
+            if not username:
+                self._json(400, {"error": "FANTASY_USER is not set"})
+                return
+            import run_weekly
+            try:
+                run_weekly.main_for(username, self.db_path)
+                self._json(200, {"ok": True})
+            except Exception as exc:
+                self._json(500, {"error": f"{type(exc).__name__}: {exc}"})
+            return
+
         if path.startswith("/api/claims/"):
             if not auth.check_api_token(self.headers.get("Authorization")):
                 self._json(401, {"error": "bad or missing API token"})
@@ -423,6 +451,20 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(303)
         self.send_header("Location", "/")
         self.end_headers()
+
+
+def already_ran_this_week(conn):
+    """Has the weekly job already produced a run in the last few days?"""
+    run = st.latest_run(conn)
+    if not run or not run["created_at"]:
+        return False
+    try:
+        when = datetime.fromisoformat(run["created_at"])
+    except ValueError:
+        return False
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=timezone.utc)
+    return (datetime.now(timezone.utc) - when) < timedelta(days=3)
 
 
 def _scheduler_loop(username, when, db_path):

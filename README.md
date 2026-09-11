@@ -133,11 +133,20 @@ fly deploy
 fly open                        # your URL, reachable from anywhere
 ```
 
-`FANTASY_USER` and `FANTASY_SCHEDULE` make the host run the weekly job
-itself. Without them the page works but stays empty, because the job would be
-filing proposals into a database on your Mac that the host cannot see. The
-machine is configured not to suspend for the same reason - a sleeping one
-would pass straight through Tuesday morning.
+`FANTASY_USER` tells the host whose leagues to read. The job itself is
+triggered from outside, by the GitHub Action in `.github/workflows/`, which
+POSTs to `/cron/weekly` on Tuesday morning. That request is also what wakes
+the machine, so it can sleep the rest of the week instead of idling at full
+price to serve a few minutes of work. Set `FANTASY_API_URL` and
+`FANTASY_API_TOKEN` as repository secrets for the Action to use.
+
+The endpoint refuses to run twice in the same week, because a second run
+would re-propose everything: the idempotency key includes the run, so a
+fresh run looks entirely new.
+
+`FANTASY_SCHEDULE` is the alternative - an in-process timer, for a host that
+is always on anyway. Setting it means the machine must not be allowed to
+sleep, which is what makes it the expensive option.
 
 Read the token back for the local half with `fly secrets list` (it shows
 digests only, so keep the value when you generate it).
