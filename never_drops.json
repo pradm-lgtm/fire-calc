@@ -1,0 +1,18 @@
+{
+  "_comment": [
+    "Players never to propose dropping, whatever the numbers say.",
+    "Depth and score reasoning cannot know that you would sooner lose a",
+    "week than cut one of these. Full names, matched case-insensitively",
+    "against Sleeper's spelling.",
+    "Seeded from the previous version of this project."
+  ],
+  "players": [
+    "Jalen Hurts",
+    "Jahmyr Gibbs",
+    "De'Von Achane",
+    "Travis Kelce",
+    "Chris Olave",
+    "George Pickens",
+    "Drake London"
+  ]
+}

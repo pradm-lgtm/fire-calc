@@ -31,8 +31,10 @@ down to 15 worth thinking about.
 Stdlib only. Requires Python 3.8+.
 """
 
+import json
 import math
 import sys
+from pathlib import Path
 
 import sleeper_client as sc
 
@@ -49,6 +51,27 @@ INJURY_PENALTY = {
     "out": 0.25, "ir": 0.1, "pup": 0.1, "sus": 0.1, "susp": 0.1,
     "doubtful": 0.4, "questionable": 0.85,
 }
+
+
+NEVER_DROP_FILE = Path(__file__).resolve().parent / "never_drops.json"
+
+
+def never_drop_names():
+    """Lower-cased names you will not part with, whatever the model says."""
+    try:
+        data = json.loads(NEVER_DROP_FILE.read_text())
+    except (OSError, json.JSONDecodeError):
+        return set()
+    return {str(n).strip().lower() for n in (data.get("players") or []) if n}
+
+
+def is_protected(player, protected=None):
+    names = never_drop_names() if protected is None else protected
+    if not names or not player:
+        return False
+    full = (player.get("full_name") or " ".join(filter(None, [
+        player.get("first_name"), player.get("last_name")]))).strip().lower()
+    return bool(full) and full in names
 
 
 def trending_adds(lookback_hours=24, limit=200):

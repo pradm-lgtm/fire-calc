@@ -91,6 +91,14 @@ def preflight(proposal, user_id, players=None):
     if drop_id and drop_id not in {str(p) for p in (mine.get("players") or [])}:
         return False, f"{proposal['drop_player_name']} is no longer on your roster"
 
+    if drop_id and players:
+        # Belt and braces: the drop chooser already skips these, but a bad
+        # edit on the approval page must not get one cut either.
+        import waiver_analyzer as wa
+        if wa.is_protected(players.get(drop_id)):
+            return False, (f"{proposal['drop_player_name']} is on your "
+                           "never-drop list")
+
     if drop_id and drop_id in {str(p) for p in (mine.get("starters") or []) if p}:
         return False, (f"{proposal['drop_player_name']} is in your starting "
                        "lineup — refusing to drop a starter")

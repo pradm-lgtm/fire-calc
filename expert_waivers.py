@@ -164,6 +164,7 @@ def choose_drop(roster, players, trending, depth, protect_ids):
     trade even when the WR scores better.
     """
     _, bench = sc.split_roster(roster)
+    protected = wa.never_drop_names()
     ranked = []
     for pid in bench:
         pid = str(pid)
@@ -172,6 +173,8 @@ def choose_drop(roster, players, trending, depth, protect_ids):
         p = players.get(pid)
         if not p:
             continue
+        if wa.is_protected(p, protected):
+            continue  # on the never-drop list; not a candidate at any score
         score = wa.score_player(p, trending.get(pid, 0))
         label = depth.get(p.get("position"), (0, 0, "ok"))[2]
         penalty = {"thin": 1000, "ok": 100, "deep": 0, "extra": 0}.get(label, 100)
