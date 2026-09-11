@@ -373,17 +373,13 @@ def drop_still_required(page):
 
 
 def select_drop(page, sel, drop_name):
-    """Pick the drop, and prove it took. Returns (ok, detail).
+    """Pick the drop and prove it took. Returns (ok, detail).
 
-    Clicking the player's name may only open his detail view, so the click is
-    retried up the ancestor chain until Sleeper's "select a player to drop"
-    warning clears. That warning disappearing is the only reliable evidence
-    the selection registered - without checking it, a claim can reach the
-    submit button with no drop chosen at all.
+    Selection is judged by the row itself changing - Sleeper marks the chosen
+    roster row - rather than by its "select a player to drop" warning, which
+    can stay on screen until the bid is actually submitted and so says nothing
+    about whether a click landed.
     """
-    if not drop_still_required(page):
-        return True, "no drop needed (roster has space)"
-
     target = sel["drop_option"].format(drop_name=drop_name)
     base = page.locator(target)
     found = base.count()
@@ -391,29 +387,38 @@ def select_drop(page, sel, drop_name):
         return False, ("expected one roster row for %r in the claim dialog, "
                        "found %d" % (drop_name, found))
 
-    attempts = [("the name cell", base.first)]
-    for depth in range(1, 4):
-        attempts.append(("ancestor %d" % depth,
-                         base.first.locator("xpath=" + "/".join([".."] * depth))))
+    row = base.first
+    before = row.get_attribute("class") or ""
 
-    for label, loc in attempts:
-        # A normal click lands at the element's centre, which on a row lands
-        # on the name cell inside it - and that child may stop the event. So
-        # try the real click first, then dispatch one directly on the element,
-        # which fires its handler regardless of what sits on top.
-        for how, action in (("click", lambda l=loc: l.click(timeout=4000)),
-                            ("js-dispatch",
-                             lambda l=loc: l.evaluate("el => el.click()"))):
-            try:
-                action()
-            except Exception:
-                continue
-            page.wait_for_timeout(700)
-            if not drop_still_required(page):
-                return True, ("drop %s selected via %s on %s"
-                              % (drop_name, how, label))
-    # Nothing worked: report what the row actually looks like, so the right
-    # thing to click can be identified without another blind round trip.
+    def selected():
+        after = row.get_attribute("class") or ""
+        if after != before:
+            return True, "row class changed to %r" % after
+        if not drop_still_required(page):
+            return True, "the drop warning cleared"
+        return False, ""
+
+    for how, action in (
+            ("click", lambda: row.click(timeout=6000)),
+            ("js-dispatch", lambda: row.evaluate("el => el.click()")),
+            ("mouse events", lambda: row.evaluate(
+                "el => ['pointerdown','mousedown','pointerup','mouseup','click']"
+                ".forEach(t => el.dispatchEvent(new MouseEvent(t, "
+                "{bubbles: true, cancelable: true, view: window})))")),
+    ):
+        try:
+            row.scroll_into_view_if_needed(timeout=4000)
+        except Exception:
+            pass
+        try:
+            action()
+        except Exception:
+            continue
+        page.wait_for_timeout(800)
+        ok, why = selected()
+        if ok:
+            return True, "drop %s selected via %s (%s)" % (drop_name, how, why)
+
     try:
         chain = base.first.evaluate(ROW_SHAPE_JS)
         print("      row structure around %r:" % drop_name)
@@ -423,8 +428,8 @@ def select_drop(page, sel, drop_name):
                      node["text"]))
     except Exception:
         pass
-    return False, ("clicked %r but Sleeper still says a drop is needed - the "
-                   "selection did not register" % drop_name)
+    return False, ("clicked the roster row for %r three ways and nothing "
+                   "changed - the selection did not register" % drop_name)
 
 
 def place_claim(page, sel, proposal, dry_run=True):
@@ -472,10 +477,6 @@ def place_claim(page, sel, proposal, dry_run=True):
             return True, (f"DRY RUN — form filled but not confirmed "
                           f"(screenshot {shot.name})"), False
 
-        if drop_still_required(page):
-            page.screenshot(path=str(shot))
-            return False, ("refusing to submit: Sleeper still says a drop is "
-                           "required"), False
         if not sel.get("confirm_button"):
             return False, ("confirm_button is not set in selectors.json - "
                            "run --probe and fill it in before submitting"), False
