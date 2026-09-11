@@ -190,6 +190,24 @@ def decide(conn, proposal_id, status, bid=None, drop_player_id=None,
     return True
 
 
+def reset_failed(conn):
+    """Return failed rows to 'approved' so they can be attempted again.
+
+    Only rows that failed are eligible: a row recorded as SUBMITTED really
+    reached the league and must never be resurrected, or the same claim could
+    be placed twice.
+    """
+    rows = conn.execute(
+        "SELECT id FROM proposals WHERE status = ?", (FAILED,)).fetchall()
+    for r in rows:
+        conn.execute(
+            "UPDATE proposals SET status = ?, submitted_at = NULL, result = NULL"
+            " WHERE id = ?", (APPROVED, r["id"]))
+        log(conn, "retry", "returned to the approved queue", r["id"])
+    conn.commit()
+    return len(rows)
+
+
 def mark_submitted(conn, proposal_id, ok, detail=""):
     conn.execute(
         "UPDATE proposals SET status = ?, submitted_at = ?, result = ?"

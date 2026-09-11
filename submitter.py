@@ -402,11 +402,11 @@ def place_claim(page, sel, proposal, dry_run=True):
         count = page.locator(claim).count()
         if count == 0:
             return False, ("no waiver link for %s — he may already be "
-                           "rostered, or the search found nothing" % add_name)
+                           "rostered, or the search found nothing" % add_name), False
         if count > 1:
             return False, ("%d waiver links visible after searching %s — "
                            "refusing to guess which player is meant"
-                           % (count, add_name))
+                           % (count, add_name)), False
         page.locator(claim).first.click(timeout=15000)
         page.wait_for_timeout(1500)
 
@@ -416,7 +416,7 @@ def place_claim(page, sel, proposal, dry_run=True):
             ok, why = select_drop(page, sel, drop_name)
             if not ok:
                 page.screenshot(path=str(shot))
-                return False, why
+                return False, why, False
         if proposal["bid"] is not None:
             page.fill(sel["bid_input"], str(proposal["bid"]), timeout=8000)
             page.wait_for_timeout(300)
@@ -424,25 +424,25 @@ def place_claim(page, sel, proposal, dry_run=True):
         page.screenshot(path=str(shot))
         if dry_run:
             return True, (f"DRY RUN — form filled but not confirmed "
-                          f"(screenshot {shot.name})")
+                          f"(screenshot {shot.name})"), False
 
         if page.locator(DROP_WARNING).count() > 0:
             page.screenshot(path=str(shot))
             return False, ("refusing to submit: Sleeper still says a drop is "
-                           "required")
+                           "required"), False
         if not sel.get("confirm_button"):
             return False, ("confirm_button is not set in selectors.json - "
-                           "run --probe and fill it in before submitting")
+                           "run --probe and fill it in before submitting"), False
         page.click(sel["confirm_button"], timeout=15000)
         page.wait_for_timeout(2000)
         page.screenshot(path=str(shot))
-        return True, f"confirmed in the UI (screenshot {shot.name})"
+        return True, f"confirmed in the UI (screenshot {shot.name})", True
     except Exception as exc:
         try:
             page.screenshot(path=str(shot))
         except Exception:
             pass
-        return False, f"{type(exc).__name__}: {str(exc).splitlines()[0][:160]}"
+        return False, f"{type(exc).__name__}: {str(exc).splitlines()[0][:160]}", False
 
 
 def abbrev_name(full):
@@ -496,8 +496,8 @@ def run(conn, user_id, week, dry_run, limit, mode='auto'):
             # In prepare mode the form is filled but you press Confirm, so the
             # only automated action is data entry - the part where a human
             # makes mistakes - and the irreversible click stays yours.
-            ok, detail = place_claim(page, sel, r,
-                                     dry_run=dry_run or mode == "prepare")
+            ok, detail, pressed = place_claim(
+                page, sel, r, dry_run=dry_run or mode == "prepare")
             print(f"  {detail}")
 
             if mode == "prepare" and ok:
@@ -513,7 +513,11 @@ def run(conn, user_id, week, dry_run, limit, mode='auto'):
                 conn.commit()
                 continue
             elif not ok:
-                st.mark_submitted(conn, r["id"], False, detail)
+                # Nothing was submitted, so the claim stays approved and can
+                # be retried once the cause is fixed. Retiring it here is how
+                # a selector timeout silently ate a whole week's claim.
+                st.log(conn, "attempt_failed", detail, r["id"])
+                conn.commit()
                 continue
 
             # The browser says it worked; the league is what decides.
@@ -571,6 +575,8 @@ def main():
     ap.add_argument("--player", metavar="NAME",
                     help="with --probe, walk the claim flow for this player")
     ap.add_argument("--audit", action="store_true")
+    ap.add_argument("--retry", action="store_true",
+                    help="return failed claims to the approved queue")
     ap.add_argument("--limit", type=int, default=0)
     ap.add_argument("--db", default=str(st.DB_PATH))
     args = ap.parse_args()
@@ -607,6 +613,13 @@ def main():
 
     conn = st.connect(args.db)
     try:
+        if args.retry:
+            n = st.reset_failed(conn)
+            print("Returned %d failed claim(s) to the approved queue."
+                  % n if n else "No failed claims to retry.")
+            if n:
+                print("Run again to attempt them.")
+            return 0
         if args.audit:
             return do_audit(conn, user["user_id"], week)
         mode = "prepare" if args.prepare else "auto"
