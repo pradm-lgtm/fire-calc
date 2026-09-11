@@ -2,31 +2,13 @@
   {
     "name": "FantasyPros",
     "hub": "https://www.fantasypros.com/nfl/advice/waiver-wire.php",
-    "limit": 2
-  },
-  {
-    "name": "FantasyPros (RSS)",
-    "hub": "https://www.fantasypros.com/nfl/advice/feed/",
-    "limit": 2
-  },
-  {
-    "name": "Yahoo Sports Fantasy",
-    "hub": "https://sports.yahoo.com/fantasy/",
-    "limit": 2
-  },
-  {
-    "name": "Yahoo Sports Fantasy (RSS)",
-    "hub": "https://sports.yahoo.com/fantasy/rss/",
-    "limit": 2
-  },
-  {
-    "name": "The Fantasy Footballers",
-    "hub": "https://www.thefantasyfootballers.com/fantasy-football-analysis/",
-    "limit": 2
+    "limit": 2,
+    "note": "Hub itself carries names but no bids; it links out to full articles (often RotoBaller's), which is what discovery follows."
   },
   {
     "name": "DraftSharks",
     "hub": "https://www.draftsharks.com/articles",
-    "limit": 2
+    "limit": 2,
+    "note": "Verified: yields waiver articles with stated FAAB figures."
   }
 ]
