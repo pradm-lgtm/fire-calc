@@ -1,0 +1,12 @@
+# Credentials — never commit
+.env
+
+# Local state
+fantasy.db
+logs/
+.cache/
+.browser-profile/
+__pycache__/
+*.pyc
+
+.DS_Store

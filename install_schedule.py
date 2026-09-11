@@ -99,6 +99,27 @@ def unload(label):
         print(f"  {label} was not installed")
 
 
+def reachable_urls(port):
+    """Addresses this Mac's approval page can be opened at, phone included."""
+    urls = [("this Mac", f"http://127.0.0.1:{port}")]
+
+    def run(cmd):
+        """Missing tools are normal - Tailscale may not be installed."""
+        try:
+            r = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
+            return r.stdout.strip() if r.returncode == 0 else ""
+        except (OSError, subprocess.SubprocessError):
+            return ""
+
+    for ip in (run(["tailscale", "ip", "-4"]) or "").split():
+        urls.append(("phone, over Tailscale", f"http://{ip}:{port}"))
+    for iface in ("en0", "en1"):
+        ip = run(["ipconfig", "getifaddr", iface])
+        if ip:
+            urls.append((f"phone, same wifi ({iface})", f"http://{ip}:{port}"))
+    return urls
+
+
 def status():
     out = subprocess.run(["launchctl", "list"], capture_output=True,
                          text=True).stdout
@@ -108,6 +129,12 @@ def status():
         print(f"  {label}: "
               f"{'installed' if installed else 'not installed'}"
               f"{', loaded' if running else ''}")
+    print("\n  open the approval page at:")
+    for label, url in reachable_urls(8777):
+        print(f"    {url:<28} {label}")
+    print("  (phone URLs only work if the page was installed with "
+          "--host 0.0.0.0)")
+
     log = HERE / "logs" / "weekly.log"
     if log.exists():
         tail = log.read_text(errors="replace").strip().splitlines()[-3:]
