@@ -16,6 +16,7 @@ on what was approved there.
 
 import argparse
 import json
+import os
 import sys
 
 import expert_extract as ex
@@ -197,6 +198,20 @@ def _run(username, urls, moves, dry_run, db_path):
                 print(f"  [{p['league_name']}] ADD {p['add_player_name']}"
                       f" / DROP {p['drop_player_name']}  bid {p['bid']}"
                       f"  ({p['consensus']} src)")
+            return 0
+
+        push_to = os.environ.get("FANTASY_API_URL")
+        if push_to:
+            # Serverless hosts cannot run this job inside a request, so it
+            # runs wherever there is time and posts the finished proposals.
+            import cloud_client
+            result = cloud_client.push_proposals(
+                season, week, sorted(texts), all_proposals)
+            if result.get("skipped"):
+                print(f"\nHost says: {result['skipped']}")
+                return 0
+            print(f"\nSent {result.get('written', 0)} proposal(s) to "
+                  f"{cloud_client.base_url()} as run {result.get('run')}.")
             return 0
 
         conn = st.connect(db_path)

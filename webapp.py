@@ -370,6 +370,35 @@ class Handler(BaseHTTPRequestHandler):
                                      "right. Try again.", "Sign in"))
             return
 
+        if path == "/api/proposals":
+            if not auth.check_api_token(self.headers.get("Authorization")):
+                self._json(401, {"error": "bad or missing API token"})
+                return
+            try:
+                payload = json.loads(self.rfile.read(length) or b"{}")
+            except json.JSONDecodeError:
+                self._json(400, {"error": "body was not JSON"})
+                return
+            rows = payload.get("proposals") or []
+            conn = self._conn()
+            try:
+                if already_ran_this_week(conn) and not payload.get("force"):
+                    self._json(200, {"ok": True,
+                                     "skipped": "already ran this week"})
+                    return
+                run_id = st.start_run(conn, payload.get("season"),
+                                      payload.get("week"),
+                                      payload.get("sources") or [])
+                written = sum(1 for r in rows
+                              if st.add_proposal(conn, run_id, **r) is not None)
+                self._json(200, {"ok": True, "run": run_id,
+                                 "written": written, "received": len(rows)})
+            except Exception as exc:
+                self._json(500, {"error": f"{type(exc).__name__}: {exc}"})
+            finally:
+                conn.close()
+            return
+
         if path == "/cron/weekly":
             if not auth.check_api_token(self.headers.get("Authorization")):
                 self._json(401, {"error": "bad or missing API token"})

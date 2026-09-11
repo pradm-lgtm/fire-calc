@@ -106,64 +106,60 @@ requires a bid cue and rejects stat cues.
 
 ## Running the page in the cloud
 
-The page and database can run on a small always-on host while the submitter
-stays on your Mac, where the logged-in browser session lives. That is what
-lets you approve from anywhere, and it decouples the two halves: approving is
-time-sensitive and happens wherever you are, submitting can happen any time
-before waivers process.
+The page and its database can be hosted while the submitter stays on your
+Mac, where the logged-in browser session lives. That is what lets you approve
+from anywhere, and it decouples the halves: approving is time-sensitive and
+happens wherever you are, submitting can happen any time before waivers
+process. The Mac is never reached from outside - it polls the host over
+HTTPS - so it works behind any router with no VPN or open ports.
 
-The Mac is never reached from outside. The submitter polls the host over
-HTTPS, so it works behind any router with no VPN, no open ports and no fixed
-address.
+Three parts, because a serverless host cannot do all of it:
 
-```bash
-brew install flyctl && fly auth login
+| where | does what | why there |
+|---|---|---|
+| Vercel | serves the page, holds the database | always on, public URL |
+| GitHub Actions | runs the weekly job, posts the proposals | the job fetches megabytes and needs minutes, far longer than a function may live |
+| your Mac | places approved claims in a browser | the logged-in session is here |
 
-fly launch --no-deploy          # uses the included fly.toml and Dockerfile
-fly volumes create fantasy_data --size 1 --region iad
+### Deploying
 
-fly secrets set \
-  FANTASY_PASSWORD='pick something long' \
-  FANTASY_SECRET="$(python3 -c 'import secrets;print(secrets.token_hex(32))')" \
-  FANTASY_API_TOKEN="$(python3 -c 'import secrets;print(secrets.token_urlsafe(32))')" \
-  FANTASY_USER=YOUR_SLEEPER_USERNAME \
-  FANTASY_SCHEDULE='tue 08:30'
-
-fly deploy
-fly open                        # your URL, reachable from anywhere
-```
-
-`FANTASY_USER` tells the host whose leagues to read. The job itself is
-triggered from outside, by the GitHub Action in `.github/workflows/`, which
-POSTs to `/cron/weekly` on Tuesday morning. That request is also what wakes
-the machine, so it can sleep the rest of the week instead of idling at full
-price to serve a few minutes of work. Set `FANTASY_API_URL` and
-`FANTASY_API_TOKEN` as repository secrets for the Action to use.
-
-The endpoint refuses to run twice in the same week, because a second run
-would re-propose everything: the idempotency key includes the run, so a
-fresh run looks entirely new.
-
-`FANTASY_SCHEDULE` is the alternative - an in-process timer, for a host that
-is always on anyway. Setting it means the machine must not be allowed to
-sleep, which is what makes it the expensive option.
-
-Read the token back for the local half with `fly secrets list` (it shows
-digests only, so keep the value when you generate it).
-
-Then point the local half at it, using the same token:
+Create a Postgres database (Vercel Postgres or Neon, both have free tiers)
+and note its connection string, then:
 
 ```bash
-export FANTASY_API_URL=https://your-app.fly.dev
-export FANTASY_API_TOKEN=...        # the value set above
-python3 submitter.py YOUR_USERNAME --submit
+npm i -g vercel && vercel login
+vercel link
+vercel env add DATABASE_URL          # the Postgres connection string
+vercel env add FANTASY_PASSWORD      # what you type in the browser
+vercel env add FANTASY_SECRET        # python3 -c 'import secrets;print(secrets.token_hex(32))'
+vercel env add FANTASY_API_TOKEN     # python3 -c 'import secrets;print(secrets.token_urlsafe(32))'
+vercel --prod
 ```
 
-`run_weekly.py` also needs to write to the host rather than a local file. Run
-it on the host itself (a scheduled machine), or keep it on the Mac and point
-`--db` at a copy you sync — the first is simpler.
+Then set three repository secrets in GitHub (Settings, Secrets and
+variables, Actions) so the weekly job can reach it: `FANTASY_API_URL` (your
+Vercel URL), `FANTASY_API_TOKEN` (the same token), and `FANTASY_USER` (your
+Sleeper username). The Action runs Tuesday morning and can also be run by
+hand from the Actions tab.
 
-Two credentials, deliberately separate: `FANTASY_PASSWORD` is what you type
-in a browser, `FANTASY_API_TOKEN` is what the submitter sends. Either can be
-rotated without disturbing the other. Sessions are signed rather than stored,
-so a redeploy does not log you out.
+Finally, point the local half at the host, in `~/.zshrc`:
+
+```bash
+export FANTASY_API_URL=https://your-app.vercel.app
+export FANTASY_API_TOKEN=...        # the same token again
+```
+
+`submitter.py` then reads approved claims from the host instead of a local
+file, and reports back what happened.
+
+### Storage
+
+`DATABASE_URL` decides the backend: set, it is Postgres; unset, a SQLite file
+next to the code. The same schema and the same code run on both, so local
+runs need nothing installed and the hosted one needs no special casing.
+
+Two credentials, deliberately separate: `FANTASY_PASSWORD` is typed in a
+browser and establishes a signed session; `FANTASY_API_TOKEN` is what the
+submitter and the weekly job send. Either can be rotated without disturbing
+the other, and sessions are signed rather than stored, so a redeploy does not
+log you out.

@@ -13,10 +13,11 @@ idempotency key so a retry cannot produce a second claim.
 """
 
 import json
-import sqlite3
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
+
+import db
 
 DB_PATH = Path(__file__).resolve().parent / "fantasy.db"
 
@@ -78,9 +79,8 @@ def now():
 
 
 def connect(path=None):
-    conn = sqlite3.connect(str(path or DB_PATH))
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA foreign_keys = ON")
+    """SQLite when run from a directory, Postgres when DATABASE_URL is set."""
+    conn = db.Connection(path or DB_PATH)
     conn.executescript(SCHEMA)
     return conn
 
@@ -137,7 +137,7 @@ def add_proposal(conn, run_id, **f):
             f"INSERT INTO proposals ({names}) VALUES ({marks})",
             tuple(cols.values()),
         )
-    except sqlite3.IntegrityError:
+    except db.IntegrityError:
         return None
     log(conn, "proposed", f"{cols['add_player_name']} in "
         f"{cols['league_name']}", cur.lastrowid)

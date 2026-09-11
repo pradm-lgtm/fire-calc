@@ -60,6 +60,14 @@ def approved_unsubmitted():
     return _call("/api/claims").get("claims", [])
 
 
+def push_proposals(season, week, sources, proposals):
+    """Send a week's proposals to the host that serves the approval page."""
+    return _call("/api/proposals", {
+        "season": season, "week": week, "sources": sources,
+        "proposals": proposals,
+    }, timeout=120)
+
+
 def recent_claims():
     """Approved and recently submitted claims, for auditing."""
     return _call("/api/claims?include=submitted").get("claims", [])
