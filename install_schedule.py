@@ -129,11 +129,18 @@ def status():
         print(f"  {label}: "
               f"{'installed' if installed else 'not installed'}"
               f"{', loaded' if running else ''}")
+    urls = reachable_urls(8777)
     print("\n  open the approval page at:")
-    for label, url in reachable_urls(8777):
+    for label, url in urls:
         print(f"    {url:<28} {label}")
-    print("  (phone URLs only work if the page was installed with "
-          "--host 0.0.0.0)")
+    if not any("Tailscale" in label for label, _ in urls):
+        print("\n  Only reachable from home. A 192.168.x address is your wifi")
+        print("  network and means nothing from anywhere else. To reach the")
+        print("  page from work, install Tailscale on this Mac and your phone")
+        print("  (free, private, nothing exposed to the internet):")
+        print("      brew install --cask tailscale")
+        print("  then sign both into the same account and re-run --status.")
+        print("  Note the Mac has to be awake to answer, whichever route.")
 
     log = HERE / "logs" / "weekly.log"
     if log.exists():
