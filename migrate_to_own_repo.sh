@@ -20,11 +20,19 @@ DEST="${1:-$HOME/waiver-agent}"
 REMOTE="${2:-https://github.com/pradm-lgtm/waiver-agent.git}"
 
 FILES=(
-  check_sources.py claim_safety.py expert_extract.py expert_waivers.py
-  install_schedule.py run_weekly.py sleeper_client.py source_discovery.py
-  store.py submitter.py waiver_analyzer.py webapp.py yahoo_auth_check.py
-  selectors.json sources.json .env.example README.md
+  check_sources.py claim_safety.py cloud_auth.py cloud_client.py
+  expert_extract.py expert_waivers.py install_schedule.py run_weekly.py
+  sleeper_client.py source_discovery.py store.py submitter.py
+  waiver_analyzer.py webapp.py yahoo_auth_check.py
+  never_drops.json selectors.json sources.json
+  Dockerfile fly.toml .env.example README.md
 )
+
+# Every module the agent imports, checked after copying. A hand-kept file
+# list silently drops whatever was added since it was written, and the first
+# symptom is the page failing to start.
+ENTRYPOINTS=(webapp submitter run_weekly expert_waivers check_sources
+             source_discovery install_schedule)
 
 echo "==> creating $DEST"
 mkdir -p "$DEST"
@@ -42,6 +50,24 @@ for state in .env fantasy.db; do
 done
 
 cd "$DEST"
+
+echo "==> checking every entrypoint imports"
+missing=0
+for mod in "${ENTRYPOINTS[@]}"; do
+  if ! python3 -c "import $mod" 2>/dev/null; then
+    echo "    BROKEN: $mod - something it imports was not copied"
+    python3 -c "import $mod" 2>&1 | tail -1 | sed 's/^/      /'
+    missing=1
+  fi
+done
+if [ "$missing" = "1" ]; then
+  echo
+  echo "Refusing to commit an installation that cannot start."
+  echo "Add the missing file(s) to FILES in $0 and re-run."
+  exit 1
+fi
+echo "    all good"
+
 if [ ! -d .git ]; then
   git init -q -b main
   git add .
