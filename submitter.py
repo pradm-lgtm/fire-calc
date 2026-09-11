@@ -183,11 +183,11 @@ def do_login(pw):
         print(" then re-run this to confirm the attach works.)")
 
 
-PROBE_JS = """
+PROBE_JS = r"""
 () => {
   const vis = el => {
     const r = el.getBoundingClientRect();
-    return r.width > 0 && r.height > 0 && r.top < innerHeight + 800;
+    return r.width > 0 && r.height > 0;
   };
   const attrs = el => {
     const keep = ['id','name','type','placeholder','aria-label','role',
@@ -225,8 +225,10 @@ PROBE_JS = """
     seen.add(k);
     return true;
   });
+  const ACTION = /^(confirm|submit|place|claim|cancel|done|save|bid|waiver|continue|next|ok|yes)\b/i;
   return {url: location.href, title: document.title, inputs,
-          clickable: uniq.slice(0, 60)};
+          actions: uniq.filter(c => ACTION.test(c.text)),
+          clickable: uniq.slice(0, 150)};
 }
 """
 
