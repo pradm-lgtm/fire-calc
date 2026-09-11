@@ -205,7 +205,9 @@ PROBE_JS = """
   // Sleeper renders no <button> elements: its controls are divs that merely
   // look and behave like buttons. Find them by the pointer cursor and short
   // leaf text instead of by tag, role or class name.
+  const chat = document.querySelector('[class*=chat i],[class*=Chat]');
   const clickable = [...document.querySelectorAll('div,span,a,button,li')]
+    .filter(el => !(chat && chat.contains(el)))
     .filter(el => {
       if (!vis(el)) return false;
       if (getComputedStyle(el).cursor !== 'pointer') return false;
@@ -285,13 +287,24 @@ def do_probe(pw, league_id, player=None):
     page.wait_for_timeout(2500)
     dump(page, "STEP 2 - after searching for %s" % player)
 
+    short = abbrev_name(player)
+    print("")
+    print("(rows show the abbreviated name: %r)" % short)
     try:
-        page.click("text=%s" % player, timeout=8000)
-        page.wait_for_timeout(2500)
-        dump(page, "STEP 3 - after opening the player")
+        claim = sel.get("claim_button", "a.player-action-button.waiver")
+        count = page.locator(claim).count()
+        print("waiver links on the page: %d" % count)
+        if count == 0:
+            print("No waiver link for this player — he may be rostered, or")
+            print("the search returned nothing.")
+        else:
+            page.locator(claim).first.click(timeout=8000)
+            page.wait_for_timeout(2500)
+            dump(page, "STEP 3 - claim dialog")
     except Exception as exc:
         print("")
-        print("Could not open the player row: %s" % str(exc).splitlines()[0][:120])
+        print("Could not open the claim dialog: %s"
+              % str(exc).splitlines()[0][:120])
 
     shot = HERE / "logs" / "probe-flow.png"
     shot.parent.mkdir(parents=True, exist_ok=True)
@@ -327,11 +340,20 @@ def place_claim(page, sel, proposal, dry_run=True):
         page.fill(sel["search_box"], add_name, timeout=15000)
         page.wait_for_timeout(1200)
 
-        row = sel["player_row"].format(player_name=add_name)
-        page.click(row, timeout=15000)
-        page.wait_for_timeout(600)
-        page.click(sel["claim_button"], timeout=15000)
-        page.wait_for_timeout(800)
+        # Searching narrows the table to one player, so the single waiver
+        # link on the page is his. Clicking the row itself does nothing
+        # useful; the link in the row is what opens the claim.
+        claim = sel["claim_button"]
+        count = page.locator(claim).count()
+        if count == 0:
+            return False, ("no waiver link for %s — he may already be "
+                           "rostered, or the search found nothing" % add_name)
+        if count > 1:
+            return False, ("%d waiver links visible after searching %s — "
+                           "refusing to guess which player is meant"
+                           % (count, add_name))
+        page.locator(claim).first.click(timeout=15000)
+        page.wait_for_timeout(1500)
 
         if drop_name:
             try:
@@ -358,6 +380,14 @@ def place_claim(page, sel, proposal, dry_run=True):
         except Exception:
             pass
         return False, f"{type(exc).__name__}: {str(exc).splitlines()[0][:160]}"
+
+
+def abbrev_name(full):
+    """'Terrance Ferguson' -> 'T. Ferguson', the form Sleeper shows in rows."""
+    parts = [x for x in str(full or "").split() if x]
+    if len(parts) < 2:
+        return str(full or "")
+    return "%s. %s" % (parts[0][0], " ".join(parts[1:]))
 
 
 def clean_name(label):

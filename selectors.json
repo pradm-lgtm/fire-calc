@@ -10,18 +10,19 @@
     "league_url": "https://sleeper.com/leagues/{league_id}/team",
     "players_url": "https://sleeper.com/leagues/{league_id}/players",
     "search_box": "input[placeholder*='Find player' i]",
-    "player_row": "text={player_name}",
-    "claim_button": "button:has-text('Claim'), button:has-text('Add')",
+    "player_row": "div.scrolled-name:text-is('{abbrev}')",
+    "claim_button": "a.player-action-button.waiver",
     "drop_select": "select[name*='drop' i]",
     "drop_option": "option:has-text('{drop_name}')",
     "bid_input": "input[type='number'], input[name*='bid' i]",
     "confirm_button": "button:has-text('Confirm'), button:has-text('Submit')",
     "success_marker": "text=/claim (placed|submitted)/i",
     "_comment": [
-      "Sleeper renders no <button> elements - its controls are clickable divs -",
-      "so text-based selectors are used rather than tag or role ones.",
-      "Confirm each against the live page with:",
-      "  python3 submitter.py USER --probe LEAGUE_ID --player 'Some Player'"
+      "Confirmed against the live site: Sleeper uses no <button> elements,",
+      "rows abbreviate first names, and the claim entry point is the waiver",
+      "link in a player's row.",
+      "Re-check after any redesign with:",
+      "  python3 submitter.py USER --probe LEAGUE_ID --player 'Full Name'"
     ]
   }
 }
