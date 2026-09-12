@@ -37,6 +37,7 @@ import urllib.request
 from pathlib import Path
 
 import expert_extract as ex
+import localenv
 import sleeper_client as sc
 import waiver_analyzer as wa
 
@@ -356,6 +357,7 @@ def analyze_league(league, user_id, players, trending, per_source_text, max_move
 
 
 def main():
+    localenv.load()
     args = sys.argv[1:]
     if not args or args[0].startswith("--"):
         print(__doc__.strip().split("WHY IT WORKS")[0].strip())

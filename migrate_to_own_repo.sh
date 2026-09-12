@@ -24,8 +24,8 @@ FILES=(
   expert_extract.py expert_waivers.py install_schedule.py run_weekly.py
   sleeper_client.py source_discovery.py store.py submitter.py
   waiver_analyzer.py webapp.py yahoo_auth_check.py
-  db.py lineup.py rankings.py render.py
-  test_rankings.py test_lineup.py
+  db.py lineup.py localenv.py rankings.py render.py
+  test_rankings.py test_lineup.py test_localenv.py
   never_drops.json selectors.json sources.json ranking_sources.json
   vercel.json requirements.txt
   Dockerfile fly.toml .env.example README.md

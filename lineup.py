@@ -27,6 +27,7 @@ import sys
 
 import expert_extract as ex
 import expert_waivers as ew
+import localenv
 import rankings as rk
 import render
 import sleeper_client as sc
@@ -318,6 +319,7 @@ def report(league, rows):
 
 
 def main():
+    localenv.load()
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("username")

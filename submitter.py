@@ -39,6 +39,7 @@ from pathlib import Path
 
 import claim_safety as cs
 import cloud_client as cloud
+import localenv
 import sleeper_client as sc
 import store as st
 
@@ -625,6 +626,7 @@ def do_audit(conn, user_id, week):
 
 
 def main():
+    localenv.load()
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("username", help="your Sleeper username")

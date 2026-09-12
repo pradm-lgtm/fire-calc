@@ -21,6 +21,7 @@ import sys
 
 import expert_extract as ex
 import expert_waivers as ew
+import localenv
 import sleeper_client as sc
 import source_discovery as sd
 import store as st
@@ -147,6 +148,7 @@ def main_for(username, db_path, moves=3):
 
 
 def main():
+    localenv.load()
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("username", nargs="?", default=None,
                     help="Sleeper username (or set it in sources.json)")

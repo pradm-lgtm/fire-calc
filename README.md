@@ -178,25 +178,35 @@ Then:
 ```bash
 npm i -g vercel && vercel login
 vercel link
-vercel env add DATABASE_URL          # the Postgres connection string
 vercel env add FANTASY_PASSWORD      # what you type in the browser
 vercel env add FANTASY_SECRET        # python3 -c 'import secrets;print(secrets.token_hex(32))'
 vercel env add FANTASY_API_TOKEN     # python3 -c 'import secrets;print(secrets.token_urlsafe(32))'
+vercel env add FANTASY_USER          # your Sleeper username
 vercel --prod
 ```
 
-Then set three repository secrets in GitHub (Settings, Secrets and
-variables, Actions) so the weekly job can reach it: `FANTASY_API_URL` (your
-Vercel URL), `FANTASY_API_TOKEN` (the same token), and `FANTASY_USER` (your
-Sleeper username). The Action runs Tuesday morning and can also be run by
-hand from the Actions tab.
+For the database, add Neon from the project's Storage tab on vercel.com and
+connect it. That sets `DATABASE_URL` itself, which is what `db.py` switches
+on: set, it speaks Postgres; unset, it writes the local SQLite file. Vercel
+Postgres was retired and its databases moved to Neon, so Neon is the
+first-party option now.
 
-Finally, point the local half at the host, in `~/.zshrc`:
+Then set three repository secrets in GitHub (Settings, Secrets and
+variables, Actions) so the scheduled jobs can reach it: `FANTASY_API_URL`
+(your Vercel URL), `FANTASY_API_TOKEN` (the same token), and `FANTASY_USER`
+(your Sleeper username). Waivers run Tuesday morning and start/sit Sunday
+morning; both can also be run by hand from the Actions tab.
+
+Finally, point the local half at the host by adding two lines to `.env`:
 
 ```bash
-export FANTASY_API_URL=https://your-app.vercel.app
-export FANTASY_API_TOKEN=...        # the same token again
+FANTASY_API_URL=https://your-app.vercel.app
+FANTASY_API_TOKEN=the same token again
 ```
+
+`localenv.py` loads that file for every tool here, so one copy of a value
+serves all of them. A variable already set in the environment always wins,
+which is why the same code needs no `.env` on Vercel or in Actions.
 
 `submitter.py` then reads approved claims from the host instead of a local
 file, and reports back what happened.

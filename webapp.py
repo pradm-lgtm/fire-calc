@@ -29,6 +29,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
 import cloud_auth as auth
+import localenv
 import store as st
 
 CSS = """
@@ -651,6 +652,7 @@ def start_scheduler(db_path):
 
 
 def main():
+    localenv.load()
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--host", default="127.0.0.1")
     ap.add_argument("--port", type=int, default=8777)
