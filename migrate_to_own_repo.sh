@@ -26,7 +26,7 @@ FILES=(
   waiver_analyzer.py webapp.py yahoo_auth_check.py
   db.py lineup.py localenv.py rankings.py render.py
   test_rankings.py test_lineup.py test_localenv.py
-  test_webapp.py
+  test_webapp.py test_db.py
   never_drops.json selectors.json sources.json ranking_sources.json
   vercel.json requirements.txt
   Dockerfile fly.toml .env.example README.md

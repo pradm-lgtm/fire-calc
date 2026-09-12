@@ -26,6 +26,44 @@ def backend():
     return POSTGRES if os.environ.get("DATABASE_URL") else SQLITE
 
 
+def statements(script):
+    """The executable statements of a SQL script, comments removed.
+
+    Splitting on ";" alone is not enough. A semicolon inside a comment ends
+    a statement that has not ended: the halves come out as a fragment
+    Postgres cannot parse and a piece that is nothing but comment, which it
+    rejects as an empty query. sqlite3 runs whole scripts itself and never
+    saw this, so one prose semicolon broke every hosted deployment while
+    every local run stayed green.
+    """
+    out, buf, i, n, in_string = [], [], 0, len(script), False
+    while i < n:
+        ch = script[i]
+        if in_string:
+            buf.append(ch)
+            if ch == "'":
+                if script.startswith("''", i):   # an escaped quote, not the end
+                    buf.append("'")
+                    i += 1
+                else:
+                    in_string = False
+        elif ch == "'":
+            in_string = True
+            buf.append(ch)
+        elif script.startswith("--", i):
+            end = script.find("\n", i)
+            i = n if end < 0 else end
+            continue
+        elif ch == ";":
+            out.append("".join(buf))
+            buf = []
+        else:
+            buf.append(ch)
+        i += 1
+    out.append("".join(buf))
+    return [s.strip() for s in out if s.strip()]
+
+
 class IntegrityError(Exception):
     """Backend-neutral duplicate-key error."""
 
@@ -107,7 +145,7 @@ class Connection:
             self._raw.executescript(sql)
             return
         cur = self._raw.cursor()
-        for statement in [s for s in sql.split(";") if s.strip()]:
+        for statement in statements(sql):
             cur.execute(self._adapt(statement))
         self._raw.commit()
 
