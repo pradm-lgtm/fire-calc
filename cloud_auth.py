@@ -18,11 +18,14 @@ or logged. Sessions are signed rather than stored, so a restart does not log
 you out and there is no session table to leak.
 """
 
+import argparse
 import base64
 import hashlib
 import hmac
 import os
+import pathlib
 import secrets
+import sys
 import time
 
 COOKIE = "fantasy_session"
@@ -115,3 +118,43 @@ def token_complaint(header_value):
 
 def generate_token():
     return secrets.token_urlsafe(32)
+
+
+def token_from_env_file(path=None):
+    """The token in .env, creating and saving one if there is none.
+
+    The Mac and the deployment have to agree on this string, and every way
+    of getting it there by hand has now failed once: generated in one place
+    and never written to the other, or piped from a file that did not have
+    it, which sets an empty one and reads as a mismatch.
+    """
+    import localenv
+
+    path = pathlib.Path(path) if path else localenv.DEFAULT
+    try:
+        existing = localenv.parse(path.read_text()).get("FANTASY_API_TOKEN")
+    except OSError:
+        existing = None
+    if existing:
+        return existing
+    token = generate_token()
+    with path.open("a") as handle:
+        handle.write(f"\nFANTASY_API_TOKEN={token}\n")
+    return token
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__.strip())
+    ap.add_argument("--token", action="store_true",
+                    help="print the API token from .env, creating one there "
+                         "if absent, so it can be piped to the host")
+    args = ap.parse_args()
+    if args.token:
+        print(token_from_env_file(), end="")
+        return 0
+    ap.print_help()
+    return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

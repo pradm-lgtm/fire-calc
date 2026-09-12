@@ -183,7 +183,7 @@ npm i -g vercel && vercel login
 vercel link
 vercel env add FANTASY_PASSWORD      # what you type in the browser
 vercel env add FANTASY_SECRET        # python3 -c 'import secrets;print(secrets.token_hex(32))'
-vercel env add FANTASY_API_TOKEN     # python3 -c 'import secrets;print(secrets.token_urlsafe(32))'
+python3 cloud_auth.py --token | vercel env add FANTASY_API_TOKEN production
 vercel env add FANTASY_USER          # your Sleeper username
 vercel --prod
 ```
