@@ -74,39 +74,60 @@ def gather_rankings(urls, players, verbose=True):
                else rk.load_sources())
     per_source = {}
     for entry in sources:
-        text = ew.fetch_url(entry["url"])
         want = entry.get("positions")
-        ranked = (rk.ranks_from_text(text, players, gazetteer, want,
-                                     entry.get("overall", False))
-                  if text else {})
-        total = sum(len(v) for v in ranked.values() if v)
+        overall = entry.get("overall", False)
+
+        def count(ranked):
+            return sum(len(v) for v in ranked.values() if v)
+
+        def from_rows(html, label):
+            """Rankings read out of the page's own data, and what it cost."""
+            rows = rk.ranked_rows_from_html(html)
+            if not rows:
+                return {}, f"no ranked data in the {label} page"
+            ranked = rk.ranks_from_rows(rows, players, gazetteer, want, overall)
+            got = count(ranked)
+            if got >= 10:
+                return ranked, f"read {got} of {len(rows)} rows from the page's own data"
+            # Rows but no matches is a different failure from no rows, and
+            # the fix is different: a name-matching problem, not a loading one.
+            return ranked, (f"{label} page data had {len(rows)} rows but only "
+                            f"{got} matched players in your leagues")
+
+        raw = ew.fetch_raw(entry["url"], quiet=not verbose)
+        ranked, note = from_rows(raw or "", "raw")
+        total = count(ranked)
+
+        if total >= 10 and verbose:
+            print(f"  . {entry['name']}: {note} (no browser needed)")
+
+        if total < 10 and raw:
+            # No embedded data: fall back to reading the order names appear in.
+            ranked = rk.ranks_from_text(ew.strip_html(raw), players, gazetteer,
+                                        want, overall)
+            total = count(ranked)
 
         if total < 10:
             # A rankings table is usually built by JavaScript, so the HTML a
             # server sends contains no players at all. Run the page properly.
             if verbose:
-                print(f"  . {entry['name']}: nothing in the raw HTML, "
-                      "loading it in a browser")
+                print(f"  . {entry['name']}: {note}, loading it in a browser")
             got = render.fetch_rendered_full(entry["url"], quiet=not verbose)
             if got:
                 # Prefer the data the page ships over the order it draws:
                 # reading the visible order infers rank and quietly truncates
                 # whenever a page does not fully render.
-                rows = rk.ranked_rows_from_html(got["html"])
-                if rows:
-                    ranked = rk.ranks_from_rows(rows, players, gazetteer, want,
-                                                entry.get("overall", False))
-                    if verbose and sum(len(v) for v in ranked.values() if v) >= 10:
-                        print(f"    (read {len(rows)} rows from the page's "
-                              "own data)")
-                if sum(len(v) for v in ranked.values() if v) < 10:
+                ranked, note = from_rows(got["html"], "rendered")
+                total = count(ranked)
+                if total < 10:
                     ranked = rk.ranks_from_text(got["text"], players, gazetteer,
-                                                want, entry.get("overall", False))
+                                                want, overall)
+                    total = count(ranked)
                     if verbose:
-                        chars = len(got["text"])
-                        print(f"    (no usable data found; read the rendered "
-                              f"text instead, {chars:,} chars)")
-            total = sum(len(v) for v in ranked.values() if v)
+                        print(f"    ({note}; read the rendered text instead, "
+                              f"{len(got['text']):,} chars)")
+                elif verbose:
+                    print(f"    ({note})")
 
         if total < 10:
             if verbose:

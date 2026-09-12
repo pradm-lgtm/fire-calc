@@ -123,6 +123,14 @@ def describe(consensus, player_id, position):
 # Ranking sites ship the table as JSON in a script tag and draw it with
 # JavaScript. Reading that is exact; reading the rendered order is an
 # inference that silently truncates when a page does not fully load.
+import re
+
+_SCRIPT = re.compile(r"<script\b[^>]*>(.*?)</script>", re.S | re.I)
+# `var ecrData = {`, `window.__DATA__ = [`, `render({`, `"players":[`.
+_ASSIGNMENT = re.compile(r"[=(:,]\s*([\[{])")
+_MIN_BLOB = 200
+_MAX_CANDIDATES = 400
+
 _RANK_KEYS = ("rank_ecr", "rank", "ecr", "pos_rank", "rank_ave")
 _NAME_KEYS = ("player_name", "name", "player", "full_name")
 
@@ -144,33 +152,100 @@ def _rows_from(value, out):
             _rows_from(sub, out)
 
 
+def _script_bodies(html):
+    """The contents of every script tag, largest source of embedded data."""
+    for match in _SCRIPT.finditer(html):
+        body = match.group(1)
+        if len(body) >= _MIN_BLOB:
+            yield body
+
+
+def _json_end(text, start):
+    """Index just past the JSON value starting at text[start], or None.
+
+    Brace counting has to respect strings, because player names and team
+    notes contain braces and escaped quotes; a naive count ends the object
+    in the middle of one.
+    """
+    opener = text[start]
+    closer = {"{": "}", "[": "]"}.get(opener)
+    if not closer:
+        return None
+    depth, in_string, escaped = 0, False, False
+    for i in range(start, len(text)):
+        ch = text[i]
+        if in_string:
+            if escaped:
+                escaped = False
+            elif ch == "\\":
+                escaped = True
+            elif ch == '"':
+                in_string = False
+            continue
+        if ch == '"':
+            in_string = True
+        elif ch == opener:
+            depth += 1
+        elif ch == closer:
+            depth -= 1
+            if depth == 0:
+                return i + 1
+    return None
+
+
+def _json_candidates(body):
+    """Substrings of a script body that might parse as JSON.
+
+    Two shapes cover what ranking sites ship: a bare JSON document (a
+    `type="application/json"` tag) and an assignment, `var ecrData = {...};`.
+    The assignment is the common one, and it is never the last thing in its
+    script tag, so matching up to `</script>` finds nothing.
+    """
+    stripped = body.strip()
+    if stripped[:1] in "{[":
+        yield stripped
+    found, consumed = 0, 0
+    for match in _ASSIGNMENT.finditer(body):
+        start = match.start(1)
+        # Every object nested inside one already yielded would be matched
+        # again by the same pattern; on a 500KB bundle that is thousands of
+        # redundant scans of the same characters.
+        if start < consumed:
+            continue
+        stop = _json_end(body, start)
+        if not stop:
+            continue
+        consumed = stop
+        if stop - start >= _MIN_BLOB:
+            yield body[start:stop]
+            found += 1
+            if found >= _MAX_CANDIDATES:
+                return
+
+
 def ranked_rows_from_html(html):
     """[(player_name, rank)] found in embedded JSON, best effort."""
     if not html:
         return []
-    import json as _json
-    import re as _re
     best = []
-    for match in _re.finditer(r"(\{.{200,}?\})\s*;?\s*</script>", html, _re.S):
-        blob = match.group(1)
-        try:
-            parsed = _json.loads(blob)
-        except ValueError:
-            continue
-        rows = []
-        _rows_from(parsed, rows)
-        if len(rows) > len(best):
-            best = rows
-    for match in _re.finditer(r"=\s*(\[\s*\{.{200,}?\}\s*\])\s*;", html, _re.S):
-        try:
-            parsed = _json.loads(match.group(1))
-        except ValueError:
-            continue
-        rows = []
-        _rows_from(parsed, rows)
-        if len(rows) > len(best):
-            best = rows
-    return best
+    for body in _script_bodies(html):
+        for blob in _json_candidates(body):
+            try:
+                parsed = json.loads(blob)
+            except ValueError:
+                continue
+            rows = []
+            _rows_from(parsed, rows)
+            if len(rows) > len(best):
+                best = rows
+    # One name, one rank: these blobs repeat players across tiers, notes and
+    # "other positions" tables, and the best rank is the ranked list's own.
+    seen = {}
+    for name, rank in best:
+        key = name.strip().lower()
+        if key and (key not in seen or rank < seen[key][1]):
+            seen[key] = (name, rank)
+    return sorted(seen.values(), key=lambda row: row[1])
 
 
 def ranks_from_rows(rows, players, gazetteer, positions=None, overall=False):
@@ -196,3 +271,50 @@ def ranks_from_rows(rows, players, gazetteer, positions=None, overall=False):
     if overall:
         per_position[OVERALL] = overall_order
     return per_position
+
+
+# ---------------------------------------------------------------- diagnostics
+
+def _diagnose(url):
+    """Say what a ranking page actually yields, raw and rendered.
+
+    Ranking pages fail in ways that look identical from the outside - a page
+    that serves no data, one whose table is drawn by JavaScript, and one
+    whose names do not match the player database all end as "nothing found".
+    This separates them.
+    """
+    import expert_waivers as ew
+    import render
+
+    raw = ew.fetch_raw(url) or ""
+    print(f"raw HTML: {len(raw):,} chars")
+    rows = ranked_rows_from_html(raw)
+    print(f"  embedded rows: {len(rows)}")
+    for name, rank in rows[:10]:
+        print(f"    {rank:>6.1f}  {name}")
+    if len(rows) >= 10:
+        print("  -> the page ships its rankings; no browser needed")
+        return 0
+
+    got = render.fetch_rendered_full(url)
+    if not got:
+        print("rendered: failed")
+        return 1
+    print(f"rendered HTML: {len(got['html']):,} chars, "
+          f"text {len(got['text']):,} chars")
+    rows = ranked_rows_from_html(got["html"])
+    print(f"  embedded rows: {len(rows)}")
+    for name, rank in rows[:10]:
+        print(f"    {rank:>6.1f}  {name}")
+    if not rows:
+        print("  no embedded data either; first 800 chars of visible text:")
+        print("  " + got["text"][:800].replace("\n", "\n  "))
+    return 0
+
+
+if __name__ == "__main__":
+    import sys
+    if len(sys.argv) != 2:
+        print("usage: python3 rankings.py <ranking-page-url>")
+        raise SystemExit(1)
+    raise SystemExit(_diagnose(sys.argv[1]))
