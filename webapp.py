@@ -366,6 +366,27 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):
         pass  # keep the terminal readable
 
+    # Every URL is rewritten to the one function that serves the app, so
+    # what arrives here is the rewritten path, not the one the browser asked
+    # for. vercel.json carries the original in __path; locally there is no
+    # rewrite and self.path is already right.
+    REWRITE_PREFIX = "/api/index"
+
+    def route(self):
+        parsed = urlparse(self.path)
+        asked = (parse_qs(parsed.query).get("__path") or [""])[0]
+        path = asked or parsed.path
+        if path.startswith(self.REWRITE_PREFIX):
+            path = path[len(self.REWRITE_PREFIX):]
+        return path or "/"
+
+    def _no_route(self, path):
+        # Naming both paths turns "404" into the one fact that explains it:
+        # whether the rewrite arrived, and what it arrived as.
+        self.send_error(404, "No such page",
+                        f"Asked for {path!r}; the function received "
+                        f"{self.path!r}.")
+
     def _cookie(self, name):
         raw = self.headers.get("Cookie") or ""
         for part in raw.split(";"):
@@ -393,7 +414,7 @@ class Handler(BaseHTTPRequestHandler):
         self._send(code, json.dumps(obj), "application/json")
 
     def do_GET(self):
-        path = urlparse(self.path).path
+        path = self.route()
         if path == "/healthz":
             self._send(200, "ok", "text/plain")
             return
@@ -413,7 +434,7 @@ class Handler(BaseHTTPRequestHandler):
                 conn.close()
             return
         if path not in ("/", "/lineup"):
-            self.send_error(404)
+            self._no_route(path)
             return
         if not self._authed():
             self.send_response(303)
@@ -432,7 +453,7 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def do_POST(self):
-        path = urlparse(self.path).path
+        path = self.route()
         length = int(self.headers.get("Content-Length") or 0)
 
         if path == "/login":
@@ -562,7 +583,7 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         if path != "/decide":
-            self.send_error(404)
+            self._no_route(path)
             return
         if not self._authed():
             self.send_response(303)
