@@ -382,8 +382,7 @@ def check(username, week=None, urls=(), verbose=True):
 
     # Context for the page, never for the verdict: a missing opponent or
     # projection leaves a line blank and changes no colour.
-    games = nfl_week.schedule(season, week)
-    points = nfl_week.projections(season, week)
+    points, games = nfl_week.week_context(season, week)
     if verbose and not (games and points):
         missing = " and ".join(
             n for n, got in (("opponents", games), ("projections", points))

@@ -76,18 +76,18 @@ def schedule(season, week):
     return out
 
 
-def projections(season, week):
-    """{player_id: points} for one week, best effort."""
+def projection_rows(season, week):
+    """The week's projection records, as served. [] if unavailable."""
     data = _get(PROJECTIONS.format(season=season, week=week))
     rows = data if isinstance(data, list) else (data or {}).get("data")
-    if not isinstance(rows, list):
-        return {}
+    return [r for r in rows if isinstance(r, dict)] if isinstance(rows, list) else []
+
+
+def points_from(rows):
+    """{player_id: points}."""
     out = {}
     for row in rows:
-        if not isinstance(row, dict):
-            continue
-        pid = row.get("player_id")
-        stats = row.get("stats")
+        pid, stats = row.get("player_id"), row.get("stats")
         if not pid or not isinstance(stats, dict):
             continue
         for key in POINT_KEYS:
@@ -98,25 +98,79 @@ def projections(season, week):
     return out
 
 
+def matchups_from(rows):
+    """{team: 'vs PHI'} read off the projection records.
+
+    The projections call already succeeds, and each record says who its
+    player faces, so the opponent comes free from a request being made
+    anyway rather than from a second service that may or may not answer.
+    """
+    out = {}
+    for row in rows:
+        team = team_name(_first(row, ("team", "team_abbr", "player_team")))
+        against = team_name(_first(row, ("opponent", "opp", "opponent_team",
+                                         "opp_team")))
+        if not team or not against or team == against:
+            continue
+        home = _first(row, ("home", "is_home"))
+        if home is None:
+            home = _first(row, ("home_team",)) == team
+        out[team] = f"{'vs' if home else 'at'} {against}"
+    return out
+
+
+def _first(row, keys):
+    for key in keys:
+        if row.get(key) not in (None, ""):
+            return row[key]
+    return None
+
+
+def projections(season, week):
+    """{player_id: points} for one week, best effort."""
+    return points_from(projection_rows(season, week))
+
+
+def week_context(season, week):
+    """({player_id: points}, {team: opponent}) from as few calls as possible."""
+    rows = projection_rows(season, week)
+    games = matchups_from(rows)
+    if not games:
+        games = schedule(season, week)
+    return points_from(rows), games
+
+
 def main():
     if len(sys.argv) != 3:
         print("usage: python3 nfl_week.py SEASON WEEK")
         return 1
     season, week = sys.argv[1], sys.argv[2]
 
-    games = schedule(season, week)
-    print(f"schedule: {len(games)} teams")
-    for team, where in sorted(games.items())[:6]:
-        print(f"    {team:<4} {where}")
-    if not games:
-        print("    (nothing came back; the page will just omit opponents)")
+    rows = projection_rows(season, week)
+    print(f"projection records: {len(rows)}")
+    if rows:
+        # What a record actually contains decides where the opponent comes
+        # from, and guessing at it has cost a round trip already.
+        print(f"  fields: {', '.join(sorted(rows[0])[:24])}")
+        print(f"  one record: {json.dumps(rows[0])[:400]}")
 
-    points = projections(season, week)
-    print(f"projections: {len(points)} players")
-    for pid, value in list(points.items())[:6]:
+    points = points_from(rows)
+    print(f"projected points: {len(points)} players")
+    for pid, value in list(points.items())[:4]:
         print(f"    {pid:<8} {value}")
-    if not points:
-        print("    (nothing came back; the page will just omit points)")
+
+    from_rows = matchups_from(rows)
+    print(f"opponents from those records: {len(from_rows)} teams")
+    for team, where in sorted(from_rows.items())[:4]:
+        print(f"    {team:<4} {where}")
+
+    if not from_rows:
+        games = schedule(season, week)
+        print(f"opponents from the scoreboard: {len(games)} teams")
+        for team, where in sorted(games.items())[:4]:
+            print(f"    {team:<4} {where}")
+        if not games:
+            print("    (neither answered; the page will omit opponents)")
     return 0
 
 

@@ -88,5 +88,37 @@ class RowShape(unittest.TestCase):
         self.assertEqual(json.loads(json.dumps(rows)), rows)
 
 
+class WeekContext(unittest.TestCase):
+    """Opponents and points, read off records that may not carry either."""
+
+    import nfl_week as nw
+
+    def test_home_and_away_read_the_right_way_round(self):
+        got = self.nw.matchups_from([
+            {"team": "GB", "opponent": "CHI", "home": False},
+            {"team": "DAL", "opponent": "PHI", "home": True}])
+        self.assertEqual(got, {"GB": "at CHI", "DAL": "vs PHI"})
+
+    def test_records_without_an_opponent_are_skipped(self):
+        self.assertEqual(self.nw.matchups_from([{"team": "WAS"}]), {})
+
+    def test_the_two_spellings_of_washington_are_reconciled(self):
+        # Sleeper says WAS and ESPN says WSH; every player record in this
+        # project comes from Sleeper, so Sleeper's spelling has to win or
+        # the opponent never matches a roster.
+        got = self.nw.matchups_from([{"team": "PHI", "opponent": "WSH",
+                                      "home": True}])
+        self.assertEqual(got, {"PHI": "vs WAS"})
+
+    def test_points_prefer_half_ppr(self):
+        got = self.nw.points_from([{"player_id": "1", "stats": {
+            "pts_ppr": 20.0, "pts_half_ppr": 17.5, "pts_std": 15.0}}])
+        self.assertEqual(got, {"1": 17.5})
+
+    def test_a_record_with_no_points_at_all_is_skipped(self):
+        self.assertEqual(self.nw.points_from([{"player_id": "1", "stats": {}}]),
+                         {})
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
