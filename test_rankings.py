@@ -101,5 +101,34 @@ class RowsToRanks(unittest.TestCase):
         self.assertEqual(got[rk.OVERALL], {"1": 1, "3": 2, "2": 3})
 
 
+class OverallOnly(unittest.TestCase):
+    """A flex page repeats the positional ranks the position pages give.
+
+    Counting them made every player look corroborated by two sources when
+    only one had been read.
+    """
+
+    PLAYERS = RowsToRanks.PLAYERS
+    GAZETTEER = RowsToRanks.GAZETTEER
+    ROWS = [("Ja'Marr Chase", 3.0), ("Bijan Robinson", 8.0),
+            ("CeeDee Lamb", 14.0)]
+
+    def test_contributes_only_the_cross_positional_order(self):
+        got = rk.ranks_from_rows(self.ROWS, self.PLAYERS, self.GAZETTEER,
+                                 positions=["WR", "RB"], overall=True,
+                                 overall_only=True)
+        self.assertEqual(list(got), [rk.OVERALL])
+        self.assertEqual(got[rk.OVERALL], {"1": 1, "3": 2, "2": 3})
+
+    def test_one_source_stays_one_source(self):
+        flex = rk.ranks_from_rows(self.ROWS, self.PLAYERS, self.GAZETTEER,
+                                  positions=["WR", "RB"], overall=True,
+                                  overall_only=True)
+        wr = rk.ranks_from_rows(self.ROWS, self.PLAYERS, self.GAZETTEER,
+                                positions=["WR"])
+        consensus = rk.merge({"WR page": wr, "FLEX page": flex})
+        self.assertEqual(rk.describe(consensus, "1", "WR"), "WR1")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

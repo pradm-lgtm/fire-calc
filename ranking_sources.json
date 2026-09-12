@@ -2,33 +2,48 @@
   {
     "name": "FantasyPros QB",
     "url": "https://www.fantasypros.com/nfl/rankings/half-point-ppr-qb.php",
-    "positions": ["QB"]
+    "positions": [
+      "QB"
+    ]
   },
   {
     "name": "FantasyPros RB",
     "url": "https://www.fantasypros.com/nfl/rankings/half-point-ppr-rb.php",
-    "positions": ["RB"]
+    "positions": [
+      "RB"
+    ]
   },
   {
     "name": "FantasyPros WR",
     "url": "https://www.fantasypros.com/nfl/rankings/half-point-ppr-wr.php",
-    "positions": ["WR"]
+    "positions": [
+      "WR"
+    ]
   },
   {
     "name": "FantasyPros TE",
     "url": "https://www.fantasypros.com/nfl/rankings/half-point-ppr-te.php",
-    "positions": ["TE"]
+    "positions": [
+      "TE"
+    ]
   },
   {
     "name": "FantasyPros DST",
     "url": "https://www.fantasypros.com/nfl/rankings/dst.php",
-    "positions": ["DEF"]
+    "positions": [
+      "DEF"
+    ]
   },
   {
     "name": "FantasyPros FLEX",
     "url": "https://www.fantasypros.com/nfl/rankings/half-point-ppr-flex.php",
-    "positions": ["RB", "WR", "TE"],
+    "positions": [
+      "RB",
+      "WR",
+      "TE"
+    ],
     "overall": true,
-    "note": "The only page that orders positions against each other, so the only one allowed to supply an overall rank for flex slots."
+    "note": "The only page that orders positions against each other, so the only one allowed to supply an overall rank for flex slots. Its positional ranks are the same consensus the dedicated pages already give, so counting them would report every player as corroborated by two sources when there is only one.",
+    "overall_only": true
   }
 ]

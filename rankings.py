@@ -38,7 +38,7 @@ def load_sources():
 
 
 def ranks_from_text(text, players, gazetteer, positions=None,
-                    overall=False):
+                    overall=False, overall_only=False):
     """{position: {player_id: rank}} from one ranking page.
 
     Rank is position in the order of first appearance, counted separately
@@ -64,8 +64,9 @@ def ranks_from_text(text, players, gazetteer, positions=None,
         # indistinguishable from a real one once merged.
         if positions and pos not in positions:
             continue
-        bucket = per_position.setdefault(pos, {})
-        bucket[str(pid)] = len(bucket) + 1
+        if not overall_only:
+            bucket = per_position.setdefault(pos, {})
+            bucket[str(pid)] = len(bucket) + 1
         # Kept alongside, because positional ranks cannot be compared across
         # positions: asking whether WR3 beats RB2 for a flex slot is
         # meaningless, and the page's own order is the only thing that can
@@ -248,7 +249,8 @@ def ranked_rows_from_html(html):
     return sorted(seen.values(), key=lambda row: row[1])
 
 
-def ranks_from_rows(rows, players, gazetteer, positions=None, overall=False):
+def ranks_from_rows(rows, players, gazetteer, positions=None, overall=False,
+                    overall_only=False):
     """Turn (name, rank) pairs into the same shape ranks_from_text returns."""
     resolved = []
     for name, rank in rows:
@@ -265,8 +267,9 @@ def ranks_from_rows(rows, players, gazetteer, positions=None, overall=False):
         pos = (players.get(str(pid)) or {}).get("position")
         if not pos or (positions and pos not in positions):
             continue
-        bucket = per_position.setdefault(pos, {})
-        bucket[str(pid)] = len(bucket) + 1
+        if not overall_only:
+            bucket = per_position.setdefault(pos, {})
+            bucket[str(pid)] = len(bucket) + 1
         overall_order[str(pid)] = len(overall_order) + 1
     if overall:
         per_position[OVERALL] = overall_order

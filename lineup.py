@@ -76,16 +76,26 @@ def gather_rankings(urls, players, verbose=True):
     for entry in sources:
         want = entry.get("positions")
         overall = entry.get("overall", False)
+        overall_only = entry.get("overall_only", False)
 
         def count(ranked):
-            return sum(len(v) for v in ranked.values() if v)
+            """Players ranked, not counting the overall list twice.
+
+            The overall list repeats every player already counted under his
+            position, so summing all the buckets reported 858 players read
+            out of a 458-row page.
+            """
+            positional = sum(len(v) for pos, v in ranked.items()
+                             if v and pos != rk.OVERALL)
+            return positional or len(ranked.get(rk.OVERALL) or {})
 
         def from_rows(html, label):
             """Rankings read out of the page's own data, and what it cost."""
             rows = rk.ranked_rows_from_html(html)
             if not rows:
                 return {}, f"no ranked data in the {label} page"
-            ranked = rk.ranks_from_rows(rows, players, gazetteer, want, overall)
+            ranked = rk.ranks_from_rows(rows, players, gazetteer, want, overall,
+                                        overall_only)
             got = count(ranked)
             if got >= 10:
                 return ranked, f"read {got} of {len(rows)} rows from the page's own data"
@@ -104,7 +114,7 @@ def gather_rankings(urls, players, verbose=True):
         if total < 10 and raw:
             # No embedded data: fall back to reading the order names appear in.
             ranked = rk.ranks_from_text(ew.strip_html(raw), players, gazetteer,
-                                        want, overall)
+                                        want, overall, overall_only)
             total = count(ranked)
 
         if total < 10:
@@ -121,7 +131,7 @@ def gather_rankings(urls, players, verbose=True):
                 total = count(ranked)
                 if total < 10:
                     ranked = rk.ranks_from_text(got["text"], players, gazetteer,
-                                                want, overall)
+                                                want, overall, overall_only)
                     total = count(ranked)
                     if verbose:
                         print(f"    ({note}; read the rendered text instead, "
