@@ -13,7 +13,9 @@ most pages do not need it.
 import re
 
 # Ranked tables often live below the fold and load as you scroll.
-SCROLL_STEPS = 18
+MAX_SCROLLS = 40
+SCROLL_WAIT_MS = 600
+STABLE_ROUNDS = 3
 SETTLE_MS = 2500
 
 
@@ -57,11 +59,44 @@ def fetch_rendered(url, quiet=False):
                            "Chrome/122.0 Safari/537.36")
             page.goto(url, wait_until="domcontentloaded", timeout=45000)
             page.wait_for_timeout(SETTLE_MS)
-            # Rankings past the first screen are often not rendered until
-            # scrolled to, so walk down the page before reading it.
-            for _ in range(SCROLL_STEPS):
-                page.mouse.wheel(0, 4000)
-                page.wait_for_timeout(400)
+
+            # Scroll until the page stops growing rather than a fixed number
+            # of times: these tables load lazily at wildly different rates,
+            # and a fixed count silently truncated one ranking at 19 players
+            # while another reached 144.
+            previous, stable = 0, 0
+            for _ in range(MAX_SCROLLS):
+                # Three ways, because one is not enough: a wheel event is
+                # real input, scrollTo moves a page that ignores wheels, and
+                # a dispatched event reaches listeners on a page too short to
+                # scroll at all - which is the state a lazy table starts in.
+                try:
+                    page.mouse.wheel(0, 3000)
+                except Exception:
+                    pass
+                page.evaluate(
+                    "() => { window.scrollTo(0, document.body.scrollHeight);"
+                    " window.dispatchEvent(new Event('scroll')); }")
+                page.wait_for_timeout(SCROLL_WAIT_MS)
+                size = page.evaluate("() => document.body.innerText.length")
+                if size <= previous:
+                    stable += 1
+                    if stable >= STABLE_ROUNDS:
+                        break
+                else:
+                    stable = 0
+                previous = size
+
+            # Some tables hide the rest behind a control rather than a scroll.
+            for label in ("Show More", "Load More", "View All", "See More"):
+                try:
+                    button = page.get_by_text(label, exact=False).first
+                    if button.is_visible(timeout=500):
+                        button.click(timeout=2000)
+                        page.wait_for_timeout(SCROLL_WAIT_MS)
+                except Exception:
+                    pass
+
             text = page.evaluate("() => document.body.innerText")
             browser.close()
     except Exception as exc:

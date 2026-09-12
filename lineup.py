@@ -173,6 +173,11 @@ def assess(league, roster, players, consensus):
         yellow_at, red_at = thresholds(mine)
         if must_sit(player):
             colour = "RED"
+        elif mine is None and best is None:
+            # Neither he nor any alternative appears in the rankings, so
+            # there is no opinion to compare against. Calling that green
+            # would claim agreement that was never established.
+            colour = "UNKNOWN"
         elif best is None or best_gap < yellow_at:
             colour = "GREEN"
         elif best_gap >= red_at:
@@ -187,7 +192,8 @@ def assess(league, roster, players, consensus):
     return verdicts
 
 
-DOT = {"GREEN": "GREEN ", "YELLOW": "YELLOW", "RED": "RED   "}
+DOT = {"GREEN": "GREEN ", "YELLOW": "YELLOW", "RED": "RED   ",
+       "UNKNOWN": "  ?   "}
 
 
 def report(league, user_id, players, consensus):
@@ -203,13 +209,16 @@ def report(league, user_id, players, consensus):
         return 0
 
     verdicts = assess(league, mine, players, consensus)
-    flagged = 0
+    flagged = unknown = 0
     print()
     for v in verdicts:
         rank_txt = (rk.describe(consensus, v["pid"], v["scale"])
                     if v["scale"] else "unranked")
         print(f"  {DOT[v['colour']]} {v['slot']:<11} "
               f"{sc.player_label(players, v['pid']):<36} {rank_txt}")
+        if v["colour"] == "UNKNOWN":
+            unknown += 1
+            continue
         if v["colour"] == "GREEN":
             continue
         flagged += 1
@@ -227,7 +236,14 @@ def report(league, user_id, players, consensus):
             print(f"              consensus prefers {better} "
                   f"— {scale_txt} {where}{gap}")
     if not flagged:
-        print("\n  Your lineup matches consensus.")
+        if unknown:
+            print(f"\n  Nothing to change among the players the rankings "
+                  f"cover, but {unknown} could not be judged.")
+        else:
+            print("\n  Your lineup matches consensus.")
+    if unknown:
+        print(f"  ({unknown} starter(s) missing from the rankings — the "
+              "pages may not go deep enough.)")
     return flagged
 
 
