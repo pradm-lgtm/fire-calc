@@ -460,7 +460,11 @@ class Handler(BaseHTTPRequestHandler):
                 state = "ok"
             except Exception as exc:
                 traceback.print_exc()
-                state = f"database unreachable: {type(exc).__name__}"
+                # The type alone named three different faults across three
+                # deploys. The message is what distinguishes them, and it is
+                # safe to show once the credentials are taken out of it.
+                state = (f"database unreachable: {type(exc).__name__}: "
+                         f"{scrub(exc)}")
             self._send(200, f"{state} (db={db.backend()})", "text/plain")
             return
         if path == "/login":

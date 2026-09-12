@@ -18,12 +18,47 @@ on a file and need nothing installed.
 
 import os
 import re
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 SQLITE, POSTGRES = "sqlite", "postgres"
 
 
 def backend():
     return POSTGRES if os.environ.get("DATABASE_URL") else SQLITE
+
+
+# The client library refuses a connection option it does not recognise, and
+# a hosted database hands out a URL written for whatever version it runs.
+# Neon's carries channel_binding, which older builds of the bundled client do
+# not have, and the refusal reads as an ordinary query error.
+_UNKNOWN_OPTION = re.compile(r'invalid connection option "([^"]+)"')
+
+
+def _without(url, option):
+    """The same URL with one query parameter removed."""
+    parts = urlsplit(url)
+    keep = [(k, v) for k, v in parse_qsl(parts.query, keep_blank_values=True)
+            if k != option]
+    return urlunsplit(parts._replace(query=urlencode(keep)))
+
+
+def _connect(psycopg2, url, tried=()):
+    """Connect, dropping options this client cannot understand.
+
+    Dropping one is safe: every option here is a refinement of a connection
+    that sslmode=require already protects, and the alternative is no
+    connection at all.
+    """
+    try:
+        return psycopg2.connect(url)
+    except psycopg2.Error as exc:
+        found = _UNKNOWN_OPTION.search(str(exc))
+        if not found or found.group(1) in tried:
+            raise
+        option = found.group(1)
+        print(f"[db] this client does not support {option}; "
+              "connecting without it")
+        return _connect(psycopg2, _without(url, option), tuple(tried) + (option,))
 
 
 def statements(script):
@@ -96,7 +131,7 @@ class Connection:
             # Hosted Postgres wants TLS, and Supabase refuses without it.
             if "sslmode=" not in url:
                 url += ("&" if "?" in url else "?") + "sslmode=require"
-            self._raw = psycopg2.connect(url)
+            self._raw = _connect(psycopg2, url)
             self._factory = psycopg2.extras.RealDictCursor
         else:
             import sqlite3

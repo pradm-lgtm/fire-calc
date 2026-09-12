@@ -53,5 +53,63 @@ class TheRealSchema(unittest.TestCase):
             self.assertNotIn("--", statement)
 
 
+class DroppingOptions(unittest.TestCase):
+    """A URL written for one client version reaching an older one."""
+
+    URL = "postgresql://u:p@h/db?sslmode=require&channel_binding=require"
+
+    def test_the_option_goes_and_the_rest_stays(self):
+        self.assertEqual(db._without(self.URL, "channel_binding"),
+                         "postgresql://u:p@h/db?sslmode=require")
+
+    def test_dropping_the_first_option_leaves_a_valid_url(self):
+        url = "postgresql://u:p@h/db?channel_binding=require&sslmode=require"
+        self.assertEqual(db._without(url, "channel_binding"),
+                         "postgresql://u:p@h/db?sslmode=require")
+
+    def test_dropping_the_only_option_leaves_no_question_mark(self):
+        self.assertEqual(db._without("postgresql://u:p@h/db?channel_binding=x",
+                                     "channel_binding"),
+                         "postgresql://u:p@h/db")
+
+    def test_an_escaped_password_is_not_re_encoded(self):
+        url = "postgresql://u:pa%40ss@h/db?sslmode=require&channel_binding=x"
+        self.assertIn("pa%40ss", db._without(url, "channel_binding"))
+
+    def test_an_unknown_option_is_retried_without_it(self):
+        class FakeError(Exception):
+            pass
+
+        class FakeDriver:
+            Error = FakeError
+
+            def __init__(self):
+                self.seen = []
+
+            def connect(self, url):
+                self.seen.append(url)
+                if "channel_binding" in url:
+                    raise FakeError('invalid connection option '
+                                    '"channel_binding"')
+                return "connected"
+
+        driver = FakeDriver()
+        self.assertEqual(db._connect(driver, self.URL), "connected")
+        self.assertEqual(driver.seen[-1], "postgresql://u:p@h/db?sslmode=require")
+
+    def test_any_other_failure_is_raised_rather_than_retried(self):
+        class FakeError(Exception):
+            pass
+
+        class FakeDriver:
+            Error = FakeError
+
+            def connect(self, url):
+                raise FakeError("password authentication failed")
+
+        with self.assertRaises(FakeError):
+            db._connect(FakeDriver(), self.URL)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
