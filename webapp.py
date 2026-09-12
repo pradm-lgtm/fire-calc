@@ -33,6 +33,7 @@ from urllib.parse import parse_qs, urlparse
 import cloud_auth as auth
 import db
 import localenv
+from lineup import SLOT_ELIGIBILITY
 import store as st
 
 CSS = """
@@ -109,7 +110,36 @@ nav a.on { background:var(--accent); border-color:var(--accent); color:#fff; }
             color:var(--muted); width:44px; flex:none; }
 .who { font-weight:650; flex:1; min-width:0; }
 .rankt { color:var(--muted); font-size:12px; text-align:right; flex:none; }
-.advice { font-size:13px; color:var(--muted); margin:-3px 0 9px 56px; }
+.advice { font-size:13px; color:var(--muted); margin:6px 0 0; }
+.player { display:flex; align-items:center; gap:10px; padding:9px 2px; }
+.player + .player { border-top:1px solid var(--line); }
+.face { width:34px; height:34px; border-radius:50%; flex:none;
+        background:var(--line) center/cover no-repeat; }
+.player .who { display:flex; flex-direction:column; min-width:0; flex:1; }
+.pname { font-weight:650; line-height:1.25; }
+.under { color:var(--muted); font-size:12px; }
+.player.starting .face { width:46px; height:46px; }
+.player.starting .pname { font-size:18px; }
+.decide { background:var(--card); border:1px solid var(--line);
+          border-left-width:4px; border-radius:12px; padding:12px 14px;
+          margin-bottom:12px; }
+.decide.RED { border-left-color:var(--no); }
+.decide.YELLOW { border-left-color:#b58900; }
+.decidehead { display:flex; justify-content:space-between; align-items:baseline;
+              gap:8px; font-size:12px; color:var(--muted);
+              text-transform:uppercase; letter-spacing:.05em; font-weight:700; }
+.verdict.RED { color:var(--no); } .verdict.YELLOW { color:#b58900; }
+.alts { margin-top:10px; padding-top:4px; border-top:1px solid var(--line); }
+.altlabel { display:block; font-size:11px; font-weight:800; letter-spacing:.06em;
+            text-transform:uppercase; color:var(--muted); margin:10px 0 2px; }
+.fold { background:var(--card); border:1px solid var(--line);
+        border-radius:12px; padding:4px 14px 10px; margin-bottom:10px; }
+.fold > summary { display:flex; justify-content:space-between; gap:8px;
+                  align-items:baseline; padding:10px 0; cursor:pointer;
+                  font-weight:650; list-style:none; }
+.fold > summary::-webkit-details-marker { display:none; }
+.fold > summary::after { content:'▸'; color:var(--muted); font-weight:400; }
+.fold[open] > summary::after { content:'▾'; }
 label { font-size:13px; color:var(--muted); }
 @media (max-width:520px) {
   body { padding:10px; }
@@ -403,6 +433,87 @@ def refresh_lineup(conn):
         return scrub(f"{type(exc).__name__}: {exc}")
 
 
+ATTENTION = ("RED", "YELLOW")
+
+
+def headshot(row):
+    """A player's face, or his team's badge for a defence.
+
+    The image is a background on a coloured circle, so a player the CDN has
+    no picture of shows the circle rather than a broken image, with no
+    script needed to notice.
+    """
+    pid, pos = row["player_id"], (row["pos"] or "").upper()
+    if pos == "DEF" and pid:
+        url = f"https://sleepercdn.com/images/team_logos/nfl/{str(pid).lower()}.png"
+    elif pid:
+        url = f"https://sleepercdn.com/content/nfl/players/{pid}.jpg"
+    else:
+        return "<span class='face'></span>"
+    return f"<span class='face' style=\"background-image:url('{e(url)}')\"></span>"
+
+
+def where_and_points(row):
+    bits = [row["matchup"]]
+    if row["projection"] is not None:
+        bits.append(f"{row['projection']:g} proj")
+    return " &middot; ".join(e(b) for b in bits if b)
+
+
+def player_line(row, emphasis=""):
+    """One player: face, name, where he ranks, who he plays, what he may score."""
+    under = " &middot; ".join(x for x in (e(row["rank_text"] or ""),
+                                          where_and_points(row)) if x)
+    return (f"<div class='player {emphasis}'>{headshot(row)}"
+            f"<span class='who'><span class='pname'>{e(row['player_name'])}"
+            f"</span><span class='under'>{under}</span></span>"
+            f"<span class='slotname'>{e(row['slot'] or '')}</span></div>")
+
+
+def alternatives_for(row, bench):
+    """Bench players who could take this slot, best projection first."""
+    allowed = SLOT_ELIGIBILITY.get(row["slot"]) or set()
+    return [b for b in bench if (b["pos"] or "") in allowed]
+
+
+def decision_card(row, bench):
+    named = row["better_name"]
+    options = alternatives_for(row, bench)
+    # The player consensus actually prefers goes first; he is the reason
+    # this card exists, and burying him under a projection ordering would
+    # make the card disagree with its own headline.
+    options.sort(key=lambda b: (named or "") not in (b["player_name"] or ""))
+
+    out = [f"<div class='decide {e(row['verdict'])}'>",
+           f"<div class='decidehead'><span>{e(row['league_name'] or '')}</span>"
+           f"<span class='verdict {e(row['verdict'])}'>"
+           f"{e(VERDICT_NOTE.get(row['verdict'], ''))}</span></div>",
+           player_line(row, "starting")]
+    if row["detail"]:
+        out.append(f"<p class='advice'>{e(row['detail'])}</p>")
+    if options:
+        out.append("<div class='alts'><span class='altlabel'>On your bench"
+                   "</span>")
+        out.extend(player_line(b) for b in options[:4])
+        out.append("</div>")
+    out.append("</div>")
+    return "".join(out)
+
+
+def league_fold(name, started, bench, flagged):
+    """A league's full lineup, folded shut when there is nothing to decide."""
+    summary = (f"{len(started)} starters, {len(bench)} on the bench"
+               if not flagged else
+               f"{flagged} to decide &middot; {len(started)} starters")
+    return ("<details class='fold'" + (" open" if flagged else "") + ">"
+            f"<summary><span>{e(name)}</span>"
+            f"<span class='meta'>{summary}</span></summary>"
+            + "".join(player_line(r) for r in started)
+            + ("<div class='altlabel'>Bench</div>" if bench else "")
+            + "".join(player_line(r) for r in bench)
+            + "</details>")
+
+
 def render_lineup(conn, force=False):
     check = st.latest_lineup_check(conn)
     age = age_of(check)
@@ -418,16 +529,25 @@ def render_lineup(conn, force=False):
                     "</p>", "Start / sit")
 
     rows = st.lineup_flags(conn, check["id"])
-    flagged = [r for r in rows if r["verdict"] in ("RED", "YELLOW")]
-    unknown = sum(1 for r in rows if r["verdict"] == "UNKNOWN")
+    started = [r for r in rows if (r["role"] or "starter") == "starter"]
+    benched = [r for r in rows if (r["role"] or "starter") == "bench"]
+    # Red before yellow, then by league: the order you would work through
+    # them, not the order the database happened to return.
+    decisions = sorted((r for r in started if r["verdict"] in ATTENTION),
+                       key=lambda r: (ATTENTION.index(r["verdict"]),
+                                      r["league_name"] or "", r["position"]))
+    unknown = sum(1 for r in started if r["verdict"] == "UNKNOWN")
 
-    headline = (f"<b>{len(flagged)}</b> worth a second look"
-                if flagged else "<b>Matches consensus</b>")
+    bench_by_league = {}
+    for r in benched:
+        bench_by_league.setdefault(r["league_id"], []).append(r)
+
+    headline = (f"<b>{len(decisions)}</b> to decide" if decisions
+                else "<b>Nothing to change</b>")
     if unknown:
         headline += f" &middot; <b>{unknown}</b> unranked"
 
-    out = [nav("/lineup"),
-           "<h1>Start / sit</h1>",
+    out = [nav("/lineup"), "<h1>Start / sit</h1>",
            f"<div class='sub'>Week {e(check['week'])} &middot; checked "
            f"{e(said_ago(age))} &middot; against analyst rankings, not "
            f"projections</div>",
@@ -440,24 +560,24 @@ def render_lineup(conn, force=False):
                       f"refresh:</span> {e(problem)} Showing the last check."
                       "</div>")
 
-    by_league = {}
-    for r in rows:
-        by_league.setdefault((r["league_id"], r["league_name"]), []).append(r)
+    # The whole point of this page is the handful of slots worth thinking
+    # about, and they were previously buried under whichever league happened
+    # to sort first - which was the one with nothing wrong with it.
+    if decisions:
+        out.append("<h2><span>Worth a look</span></h2>")
+        for row in decisions:
+            out.append(decision_card(row, bench_by_league.get(row["league_id"], [])))
 
-    for (_lid, lname), items in by_league.items():
-        hot = sum(1 for i in items if i["verdict"] in ("RED", "YELLOW"))
-        out.append(f"<h2><span>{e(lname)}</span><span class='meta'>"
-                   f"{hot or 'none'} flagged</span></h2>")
-        for r in items:
-            note = VERDICT_NOTE.get(r["verdict"], "")
-            out.append(
-                f"<div class='slot {e(r['verdict'])}'>"
-                f"<span class='slotname'>{e(r['slot'] or '')}</span>"
-                f"<span class='who'>{e(r['player_name'] or '')}</span>"
-                f"<span class='rankt'>{e(r['rank_text'] or '')}"
-                f"{f'<br>{e(note)}' if note else ''}</span></div>")
-            if r["detail"]:
-                out.append(f"<div class='advice'>{e(r['detail'])}</div>")
+    out.append("<h2><span>Everything else</span></h2>")
+    seen = []
+    for r in started:
+        if (r["league_id"], r["league_name"]) not in seen:
+            seen.append((r["league_id"], r["league_name"]))
+    for lid, lname in seen:
+        mine = [r for r in started if r["league_id"] == lid]
+        out.append(league_fold(lname or "", mine, bench_by_league.get(lid, []),
+                               sum(1 for r in mine
+                                   if r["verdict"] in ATTENTION)))
     return page("".join(out), "Start / sit")
 
 

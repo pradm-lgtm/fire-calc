@@ -97,5 +97,77 @@ class Freshness(unittest.TestCase):
         self.assertEqual(webapp.said_ago(self.timedelta(days=2)), "2 days ago")
 
 
+class LineupPage(unittest.TestCase):
+    """What the page puts first, and what it folds away."""
+
+    def rows(self):
+        def row(**kw):
+            base = dict(league_id="1", league_name="OTG", slot="QB",
+                        position=0, verdict="GREEN", player_id="1",
+                        player_name="A", rank_text="QB1", better_name=None,
+                        detail="", role="starter", pos="QB", matchup="vs PHI",
+                        projection=10.0)
+            base.update(kw)
+            return base
+        return [
+            row(league_id="2", league_name="LEHG", player_id="9",
+                player_name="Quiet Starter"),
+            row(verdict="YELLOW", player_id="1", player_name="Close Call",
+                better_name="Better QB", detail="consensus prefers Better QB"),
+            row(verdict="RED", slot="FLEX", position=1, player_id="3",
+                player_name="Wrong Call", pos="RB", better_name="Better RB"),
+            row(slot="BN", verdict="BENCH", role="bench", player_id="4",
+                player_name="Better QB", projection=20.0),
+            row(slot="BN", verdict="BENCH", role="bench", player_id="5",
+                player_name="Better RB", pos="RB", projection=15.0),
+        ]
+
+    def render(self):
+        import store as st
+        conn = st.connect(":memory:")
+        check_id = st.start_lineup_check(conn, "2026", 1, ["page"])
+        for r in self.rows():
+            st.add_lineup_flag(conn, check_id, **r)
+        return webapp.render_lineup(conn).decode()
+
+    def test_red_comes_before_yellow(self):
+        html = self.render()
+        self.assertLess(html.index("Wrong Call"), html.index("Close Call"))
+
+    def test_a_flagged_league_outranks_a_quiet_one(self):
+        # The complaint that started this: the league with nothing wrong
+        # sorted first, so the two decisions were below a screen of green.
+        html = self.render()
+        self.assertLess(html.index("Wrong Call"), html.index("Quiet Starter"))
+
+    def test_a_quiet_league_is_folded_shut(self):
+        html = self.render()
+        fold = html[html.index("Everything else"):]
+        self.assertIn("<details class='fold'>", fold)
+
+    def test_a_decision_shows_the_bench_players_that_could_take_the_slot(self):
+        html = self.render()
+        card = html[html.index("Wrong Call"):html.index("Close Call")]
+        self.assertIn("Better RB", card)      # a running back can play flex
+        self.assertNotIn("Better QB", card)   # a quarterback cannot
+
+    def test_the_opponent_and_projection_are_shown(self):
+        html = self.render()
+        self.assertIn("vs PHI", html)
+        self.assertIn("10 proj", html)
+
+    def test_a_missing_projection_leaves_the_line_alone(self):
+        self.assertEqual(webapp.where_and_points(
+            {"matchup": "at LV", "projection": None}), "at LV")
+        self.assertEqual(webapp.where_and_points(
+            {"matchup": None, "projection": None}), "")
+
+    def test_a_defence_gets_its_team_badge_not_a_headshot(self):
+        self.assertIn("team_logos", webapp.headshot(
+            {"player_id": "PIT", "pos": "DEF"}))
+        self.assertIn("players/1234", webapp.headshot(
+            {"player_id": "1234", "pos": "RB"}))
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

@@ -88,7 +88,11 @@ CREATE TABLE IF NOT EXISTS lineup_flags (
     player_name  TEXT,
     rank_text    TEXT,
     better_name  TEXT,
-    detail       TEXT
+    detail       TEXT,
+    role         TEXT DEFAULT 'starter',
+    pos          TEXT,
+    matchup      TEXT,
+    projection   REAL
 );
 
 CREATE INDEX IF NOT EXISTS idx_lineup_flags_check ON lineup_flags(check_id);
@@ -101,6 +105,32 @@ CREATE TABLE IF NOT EXISTS events (
     detail      TEXT
 );
 """
+
+
+# Columns added after the table already existed somewhere. CREATE TABLE IF
+# NOT EXISTS will not add a column to a table that is already there, and the
+# two backends spell a conditional ALTER differently, so each one is tried
+# and a complaint that it is already present is the expected answer.
+MIGRATIONS = [
+    "ALTER TABLE lineup_flags ADD COLUMN role TEXT",
+    "ALTER TABLE lineup_flags ADD COLUMN pos TEXT",
+    "ALTER TABLE lineup_flags ADD COLUMN matchup TEXT",
+    "ALTER TABLE lineup_flags ADD COLUMN projection REAL",
+]
+
+
+def apply_migrations(conn):
+    for statement in MIGRATIONS:
+        try:
+            conn.execute(statement)
+            conn.commit()
+        except Exception:
+            # Already applied. Postgres aborts the transaction on a failed
+            # statement, so it has to be cleared before the next one.
+            try:
+                conn.rollback()
+            except Exception:
+                pass
 
 
 def now():
@@ -120,8 +150,12 @@ def connect(path=None):
     """
     conn = db.Connection(path or DB_PATH)
     key = db.backend(), str(path or DB_PATH)
-    if key not in _schema_ready:
+    # Every connection to ":memory:" is a different, empty database, so
+    # remembering that one of them has the schema says nothing about the
+    # next.
+    if str(path) == ":memory:" or key not in _schema_ready:
         conn.executescript(SCHEMA)
+        apply_migrations(conn)
         _schema_ready.add(key)
     return conn
 
@@ -212,6 +246,8 @@ def add_lineup_flag(conn, check_id, **f):
         player_id=(str(f["player_id"]) if f.get("player_id") else None),
         player_name=f.get("player_name"), rank_text=f.get("rank_text"),
         better_name=f.get("better_name"), detail=f.get("detail", ""),
+        role=f.get("role", "starter"), pos=f.get("pos"),
+        matchup=f.get("matchup"), projection=f.get("projection"),
     )
     names = ", ".join(cols)
     marks = ", ".join("?" for _ in cols)
