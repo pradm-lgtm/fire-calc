@@ -22,13 +22,16 @@ import argparse
 import html
 import json
 import os
+import re
 import threading
+import traceback
 import time
 from datetime import datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
 import cloud_auth as auth
+import db
 import localenv
 import store as st
 
@@ -117,6 +120,14 @@ label { font-size:13px; color:var(--muted); }
   .approve, .decline { flex:1 1 45%; }
 }
 """
+
+
+# A connection string carries its password; an error quoting one must not.
+_CREDENTIALS = re.compile(r"://[^/@\s]+@")
+
+
+def scrub(text):
+    return _CREDENTIALS.sub("://...@", str(text))
 
 
 def e(v):
@@ -410,13 +421,47 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _guard(self, handle):
+        """Answer with the failure rather than dying inside the platform.
+
+        An unhandled exception here reaches the browser as the host's own
+        "this function crashed" page, which names nothing: the same page
+        appears for a missing driver, an unreachable database and a bug.
+        """
+        try:
+            handle()
+        except Exception as exc:
+            traceback.print_exc()
+            detail = scrub(f"{type(exc).__name__}: {exc}")
+            try:
+                self._send(500, page(
+                    "<h1>Something broke</h1>"
+                    f"<p class='why'>{e(detail)}</p>"
+                    "<p class='why'>The full traceback is in the host's "
+                    "logs.</p>", "Error"))
+            except Exception:
+                pass
+
     def _json(self, code, obj):
         self._send(code, json.dumps(obj), "application/json")
 
     def do_GET(self):
+        self._guard(self._get)
+
+    def _get(self):
         path = self.route()
         if path == "/healthz":
-            self._send(200, "ok", "text/plain")
+            # Reaching the database is the half that breaks, and it breaks
+            # after login, where the failure looks like a broken site.
+            try:
+                conn = self._conn()
+                conn.execute("SELECT 1")
+                conn.close()
+                state = "ok"
+            except Exception as exc:
+                traceback.print_exc()
+                state = f"database unreachable: {type(exc).__name__}"
+            self._send(200, f"{state} (db={db.backend()})", "text/plain")
             return
         if path == "/login":
             self._send(200, page(LOGIN_HTML % "Sign in to review this week's"
@@ -453,6 +498,9 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def do_POST(self):
+        self._guard(self._post)
+
+    def _post(self):
         path = self.route()
         length = int(self.headers.get("Content-Length") or 0)
 

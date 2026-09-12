@@ -45,5 +45,19 @@ class Routing(unittest.TestCase):
         self.assertEqual(route("/api/index?__path=/nope"), "/nope")
 
 
+class Scrubbing(unittest.TestCase):
+    """An error message must not carry the password out of the process."""
+
+    def test_a_connection_string_loses_its_credentials(self):
+        got = webapp.scrub("could not connect to "
+                           "postgresql://owner:npg_secret@ep-x.neon.tech/db")
+        self.assertNotIn("npg_secret", got)
+        self.assertIn("ep-x.neon.tech/db", got)
+
+    def test_ordinary_text_is_left_alone(self):
+        self.assertEqual(webapp.scrub("ModuleNotFoundError: no module psycopg2"),
+                         "ModuleNotFoundError: no module psycopg2")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
