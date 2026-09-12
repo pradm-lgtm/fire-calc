@@ -22,7 +22,9 @@ Stdlib only. Requires Python 3.8+.
 """
 
 import json
+import os
 import sys
+import tempfile
 import time
 import urllib.error
 import urllib.parse
@@ -30,9 +32,27 @@ import urllib.request
 from pathlib import Path
 
 API_BASE = "https://api.sleeper.app/v1"
-CACHE_DIR = Path(__file__).resolve().parent / ".cache"
-PLAYERS_CACHE = CACHE_DIR / "players_nfl.json"
 PLAYERS_CACHE_MAX_AGE = 24 * 60 * 60  # seconds
+
+
+def cache_dir():
+    """Somewhere writable to keep the player database.
+
+    Next to the code on a laptop. On a serverless host the deployment is
+    read-only, so it goes to the temp directory instead, which survives
+    between requests on a warm instance and is most of them.
+    """
+    override = os.environ.get("FANTASY_CACHE")
+    if override:
+        return Path(override)
+    here = Path(__file__).resolve().parent
+    if os.access(here, os.W_OK):
+        return here / ".cache"
+    return Path(tempfile.gettempdir()) / "fantasy-cache"
+
+
+def players_cache():
+    return cache_dir() / "players_nfl.json"
 
 # Sleeper returns roster slots in this order; BN/TAXI/IR are bench-ish.
 STARTING_SLOTS = {"QB", "RB", "WR", "TE", "FLEX", "SUPER_FLEX", "WRRB_FLEX",
@@ -97,16 +117,21 @@ def league_matchups(league_id, week):
 
 def all_players(refresh=False):
     """The full NFL player map, cached on disk (it is ~5 MB and rarely changes)."""
-    if not refresh and PLAYERS_CACHE.exists():
-        age = time.time() - PLAYERS_CACHE.stat().st_mtime
+    cache = players_cache()
+    if not refresh and cache.exists():
+        age = time.time() - cache.stat().st_mtime
         if age < PLAYERS_CACHE_MAX_AGE:
             try:
-                return json.loads(PLAYERS_CACHE.read_text())
+                return json.loads(cache.read_text())
             except json.JSONDecodeError:
                 pass  # corrupt cache: fall through and refetch
     players = get("/players/nfl") or {}
-    CACHE_DIR.mkdir(exist_ok=True)
-    PLAYERS_CACHE.write_text(json.dumps(players))
+    try:
+        cache.parent.mkdir(parents=True, exist_ok=True)
+        cache.write_text(json.dumps(players))
+    except OSError:
+        # Nowhere to write is slower, not broken: the next call refetches.
+        pass
     return players
 
 

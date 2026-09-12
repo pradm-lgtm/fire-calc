@@ -316,13 +316,73 @@ VERDICT_NOTE = {
 }
 
 
-def render_lineup(conn):
+# How old a set of verdicts may be before the page works them out again.
+# Lineups change between opening the page and kickoff, and advice about a
+# lineup you have since changed is worse than none - but this runs inside a
+# request, so re-running it on every reload would make the page unusable.
+LINEUP_MAX_AGE = timedelta(hours=3)
+
+
+def age_of(check):
+    if not check or not check["created_at"]:
+        return None
+    try:
+        when = datetime.fromisoformat(check["created_at"])
+    except ValueError:
+        return None
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=timezone.utc)
+    return datetime.now(timezone.utc) - when
+
+
+def said_ago(age):
+    if age is None:
+        return "just now"
+    minutes = int(age.total_seconds() // 60)
+    if minutes < 2:
+        return "just now"
+    if minutes < 60:
+        return f"{minutes} minutes ago"
+    hours = minutes // 60
+    if hours < 24:
+        return f"{hours} hour{'s' if hours > 1 else ''} ago"
+    days = hours // 24
+    return f"{days} day{'s' if days > 1 else ''} ago"
+
+
+def refresh_lineup(conn):
+    """Work the verdicts out now. Returns an error to show, or None."""
+    import lineup as ln
+
+    username = os.environ.get("FANTASY_USER", "")
+    if not username:
+        return "FANTASY_USER is not set on the host, so I cannot look up " \
+               "your leagues."
+    try:
+        got = ln.check(username, verbose=False)
+        ln.store_check(conn, got)
+        return None
+    except ln.NoRankings:
+        return "No ranking page could be read just now, so there was nothing " \
+               "to compare against."
+    except Exception as exc:
+        traceback.print_exc()
+        return scrub(f"{type(exc).__name__}: {exc}")
+
+
+def render_lineup(conn, force=False):
     check = st.latest_lineup_check(conn)
+    age = age_of(check)
+    problem = None
+    if force or not check or age is None or age > LINEUP_MAX_AGE:
+        problem = refresh_lineup(conn)
+        check = st.latest_lineup_check(conn) or check
+        age = age_of(check)
+
     if not check:
-        return page(nav("/lineup") +
-                    "<h1>Start / sit</h1><p class='empty'>No lineup check "
-                    "yet. It runs Sunday morning, before kickoff.</p>",
-                    "Start / sit")
+        return page(nav("/lineup") + "<h1>Start / sit</h1>"
+                    f"<p class='empty'>{e(problem or 'Nothing to show yet.')}"
+                    "</p>", "Start / sit")
 
     rows = st.lineup_flags(conn, check["id"])
     flagged = [r for r in rows if r["verdict"] in ("RED", "YELLOW")]
@@ -335,10 +395,17 @@ def render_lineup(conn):
 
     out = [nav("/lineup"),
            "<h1>Start / sit</h1>",
-           f"<div class='sub'>Week {e(check['week'])} &middot; "
-           f"{e(check['created_at'][:10])} &middot; against analyst "
-           f"rankings, not projections</div>",
-           f"<div class='counts'><span>{headline}</span></div>"]
+           f"<div class='sub'>Week {e(check['week'])} &middot; checked "
+           f"{e(said_ago(age))} &middot; against analyst rankings, not "
+           f"projections</div>",
+           f"<div class='counts'><span>{headline}</span></div>",
+           "<form method='post' action='/lineup/refresh'>"
+           "<button class='decline' style='width:100%;margin-bottom:12px'>"
+           "Check again now</button></form>"]
+    if problem:
+        out.insert(3, f"<div class='bar'><span class='warn'>Could not "
+                      f"refresh:</span> {e(problem)} Showing the last check."
+                      "</div>")
 
     by_league = {}
     for r in rows:
@@ -473,7 +540,8 @@ class Handler(BaseHTTPRequestHandler):
             return
         if path == "/api/claims":
             if not auth.check_api_token(self.headers.get("Authorization")):
-                self._json(401, {"error": "bad or missing API token"})
+                self._json(401, {"error": auth.token_complaint(
+                    self.headers.get("Authorization"))})
                 return
             want_all = "include=submitted" in (urlparse(self.path).query or "")
             conn = self._conn()
@@ -527,7 +595,8 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == "/api/proposals":
             if not auth.check_api_token(self.headers.get("Authorization")):
-                self._json(401, {"error": "bad or missing API token"})
+                self._json(401, {"error": auth.token_complaint(
+                    self.headers.get("Authorization"))})
                 return
             try:
                 payload = json.loads(self.rfile.read(length) or b"{}")
@@ -556,7 +625,8 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == "/api/lineup":
             if not auth.check_api_token(self.headers.get("Authorization")):
-                self._json(401, {"error": "bad or missing API token"})
+                self._json(401, {"error": auth.token_complaint(
+                    self.headers.get("Authorization"))})
                 return
             try:
                 payload = json.loads(self.rfile.read(length) or b"{}")
@@ -584,7 +654,8 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == "/cron/weekly":
             if not auth.check_api_token(self.headers.get("Authorization")):
-                self._json(401, {"error": "bad or missing API token"})
+                self._json(401, {"error": auth.token_complaint(
+                    self.headers.get("Authorization"))})
                 return
             self.rfile.read(length)
             conn = self._conn()
@@ -611,7 +682,8 @@ class Handler(BaseHTTPRequestHandler):
 
         if path.startswith("/api/claims/"):
             if not auth.check_api_token(self.headers.get("Authorization")):
-                self._json(401, {"error": "bad or missing API token"})
+                self._json(401, {"error": auth.token_complaint(
+                    self.headers.get("Authorization"))})
                 return
             try:
                 pid = int(path.rsplit("/", 2)[-2])
@@ -632,6 +704,23 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(200, {"ok": True})
             finally:
                 conn.close()
+            return
+
+        if path == "/lineup/refresh":
+            if not self._authed():
+                self.send_response(303)
+                self.send_header("Location", "/login")
+                self.end_headers()
+                return
+            self.rfile.read(length)
+            conn = self._conn()
+            try:
+                refresh_lineup(conn)
+            finally:
+                conn.close()
+            self.send_response(303)
+            self.send_header("Location", "/lineup")
+            self.end_headers()
             return
 
         if path != "/decide":

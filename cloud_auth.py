@@ -90,5 +90,28 @@ def check_api_token(header_value):
     return hmac.compare_digest(given, expected)
 
 
+def fingerprint(value):
+    """Eight hex characters of a hash of a secret.
+
+    Enough to tell two secrets apart without revealing either, which is the
+    difference between "they do not match" and knowing which side is stale.
+    """
+    value = str(value or "")
+    return hashlib.sha256(value.encode()).hexdigest()[:8] if value else "unset"
+
+
+def token_complaint(header_value):
+    """Why a token was rejected, in terms that are safe to send back."""
+    given = str(header_value or "")
+    if given.lower().startswith("bearer "):
+        given = given[7:]
+    if not given:
+        return "no bearer token reached the server"
+    if not api_token():
+        return "the server has no FANTASY_API_TOKEN set"
+    return (f"token mismatch: the server expects {fingerprint(api_token())}, "
+            f"the caller sent {fingerprint(given)}")
+
+
 def generate_token():
     return secrets.token_urlsafe(32)

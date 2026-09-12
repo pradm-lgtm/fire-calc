@@ -44,8 +44,13 @@ def _call(path, payload=None, timeout=30):
     except urllib.error.HTTPError as e:
         detail = e.read().decode("utf-8", "replace")[:200]
         if e.code == 401:
-            raise RemoteError("the host rejected the API token — check "
-                              "FANTASY_API_TOKEN matches the deployment")
+            # The host says which side is stale; repeating that beats a
+            # generic "check your token", which is where three rounds went.
+            try:
+                said = json.loads(detail).get("error", detail)
+            except json.JSONDecodeError:
+                said = detail
+            raise RemoteError(f"the host rejected the API token: {said}")
         raise RemoteError(f"HTTP {e.code} from {url}: {detail}")
     except urllib.error.URLError as e:
         raise RemoteError(f"could not reach {url}: {e.reason}")

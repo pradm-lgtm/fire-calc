@@ -1,9 +1,9 @@
 # Checks the lineups against analyst rankings and sends the verdicts to the
-# approval page, so Sunday morning is a glance at a phone rather than a
-# terminal command.
+# approval page.
 #
-# Separate from the waiver job because the cadence is different: waivers are
-# decided Tuesday, lineups Sunday morning before kickoff.
+# The page works this out for itself when you open it, so this is not the
+# only way it runs - it is here so Sunday morning is already done rather
+# than made to wait while the page fetches half a dozen ranking pages.
 name: sunday start/sit check
 
 on:

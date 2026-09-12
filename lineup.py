@@ -318,6 +318,46 @@ def report(league, rows):
     return flagged
 
 
+class NoRankings(Exception):
+    """No ranking page could be read, so there is nothing to compare with."""
+
+
+def check(username, week=None, urls=(), verbose=True):
+    """Run the whole start/sit check. Returns the rows and what produced them.
+
+    Separate from main() because the page runs this itself now: a verdict
+    from last Sunday is about a lineup you have since changed.
+    """
+    state = sc.current_state()
+    season = state.get("season")
+    week = week or state.get("week") or 1
+    players = sc.all_players()
+
+    per_source = gather_rankings(list(urls), players, verbose=verbose)
+    if not per_source:
+        raise NoRankings("no ranking page could be read")
+    consensus = rk.merge(per_source)
+
+    user = sc.resolve_user(username)
+    leagues = sc.user_leagues(user["user_id"], season)
+    found = []
+    for league in leagues:
+        found.append((league, league_rows(league, user["user_id"], players,
+                                          consensus)))
+    return {"season": season, "week": week, "sources": sorted(per_source),
+            "leagues": found,
+            "rows": [r for _l, rows in found for r in (rows or [])]}
+
+
+def store_check(conn, got):
+    """Write one check's verdicts. The newest check is the only one shown."""
+    check_id = st.start_lineup_check(conn, got["season"], got["week"],
+                                     got["sources"])
+    for row in got["rows"]:
+        st.add_lineup_flag(conn, check_id, **row)
+    return check_id
+
+
 def main():
     localenv.load()
     ap = argparse.ArgumentParser(description=__doc__,
@@ -332,52 +372,38 @@ def main():
     args = ap.parse_args()
 
     try:
-        state = sc.current_state()
-        season = state.get("season")
-        week = args.week or state.get("week") or 1
-        print(f"NFL {season}, week {week}")
-        players = sc.all_players()
-
         print("Reading rankings...")
-        per_source = gather_rankings(args.url, players)
-        if not per_source:
-            print("\nNo rankings could be read, so there is nothing to compare")
-            print("against. Check the pages with:")
-            print("  python3 lineup.py USER --url PAGE")
-            return 1
-        consensus = rk.merge(per_source)
+        got = check(args.username, args.week, args.url)
+        print(f"NFL {got['season']}, week {got['week']}")
 
-        user = sc.resolve_user(args.username)
-        leagues = sc.user_leagues(user["user_id"], season)
-        flagged, saved = 0, []
-        for league in leagues:
-            rows = league_rows(league, user["user_id"], players, consensus)
-            flagged += report(league, rows)
-            saved.extend(rows or [])
+        flagged = sum(report(league, rows) for league, rows in got["leagues"])
 
         if args.save:
             import cloud_client
             if cloud_client.configured():
                 # Same split as the waiver job: the work happens where there
                 # is time for it, and only the finished verdicts travel.
-                result = cloud_client.push_lineup(season, week,
-                                                  sorted(per_source), saved)
+                result = cloud_client.push_lineup(
+                    got["season"], got["week"], got["sources"], got["rows"])
                 print(f"\nSent {result.get('written', 0)} verdict(s) to "
                       f"{cloud_client.base_url()}.")
             else:
                 conn = st.connect()
-                check_id = st.start_lineup_check(conn, season, week,
-                                                 sorted(per_source))
-                for row in saved:
-                    st.add_lineup_flag(conn, check_id, **row)
+                store_check(conn, got)
                 conn.close()
-                print(f"\nSaved {len(saved)} verdicts for the approval page.")
+                print(f"\nSaved {len(got['rows'])} verdicts for the "
+                      "approval page.")
         print()
         print("=" * 74)
         print(f"{flagged} started player(s) worth a second look. "
               "Nothing was changed.")
         print("=" * 74)
         return 0
+    except NoRankings:
+        print("\nNo rankings could be read, so there is nothing to compare")
+        print("against. Check the pages with:")
+        print("  python3 rankings.py PAGE")
+        return 1
     except sc.SleeperError as e:
         print(f"ERROR: {e}")
         return 1

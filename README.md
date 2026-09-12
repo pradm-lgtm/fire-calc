@@ -59,8 +59,11 @@ python3 submitter.py YOUR_USERNAME --audit    # what is really queued
 python3 lineup.py YOUR_SLEEPER_USERNAME
 ```
 
-Runs Sunday morning on its own and shows up under **Start / sit** on the same
-page as the waiver proposals.
+Lives under **Start / sit** on the same page as the waiver proposals. Opening
+that page works the verdicts out itself if the last ones are more than three
+hours old, so what you see is about the lineup you have now, not the one you
+had on Sunday morning. A scheduled run each Sunday keeps the page quick
+rather than being the only way it happens, and "Check again now" forces it.
 
 It reads no projections. Projections are the part you can do yourself; what
 this does is compare who you have started against where analysts rank those
