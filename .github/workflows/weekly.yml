@@ -31,4 +31,6 @@ jobs:
           FANTASY_API_URL: ${{ secrets.FANTASY_API_URL }}
           FANTASY_API_TOKEN: ${{ secrets.FANTASY_API_TOKEN }}
           FANTASY_USER: ${{ secrets.FANTASY_USER }}
-        run: python3 run_weekly.py "$FANTASY_USER"
+        run: |
+          python3 run_weekly.py "$FANTASY_USER" \
+            ${{ inputs.force && '--force' || '' }}

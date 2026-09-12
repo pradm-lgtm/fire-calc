@@ -65,11 +65,11 @@ def approved_unsubmitted():
     return _call("/api/claims").get("claims", [])
 
 
-def push_proposals(season, week, sources, proposals):
+def push_proposals(season, week, sources, proposals, force=False):
     """Send a week's proposals to the host that serves the approval page."""
     return _call("/api/proposals", {
         "season": season, "week": week, "sources": sources,
-        "proposals": proposals,
+        "proposals": proposals, "force": force,
     }, timeout=120)
 
 

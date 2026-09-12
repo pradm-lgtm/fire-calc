@@ -142,9 +142,9 @@ def proposals_for_league(league, user_id, players, trending, texts, max_moves):
     return out
 
 
-def main_for(username, db_path, moves=3):
+def main_for(username, db_path, moves=3, force=False):
     """Run the job programmatically, for the host's own scheduler."""
-    return _run(username, [], moves, False, db_path)
+    return _run(username, [], moves, False, db_path, force)
 
 
 def main():
@@ -156,16 +156,19 @@ def main():
     ap.add_argument("--moves", type=int, default=3)
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--db", default=str(st.DB_PATH))
+    ap.add_argument("--force", action="store_true",
+                    help="propose again even if this week already has a run")
     args = ap.parse_args()
 
     username = args.username
     if not username:
         print("Give a Sleeper username: python3 run_weekly.py YOUR_USERNAME")
         return 1
-    return _run(username, args.url, args.moves, args.dry_run, args.db)
+    return _run(username, args.url, args.moves, args.dry_run, args.db,
+                args.force)
 
 
-def _run(username, urls, moves, dry_run, db_path):
+def _run(username, urls, moves, dry_run, db_path, force=False):
     try:
         state = sc.current_state()
         season, week = state.get("season"), state.get("week") or 1
@@ -208,7 +211,7 @@ def _run(username, urls, moves, dry_run, db_path):
             # runs wherever there is time and posts the finished proposals.
             import cloud_client
             result = cloud_client.push_proposals(
-                season, week, sorted(texts), all_proposals)
+                season, week, sorted(texts), all_proposals, force)
             if result.get("skipped"):
                 print(f"\nHost says: {result['skipped']}")
                 return 0
