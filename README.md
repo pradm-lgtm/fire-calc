@@ -47,8 +47,25 @@ python3 submitter.py YOUR_USERNAME --audit    # what is really queued
 | `webapp.py` | the approval page |
 | `claim_safety.py` | pre-flight checks and API read-back |
 | `submitter.py` | drives Sleeper's UI to place approved claims |
+| `lineup.py` | start/sit recommendations for the coming week |
 | `check_sources.py` | is a candidate site usable as a source? |
 | `selectors.json` | Sleeper's DOM selectors, kept out of the code |
+
+## Start/sit
+
+```bash
+python3 lineup.py YOUR_SLEEPER_USERNAME
+```
+
+Compares your starters against your bench using projections scored by each
+league's own rules, which matters when leagues differ: 4 versus 6 points for
+a passing touchdown makes the same quarterback worth visibly different
+amounts, so one ranking cannot serve both.
+
+An unavailable starter is always replaced; a projected gain is only worth
+acting on above a small threshold, below which the projection is noise. A
+player who is Out is never suggested as a replacement however well he
+projects.
 
 ## Safety model
 
@@ -97,7 +114,6 @@ requires a bid cue and rejects stat cues.
 ## Known limits
 
 - Yahoo leagues are unsupported: no reads, no writes.
-- No lineup/start-sit recommendations yet.
 - Extraction can attribute a recommendation to a player merely discussed in
   someone else's write-up. Each proposal carries the source sentence — read
   it before approving.
