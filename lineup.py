@@ -1,28 +1,33 @@
 #!/usr/bin/env python3
 """
-Start/sit recommendations (the other half of the original brief).
+Start/sit checked against analyst consensus.
 
     python3 lineup.py <your-sleeper-username>
     python3 lineup.py pradm7 --week 3
+    python3 lineup.py pradm7 --url https://site/half-ppr-rankings
 
-Compares who you have starting against who is on your bench, using
-projections scored by each league's own rules. That last part matters more
-than it sounds: your two leagues award 4 and 6 points for a passing
-touchdown, so the same quarterback is worth visibly different amounts in
-each, and a single ranking would be wrong in one of them.
+This does not project anything. It reads half-PPR rankings from the sites
+you trust and tells you where your lineup disagrees with them, so the
+judgement stays yours and the arithmetic does not.
 
-Flags three things, in descending order of how much they should worry you:
+Each started player gets a colour:
 
-  * a starter who is Out or Doubtful - points you are simply forfeiting
-  * a bench player projected clearly above a starter he could replace
-  * a starter who is Questionable, which is a judgement call, not a verdict
+  GREEN   nobody on your bench is ranked meaningfully above him
+  YELLOW  a bench player ranks somewhat higher - close enough to be a
+          matchup call rather than a mistake
+  RED     a bench player ranks far higher, or the starter will not play
 
-Recommendations only. Nothing is changed in any league.
+Rankings are positional and come from the order players appear in on a
+ranking page, which is what a ranking page is. Nothing is changed in any
+league.
 """
 
 import argparse
 import sys
 
+import expert_extract as ex
+import expert_waivers as ew
+import rankings as rk
 import sleeper_client as sc
 import waiver_analyzer as wa
 
@@ -37,50 +42,38 @@ SLOT_ELIGIBILITY = {
 }
 BENCH_SLOTS = {"BN", "IR", "TAXI"}
 
-# A swap has to be worth more than the noise in a projection to be worth
-# making; below this the honest answer is that it does not matter.
-MEANINGFUL_POINTS = 1.5
+# How far a bench player must out-rank a starter before it stops being a
+# matchup opinion and starts being a mistake. Positional places, so "8" means
+# roughly WR12 sitting behind WR20.
+RED_GAP = 8
+YELLOW_GAP = 3
 
 SIT_STATUSES = {"out", "ir", "doubtful", "suspended", "pup"}
 
 
-def get_projections(season, week):
-    """{player_id: {stat: value}} for the week, or {} if unavailable.
-
-    This endpoint is not part of Sleeper's documented API, so treat its
-    absence as normal rather than an error - the tool still has injury
-    information to work with.
-    """
-    try:
-        rows = sc.get(f"/projections/nfl/{season}/{week}"
-                      f"?season_type=regular&order_by=ppr")
-    except sc.SleeperError:
-        return {}
-    if not isinstance(rows, list):
-        return {}
-    out = {}
-    for r in rows:
-        pid = r.get("player_id")
-        stats = r.get("stats")
-        if pid and isinstance(stats, dict):
-            out[str(pid)] = stats
-    return out
-
-
-def project_points(stats, scoring):
-    """Score a projected stat line by one league's own rules."""
-    if not stats or not scoring:
-        return None
-    total = 0.0
-    for key, value in stats.items():
-        weight = scoring.get(key)
-        if weight is None:
+def gather_rankings(urls, players, verbose=True):
+    """{source: {position: {player_id: rank}}} from ranking pages."""
+    gazetteer = ex.build_gazetteer(
+        players, [pid for pid, p in players.items() if wa.is_rosterable(p)])
+    sources = ([{"name": u, "url": u} for u in urls] if urls
+               else rk.load_sources())
+    per_source = {}
+    for entry in sources:
+        text = ew.fetch_url(entry["url"])
+        if not text:
             continue
-        try:
-            total += float(weight) * float(value)
-        except (TypeError, ValueError):
+        ranked = rk.ranks_from_text(text, players, gazetteer)
+        total = sum(len(v) for v in ranked.values())
+        if total < 10:
+            if verbose:
+                print(f"  - {entry['name']}: only {total} players found; "
+                      "the page may render its table in JavaScript")
             continue
-    return round(total, 2)
+        per_source[entry["name"]] = ranked
+        if verbose:
+            shape = ", ".join(f"{p}{len(v)}" for p, v in sorted(ranked.items()))
+            print(f"  + {entry['name']}: {total} ranked ({shape})")
+    return per_source
 
 
 def injury_note(player):
@@ -107,60 +100,67 @@ def eligible(player, slot):
     return bool(set(player.get("fantasy_positions") or []) & allowed)
 
 
-def evaluate(league, roster, players, projections):
-    """Return (rows, swaps) describing the lineup and what to change."""
-    scoring = league.get("scoring_settings") or {}
+def assess(league, roster, players, consensus):
+    """One verdict per started player, with the bench player behind it."""
     slots = starting_slots(league)
-    starters = [p for p in (roster.get("starters") or []) if p and p != "0"]
+    starters = [str(p) for p in (roster.get("starters") or []) if p and p != "0"]
     everyone = [str(p) for p in (roster.get("players") or []) if p and p != "0"]
     bench = [p for p in everyone if p not in starters]
 
-    def points(pid):
-        return project_points(projections.get(str(pid)), scoring)
-
-    rows = []
+    verdicts, claimed = [], set()
     for i, pid in enumerate(starters):
         slot = slots[i] if i < len(slots) else "?"
-        player = players.get(str(pid)) or {}
-        rows.append({"slot": slot, "pid": str(pid), "player": player,
-                     "points": points(pid), "injury": injury_note(player)})
+        player = players.get(pid) or {}
+        pos = player.get("position")
+        # A flex slot pits positions against each other, so compare where the
+        # page itself put them; a fixed slot compares within its position.
+        flexible = len(SLOT_ELIGIBILITY.get(slot, ())) > 1
+        scale = rk.OVERALL if flexible else pos
+        mine = rk.rank_of(consensus, pid, scale) if scale else None
 
-    bench_rows = [{"pid": p, "player": players.get(p) or {}, "points": points(p),
-                   "injury": injury_note(players.get(p) or {})} for p in bench]
+        best, best_gap = None, 0.0
+        for cand_id in bench:
+            if cand_id in claimed:
+                continue
+            cand = players.get(cand_id) or {}
+            if not cand or not eligible(cand, slot) or must_sit(cand):
+                continue
+            cand_scale = rk.OVERALL if flexible else cand.get("position")
+            cand_rank = rk.rank_of(consensus, cand_id, cand_scale)
+            if cand_rank is None:
+                continue
+            if must_sit(player):
+                # Anyone playable beats someone who will not play.
+                gap = 99.0 if mine is None else max(1.0, mine - cand_rank)
+            elif mine is None:
+                # An unranked starter behind a ranked alternative is worth
+                # raising, but it is not the same as being out-ranked.
+                gap = float(YELLOW_GAP)
+            else:
+                gap = mine - cand_rank
+            if gap > best_gap:
+                best, best_gap = cand_id, gap
 
-    swaps, used = [], set()
-    for row in rows:
-        best, best_gain = None, 0.0
-        for cand in bench_rows:
-            if cand["pid"] in used or not cand["player"]:
-                continue
-            if not eligible(cand["player"], row["slot"]):
-                continue
-            if must_sit(cand["player"]):
-                continue
-            # An unavailable starter should be replaced by anyone playable,
-            # even where projections cannot say by how much.
-            if must_sit(row["player"]):
-                gain = (cand["points"] or 0) - 0
-                if best is None or gain > best_gain:
-                    best, best_gain = cand, gain
-                continue
-            if row["points"] is None or cand["points"] is None:
-                continue
-            gain = cand["points"] - row["points"]
-            if gain > best_gain:
-                best, best_gain = cand, gain
-        if best is None:
-            continue
-        forced = must_sit(row["player"])
-        if forced or best_gain >= MEANINGFUL_POINTS:
-            used.add(best["pid"])
-            swaps.append({"row": row, "with": best, "gain": best_gain,
-                          "forced": forced})
-    return rows, swaps
+        if must_sit(player):
+            colour = "RED"
+        elif best is None or best_gap < YELLOW_GAP:
+            colour = "GREEN"
+        elif best_gap >= RED_GAP:
+            colour = "RED"
+        else:
+            colour = "YELLOW"
+        if colour != "GREEN" and best:
+            claimed.add(best)
+        verdicts.append({"slot": slot, "pid": pid, "player": player,
+                         "rank": mine, "colour": colour, "scale": scale,
+                         "better": best, "gap": best_gap})
+    return verdicts
 
 
-def report(league, user_id, players, projections):
+DOT = {"GREEN": "GREEN ", "YELLOW": "YELLOW", "RED": "RED   "}
+
+
+def report(league, user_id, players, consensus):
     print()
     print("=" * 74)
     print(f"{league.get('name','?')}   ({sc.scoring_summary(league)})")
@@ -172,40 +172,33 @@ def report(league, user_id, players, projections):
         print("Could not find your roster here; skipping.")
         return 0
 
-    rows, swaps = evaluate(league, mine, players, projections)
-    have_points = any(r["points"] is not None for r in rows)
-
-    print("\nYOUR LINEUP" + ("" if have_points else "   (no projections available)"))
-    for r in rows:
-        pts = f"{r['points']:6.1f}" if r["points"] is not None else "     -"
-        print(f"  {r['slot']:<11} {pts}  {sc.player_label(players, r['pid'])}")
-
-    if not swaps:
-        print("\nNo changes worth making.")
-        if not have_points:
-            print("Projections were unavailable, so this only checked injuries.")
-        return 0
-
-    print(f"\nSUGGESTED CHANGES ({len(swaps)}):")
-    for s in swaps:
-        # The label carries the injury flag, so name him plainly here and let
-        # the sentence say why.
-        out_name = sc.player_label(players, s["row"]["pid"]).split(" [")[0]
-        in_name = sc.player_label(players, s["with"]["pid"])
-        print()
-        if s["forced"]:
-            print(f"  {s['row']['slot']}: {out_name} is "
-                  f"{s['row']['injury']} — he will not play")
-            print(f"      start {in_name} instead")
-            if s["with"]["points"] is not None:
-                print(f"      projected {s['with']['points']:.1f}")
-        else:
-            print(f"  {s['row']['slot']}: start {in_name} over {out_name}")
-            print(f"      {s['with']['points']:.1f} vs {s['row']['points']:.1f}"
-                  f"  (+{s['gain']:.1f} projected)")
-            if s["row"]["injury"]:
-                print(f"      {out_name} is also {s['row']['injury']}")
-    return len(swaps)
+    verdicts = assess(league, mine, players, consensus)
+    flagged = 0
+    print()
+    for v in verdicts:
+        rank_txt = (rk.describe(consensus, v["pid"], v["scale"])
+                    if v["scale"] else "unranked")
+        print(f"  {DOT[v['colour']]} {v['slot']:<11} "
+              f"{sc.player_label(players, v['pid']):<36} {rank_txt}")
+        if v["colour"] == "GREEN":
+            continue
+        flagged += 1
+        if must_sit(v["player"]):
+            print(f"              he is {injury_note(v['player'])} — "
+                  "he will not play")
+        if v["better"]:
+            better = sc.player_label(players, v["better"]).split(" [")[0]
+            b_scale = (rk.OVERALL if len(SLOT_ELIGIBILITY.get(v["slot"], ())) > 1
+                       else (players.get(v["better"]) or {}).get("position"))
+            b_rank = rk.rank_of(consensus, v["better"], b_scale)
+            where = (f"{int(round(b_rank))}" if b_rank is not None else "?")
+            scale_txt = "overall" if b_scale == rk.OVERALL else b_scale
+            gap = f", {v['gap']:.0f} places better" if v["gap"] < 90 else ""
+            print(f"              consensus prefers {better} "
+                  f"— {scale_txt} {where}{gap}")
+    if not flagged:
+        print("\n  Your lineup matches consensus.")
+    return flagged
 
 
 def main():
@@ -213,6 +206,8 @@ def main():
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("username")
     ap.add_argument("--week", type=int, default=None)
+    ap.add_argument("--url", action="append", default=[],
+                    help="a ranking page to use instead of the configured ones")
     args = ap.parse_args()
 
     try:
@@ -220,23 +215,25 @@ def main():
         season = state.get("season")
         week = args.week or state.get("week") or 1
         print(f"NFL {season}, week {week}")
+        players = sc.all_players()
+
+        print("Reading rankings...")
+        per_source = gather_rankings(args.url, players)
+        if not per_source:
+            print("\nNo rankings could be read, so there is nothing to compare")
+            print("against. Check the pages with:")
+            print("  python3 lineup.py USER --url PAGE")
+            return 1
+        consensus = rk.merge(per_source)
 
         user = sc.resolve_user(args.username)
         leagues = sc.user_leagues(user["user_id"], season)
-        if not leagues:
-            print("No leagues found.")
-            return 1
-        players = sc.all_players()
-        projections = get_projections(season, week)
-        print(f"Projections for {len(projections):,} players."
-              if projections else
-              "Projections unavailable — checking injuries only.")
-
-        total = sum(report(l, user["user_id"], players, projections)
-                    for l in leagues)
+        flagged = sum(report(l, user["user_id"], players, consensus)
+                      for l in leagues)
         print()
         print("=" * 74)
-        print(f"{total} change(s) suggested. Nothing was altered in any league.")
+        print(f"{flagged} started player(s) worth a second look. "
+              "Nothing was changed.")
         print("=" * 74)
         return 0
     except sc.SleeperError as e:
