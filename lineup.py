@@ -30,6 +30,7 @@ import expert_waivers as ew
 import rankings as rk
 import render
 import sleeper_client as sc
+import store as st
 import waiver_analyzer as wa
 
 # Which positions may fill which lineup slot.
@@ -242,45 +243,68 @@ DOT = {"GREEN": "GREEN ", "YELLOW": "YELLOW", "RED": "RED   ",
        "UNKNOWN": "  ?   "}
 
 
-def report(league, user_id, players, consensus):
+def flag_rows(league, roster, players, consensus):
+    """One serialisable row per started player.
+
+    The terminal report and the phone page both read these, so the two can
+    never drift into saying different things about the same lineup.
+    """
+    rows = []
+    for i, v in enumerate(assess(league, roster, players, consensus)):
+        rank_text = (rk.describe(consensus, v["pid"], v["scale"])
+                     if v["scale"] else "unranked")
+        reasons = []
+        if must_sit(v["player"]):
+            reasons.append(f"he is {injury_note(v['player'])} — he will not play")
+        better_name = None
+        if v["colour"] != "GREEN" and v["better"]:
+            better_name = sc.player_label(players, v["better"]).split(" [")[0]
+            flexible = len(SLOT_ELIGIBILITY.get(v["slot"], ())) > 1
+            b_scale = (rk.OVERALL if flexible
+                       else (players.get(v["better"]) or {}).get("position"))
+            b_rank = rk.rank_of(consensus, v["better"], b_scale)
+            where = f"{int(round(b_rank))}" if b_rank is not None else "?"
+            scale_txt = "overall" if b_scale == rk.OVERALL else b_scale
+            gap = f", {v['gap']:.0f} places better" if v["gap"] < 90 else ""
+            reasons.append(f"consensus prefers {better_name} — "
+                           f"{scale_txt} {where}{gap}")
+        rows.append({
+            "league_id": str(league["league_id"]),
+            "league_name": league.get("name"),
+            "slot": v["slot"], "position": i, "verdict": v["colour"],
+            "player_id": v["pid"],
+            "player_name": sc.player_label(players, v["pid"]).split(" [")[0],
+            "rank_text": rank_text, "better_name": better_name,
+            "detail": "; ".join(reasons),
+        })
+    return rows
+
+
+def league_rows(league, user_id, players, consensus):
+    rosters = sc.league_rosters(league["league_id"])
+    mine = sc.my_roster(rosters, user_id)
+    if not mine:
+        return None
+    return flag_rows(league, mine, players, consensus)
+
+
+def report(league, rows):
     print()
     print("=" * 74)
     print(f"{league.get('name','?')}   ({sc.scoring_summary(league)})")
     print("=" * 74)
-
-    rosters = sc.league_rosters(league["league_id"])
-    mine = sc.my_roster(rosters, user_id)
-    if not mine:
+    if rows is None:
         print("Could not find your roster here; skipping.")
         return 0
 
-    verdicts = assess(league, mine, players, consensus)
-    flagged = unknown = 0
+    flagged = sum(1 for r in rows if r["verdict"] in ("YELLOW", "RED"))
+    unknown = sum(1 for r in rows if r["verdict"] == "UNKNOWN")
     print()
-    for v in verdicts:
-        rank_txt = (rk.describe(consensus, v["pid"], v["scale"])
-                    if v["scale"] else "unranked")
-        print(f"  {DOT[v['colour']]} {v['slot']:<11} "
-              f"{sc.player_label(players, v['pid']):<36} {rank_txt}")
-        if v["colour"] == "UNKNOWN":
-            unknown += 1
-            continue
-        if v["colour"] == "GREEN":
-            continue
-        flagged += 1
-        if must_sit(v["player"]):
-            print(f"              he is {injury_note(v['player'])} — "
-                  "he will not play")
-        if v["better"]:
-            better = sc.player_label(players, v["better"]).split(" [")[0]
-            b_scale = (rk.OVERALL if len(SLOT_ELIGIBILITY.get(v["slot"], ())) > 1
-                       else (players.get(v["better"]) or {}).get("position"))
-            b_rank = rk.rank_of(consensus, v["better"], b_scale)
-            where = (f"{int(round(b_rank))}" if b_rank is not None else "?")
-            scale_txt = "overall" if b_scale == rk.OVERALL else b_scale
-            gap = f", {v['gap']:.0f} places better" if v["gap"] < 90 else ""
-            print(f"              consensus prefers {better} "
-                  f"— {scale_txt} {where}{gap}")
+    for r in rows:
+        print(f"  {DOT[r['verdict']]} {r['slot']:<11} "
+              f"{r['player_name']:<36} {r['rank_text']}")
+        for reason in filter(None, r["detail"].split("; ")):
+            print(f"              {reason}")
     if not flagged:
         if unknown:
             print(f"\n  Nothing to change among the players the rankings "
@@ -300,6 +324,9 @@ def main():
     ap.add_argument("--week", type=int, default=None)
     ap.add_argument("--url", action="append", default=[],
                     help="a ranking page to use instead of the configured ones")
+    ap.add_argument("--save", action="store_true",
+                    help="record the verdicts so the approval page shows them "
+                         "(sent to the hosted page when FANTASY_API_URL is set)")
     args = ap.parse_args()
 
     try:
@@ -320,8 +347,29 @@ def main():
 
         user = sc.resolve_user(args.username)
         leagues = sc.user_leagues(user["user_id"], season)
-        flagged = sum(report(l, user["user_id"], players, consensus)
-                      for l in leagues)
+        flagged, saved = 0, []
+        for league in leagues:
+            rows = league_rows(league, user["user_id"], players, consensus)
+            flagged += report(league, rows)
+            saved.extend(rows or [])
+
+        if args.save:
+            import cloud_client
+            if cloud_client.configured():
+                # Same split as the waiver job: the work happens where there
+                # is time for it, and only the finished verdicts travel.
+                result = cloud_client.push_lineup(season, week,
+                                                  sorted(per_source), saved)
+                print(f"\nSent {result.get('written', 0)} verdict(s) to "
+                      f"{cloud_client.base_url()}.")
+            else:
+                conn = st.connect()
+                check_id = st.start_lineup_check(conn, season, week,
+                                                 sorted(per_source))
+                for row in saved:
+                    st.add_lineup_flag(conn, check_id, **row)
+                conn.close()
+                print(f"\nSaved {len(saved)} verdicts for the approval page.")
         print()
         print("=" * 74)
         print(f"{flagged} started player(s) worth a second look. "

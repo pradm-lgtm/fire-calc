@@ -47,7 +47,9 @@ python3 submitter.py YOUR_USERNAME --audit    # what is really queued
 | `webapp.py` | the approval page |
 | `claim_safety.py` | pre-flight checks and API read-back |
 | `submitter.py` | drives Sleeper's UI to place approved claims |
-| `lineup.py` | start/sit recommendations for the coming week |
+| `lineup.py` | flags starters that disagree with analyst rankings |
+| `rankings.py` | reads ranked players out of the data a page ships |
+| `render.py` | loads a page in a browser when the HTML alone is empty |
 | `check_sources.py` | is a candidate site usable as a source? |
 | `selectors.json` | Sleeper's DOM selectors, kept out of the code |
 
@@ -57,15 +59,38 @@ python3 submitter.py YOUR_USERNAME --audit    # what is really queued
 python3 lineup.py YOUR_SLEEPER_USERNAME
 ```
 
-Compares your starters against your bench using projections scored by each
-league's own rules, which matters when leagues differ: 4 versus 6 points for
-a passing touchdown makes the same quarterback worth visibly different
-amounts, so one ranking cannot serve both.
+Runs Sunday morning on its own and shows up under **Start / sit** on the same
+page as the waiver proposals.
 
-An unavailable starter is always replaced; a projected gain is only worth
-acting on above a small threshold, below which the projection is noise. A
-player who is Out is never suggested as a replacement however well he
-projects.
+It reads no projections. Projections are the part you can do yourself; what
+this does is compare who you have started against where analysts rank those
+players, and flag only the places you disagree with them:
+
+| | meaning |
+|---|---|
+| green | your starter is where consensus would put him |
+| yellow | someone on your bench ranks higher, but not by much |
+| red | consensus is well clear of your choice, or your starter will not play |
+| grey | nobody ranks him, so there is no opinion to compare against |
+
+Fixed slots are judged within the position, because a receiver's rank says
+nothing about a running back. Flex slots are judged on the flex page's own
+cross-positional order, which is the only thing that can answer whether WR12
+beats RB20 for one spot.
+
+The thresholds widen with the rank being questioned: two places apart at the
+top of a position is a real disagreement, two places apart at RB90 is noise.
+
+A starter nobody ranks is reported as unjudged rather than counted as
+agreement. Saying a lineup matches consensus when a third of it was never
+compared is the failure worth avoiding here.
+
+Rankings come from the pages listed in `ranking_sources.json`. To see what a
+page actually yields:
+
+```bash
+python3 rankings.py https://www.fantasypros.com/nfl/rankings/half-point-ppr-wr.php
+```
 
 ## Safety model
 

@@ -64,6 +64,35 @@ CREATE TABLE IF NOT EXISTS proposals (
 CREATE INDEX IF NOT EXISTS idx_proposals_run ON proposals(run_id);
 CREATE INDEX IF NOT EXISTS idx_proposals_status ON proposals(status);
 
+-- Start/sit lives apart from proposals on purpose. A proposal is something
+-- to submit; a lineup flag is something to look at, and putting them in one
+-- table would be one typo away from the submitter treating "bench Dobbins"
+-- as a waiver claim.
+CREATE TABLE IF NOT EXISTS lineup_checks (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    created_at TEXT NOT NULL,
+    season     TEXT,
+    week       INTEGER,
+    sources    TEXT
+);
+
+CREATE TABLE IF NOT EXISTS lineup_flags (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    check_id     INTEGER NOT NULL REFERENCES lineup_checks(id),
+    league_id    TEXT NOT NULL,
+    league_name  TEXT,
+    slot         TEXT,
+    position     INTEGER DEFAULT 0,
+    verdict      TEXT NOT NULL,
+    player_id    TEXT,
+    player_name  TEXT,
+    rank_text    TEXT,
+    better_name  TEXT,
+    detail       TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_lineup_flags_check ON lineup_flags(check_id);
+
 CREATE TABLE IF NOT EXISTS events (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     at          TEXT NOT NULL,
@@ -163,6 +192,47 @@ def add_proposal(conn, run_id, **f):
         f"{cols['league_name']}", cur.lastrowid)
     conn.commit()
     return cur.lastrowid
+
+
+def start_lineup_check(conn, season, week, sources):
+    cur = conn.execute(
+        "INSERT INTO lineup_checks (created_at, season, week, sources)"
+        " VALUES (?,?,?,?)",
+        (now(), str(season), week, json.dumps(sources)),
+    )
+    conn.commit()
+    return cur.lastrowid
+
+
+def add_lineup_flag(conn, check_id, **f):
+    cols = dict(
+        check_id=check_id, league_id=str(f["league_id"]),
+        league_name=f.get("league_name"), slot=f.get("slot"),
+        position=f.get("position", 0), verdict=f["verdict"],
+        player_id=(str(f["player_id"]) if f.get("player_id") else None),
+        player_name=f.get("player_name"), rank_text=f.get("rank_text"),
+        better_name=f.get("better_name"), detail=f.get("detail", ""),
+    )
+    names = ", ".join(cols)
+    marks = ", ".join("?" for _ in cols)
+    cur = conn.execute(
+        f"INSERT INTO lineup_flags ({names}) VALUES ({marks})",
+        tuple(cols.values()),
+    )
+    conn.commit()
+    return cur.lastrowid
+
+
+def latest_lineup_check(conn):
+    return conn.execute(
+        "SELECT * FROM lineup_checks ORDER BY id DESC LIMIT 1").fetchone()
+
+
+def lineup_flags(conn, check_id):
+    return conn.execute(
+        "SELECT * FROM lineup_flags WHERE check_id = ?"
+        " ORDER BY league_name, position, id", (check_id,)
+    ).fetchall()
 
 
 def latest_run(conn):

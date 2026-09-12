@@ -1,0 +1,31 @@
+# Checks the lineups against analyst rankings and sends the verdicts to the
+# approval page, so Sunday morning is a glance at a phone rather than a
+# terminal command.
+#
+# Separate from the waiver job because the cadence is different: waivers are
+# decided Tuesday, lineups Sunday morning before kickoff.
+name: sunday start/sit check
+
+on:
+  schedule:
+    # 09:00 US Eastern, a few hours before the early games. GitHub cron is
+    # UTC and ignores daylight saving, so both offsets are listed; a second
+    # run only replaces the verdicts with the same ones.
+    - cron: "0 13 * * 0"   # 09:00 EDT
+    - cron: "0 14 * * 0"   # 09:00 EST
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Compare every starter against consensus and send the verdicts
+        env:
+          FANTASY_API_URL: ${{ secrets.FANTASY_API_URL }}
+          FANTASY_API_TOKEN: ${{ secrets.FANTASY_API_TOKEN }}
+          FANTASY_USER: ${{ secrets.FANTASY_USER }}
+        run: python3 lineup.py "$FANTASY_USER" --save

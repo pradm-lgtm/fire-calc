@@ -89,6 +89,23 @@ button { min-height:46px; padding:10px 18px; border-radius:8px;
 .counts { display:flex; gap:14px; font-size:13px; color:var(--muted);
           margin-bottom:16px; flex-wrap:wrap; }
 .counts b { color:var(--ink); }
+nav { display:flex; gap:6px; margin-bottom:14px; }
+nav a { flex:1; text-align:center; padding:9px 8px; border-radius:8px;
+        border:1px solid var(--line); background:var(--card); font-size:14px;
+        font-weight:650; text-decoration:none; color:var(--muted); }
+nav a.on { background:var(--accent); border-color:var(--accent); color:#fff; }
+.slot { display:flex; align-items:center; gap:10px; padding:11px 12px;
+        background:var(--card); border:1px solid var(--line);
+        border-radius:10px; margin-bottom:7px; border-left-width:4px; }
+.slot.GREEN { border-left-color:var(--ok); }
+.slot.YELLOW { border-left-color:#b58900; }
+.slot.RED { border-left-color:var(--no); }
+.slot.UNKNOWN { border-left-color:var(--line); }
+.slotname { font-size:10px; font-weight:800; letter-spacing:.06em;
+            color:var(--muted); width:44px; flex:none; }
+.who { font-weight:650; flex:1; min-width:0; }
+.rankt { color:var(--muted); font-size:12px; text-align:right; flex:none; }
+.advice { font-size:13px; color:var(--muted); margin:-3px 0 9px 56px; }
 label { font-size:13px; color:var(--muted); }
 @media (max-width:520px) {
   body { padding:10px; }
@@ -147,13 +164,14 @@ def claims_json(conn, include_submitted=False):
 def render(conn):
     run = st.latest_run(conn)
     if not run:
-        return page("<p class='empty'>No runs yet. Run the weekly job first:"
-                    "<br><code>python3 run_weekly.py</code></p>", "Waivers")
+        return page(nav("/") + "<p class='empty'>No runs yet. Run the weekly "
+                    "job first:<br><code>python3 run_weekly.py</code></p>",
+                    "Waivers")
 
     rows = st.proposals_for_run(conn, run["id"])
     if not rows:
-        return page("<p class='empty'>That run produced no proposals.</p>",
-                    "Waivers")
+        return page(nav("/") + "<p class='empty'>That run produced no "
+                    "proposals.</p>", "Waivers")
 
     by_league = {}
     for r in rows:
@@ -168,7 +186,8 @@ def render(conn):
                          (st.DECLINED, "declined"), (st.SUBMITTED, "submitted"))
         if tally.get(k))
 
-    out = [f"<h1>Waiver proposals</h1>"
+    out = [nav("/"),
+           f"<h1>Waiver proposals</h1>"
            f"<div class='sub'>Week {e(run['week'])} &middot; "
            f"{e(run['created_at'][:10])} &middot; nothing is submitted until "
            f"you approve it</div>"
@@ -268,6 +287,68 @@ def short_source(url):
         return str(url)
 
 
+def nav(here):
+    tabs = (("/", "Waivers"), ("/lineup", "Start / sit"))
+    return "<nav>" + "".join(
+        f"<a class='{'on' if path == here else ''}' href='{path}'>{label}</a>"
+        for path, label in tabs) + "</nav>"
+
+
+# Green is not a compliment and red is not an order: these compare one
+# lineup against one site's consensus, which is a second opinion, not a
+# verdict.
+VERDICT_NOTE = {
+    "RED": "well off consensus",
+    "YELLOW": "close, worth a look",
+    "UNKNOWN": "not in the rankings",
+}
+
+
+def render_lineup(conn):
+    check = st.latest_lineup_check(conn)
+    if not check:
+        return page(nav("/lineup") +
+                    "<h1>Start / sit</h1><p class='empty'>No lineup check "
+                    "yet. It runs Sunday morning, before kickoff.</p>",
+                    "Start / sit")
+
+    rows = st.lineup_flags(conn, check["id"])
+    flagged = [r for r in rows if r["verdict"] in ("RED", "YELLOW")]
+    unknown = sum(1 for r in rows if r["verdict"] == "UNKNOWN")
+
+    headline = (f"<b>{len(flagged)}</b> worth a second look"
+                if flagged else "<b>Matches consensus</b>")
+    if unknown:
+        headline += f" &middot; <b>{unknown}</b> unranked"
+
+    out = [nav("/lineup"),
+           "<h1>Start / sit</h1>",
+           f"<div class='sub'>Week {e(check['week'])} &middot; "
+           f"{e(check['created_at'][:10])} &middot; against analyst "
+           f"rankings, not projections</div>",
+           f"<div class='counts'><span>{headline}</span></div>"]
+
+    by_league = {}
+    for r in rows:
+        by_league.setdefault((r["league_id"], r["league_name"]), []).append(r)
+
+    for (_lid, lname), items in by_league.items():
+        hot = sum(1 for i in items if i["verdict"] in ("RED", "YELLOW"))
+        out.append(f"<h2><span>{e(lname)}</span><span class='meta'>"
+                   f"{hot or 'none'} flagged</span></h2>")
+        for r in items:
+            note = VERDICT_NOTE.get(r["verdict"], "")
+            out.append(
+                f"<div class='slot {e(r['verdict'])}'>"
+                f"<span class='slotname'>{e(r['slot'] or '')}</span>"
+                f"<span class='who'>{e(r['player_name'] or '')}</span>"
+                f"<span class='rankt'>{e(r['rank_text'] or '')}"
+                f"{f'<br>{e(note)}' if note else ''}</span></div>")
+            if r["detail"]:
+                out.append(f"<div class='advice'>{e(r['detail'])}</div>")
+    return page("".join(out), "Start / sit")
+
+
 def page(body, title):
     return (f"<!doctype html><html><head><meta charset='utf-8'>"
             f"<meta name='viewport' content='width=device-width,initial-scale=1'>"
@@ -330,7 +411,7 @@ class Handler(BaseHTTPRequestHandler):
             finally:
                 conn.close()
             return
-        if path != "/":
+        if path not in ("/", "/lineup"):
             self.send_error(404)
             return
         if not self._authed():
@@ -340,7 +421,7 @@ class Handler(BaseHTTPRequestHandler):
             return
         conn = self._conn()
         try:
-            body = render(conn)
+            body = render_lineup(conn) if path == "/lineup" else render(conn)
         finally:
             conn.close()
         self.send_response(200)
@@ -393,6 +474,34 @@ class Handler(BaseHTTPRequestHandler):
                               if st.add_proposal(conn, run_id, **r) is not None)
                 self._json(200, {"ok": True, "run": run_id,
                                  "written": written, "received": len(rows)})
+            except Exception as exc:
+                self._json(500, {"error": f"{type(exc).__name__}: {exc}"})
+            finally:
+                conn.close()
+            return
+
+        if path == "/api/lineup":
+            if not auth.check_api_token(self.headers.get("Authorization")):
+                self._json(401, {"error": "bad or missing API token"})
+                return
+            try:
+                payload = json.loads(self.rfile.read(length) or b"{}")
+            except json.JSONDecodeError:
+                self._json(400, {"error": "body was not JSON"})
+                return
+            rows = payload.get("flags") or []
+            conn = self._conn()
+            try:
+                # A lineup check replaces the last one rather than adding to
+                # it: yesterday's advice about a lineup you have since changed
+                # is worse than no advice, so only the newest check is shown.
+                check_id = st.start_lineup_check(
+                    conn, payload.get("season"), payload.get("week"),
+                    payload.get("sources") or [])
+                for row in rows:
+                    st.add_lineup_flag(conn, check_id, **row)
+                self._json(200, {"ok": True, "check": check_id,
+                                 "written": len(rows)})
             except Exception as exc:
                 self._json(500, {"error": f"{type(exc).__name__}: {exc}"})
             finally:

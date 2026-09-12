@@ -68,6 +68,13 @@ def push_proposals(season, week, sources, proposals):
     }, timeout=120)
 
 
+def push_lineup(season, week, sources, flags):
+    """Send this week's start/sit verdicts to the page."""
+    return _call("/api/lineup", {
+        "season": season, "week": week, "sources": sources, "flags": flags,
+    }, timeout=120)
+
+
 def recent_claims():
     """Approved and recently submitted claims, for auditing."""
     return _call("/api/claims?include=submitted").get("claims", [])

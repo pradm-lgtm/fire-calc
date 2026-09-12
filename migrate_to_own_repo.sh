@@ -24,7 +24,8 @@ FILES=(
   expert_extract.py expert_waivers.py install_schedule.py run_weekly.py
   sleeper_client.py source_discovery.py store.py submitter.py
   waiver_analyzer.py webapp.py yahoo_auth_check.py
-  db.py lineup.py rankings.py render.py test_rankings.py
+  db.py lineup.py rankings.py render.py
+  test_rankings.py test_lineup.py
   never_drops.json selectors.json sources.json ranking_sources.json
   vercel.json requirements.txt
   Dockerfile fly.toml .env.example README.md
@@ -78,10 +79,14 @@ if [ "$missing" = "1" ]; then
 fi
 echo "    all good"
 
-if [ -f test_rankings.py ]; then
-  echo "==> running tests"
-  python3 test_rankings.py 2>&1 | tail -3 | sed 's/^/    /'
-fi
+echo "==> running tests"
+for t in test_*.py; do
+  [ -f "$t" ] || continue
+  if ! python3 "$t" 2>&1 | tail -3 | sed "s/^/    $t /"; then
+    echo "Refusing to commit with failing tests."
+    exit 1
+  fi
+done
 
 if [ ! -d .git ]; then
   git init -q -b main
