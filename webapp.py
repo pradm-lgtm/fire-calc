@@ -176,14 +176,17 @@ def claims_json(conn, include_submitted=False):
 def render(conn):
     run = st.latest_run(conn)
     if not run:
-        return page(nav("/") + "<p class='empty'>No runs yet. Run the weekly "
-                    "job first:<br><code>python3 run_weekly.py</code></p>",
-                    "Waivers")
+        return page(nav("/") + "<h1>Waiver proposals</h1>"
+                    + refresh_button("Work out this week's moves")
+                    + "<p class='empty'>Nothing yet. The weekly job runs "
+                      "Monday night, after the last game.</p>", "Waivers")
 
     rows = st.proposals_for_run(conn, run["id"])
     if not rows:
-        return page(nav("/") + "<p class='empty'>That run produced no "
-                    "proposals.</p>", "Waivers")
+        return page(nav("/") + "<h1>Waiver proposals</h1>"
+                    + refresh_button("Look again")
+                    + "<p class='empty'>That run produced no proposals.</p>",
+                    "Waivers")
 
     by_league = {}
     for r in rows:
@@ -200,10 +203,11 @@ def render(conn):
 
     out = [nav("/"),
            f"<h1>Waiver proposals</h1>"
-           f"<div class='sub'>Week {e(run['week'])} &middot; "
-           f"{e(run['created_at'][:10])} &middot; nothing is submitted until "
+           f"<div class='sub'>Week {e(run['week'])} &middot; filed "
+           f"{e(said_ago(age_of(run)))} &middot; nothing is submitted until "
            f"you approve it</div>"
-           f"<div class='counts'>{counts}</div>"]
+           f"<div class='counts'>{counts}</div>",
+           refresh_button("Work them out again")]
 
     for (lid, lname), items in by_league.items():
         budget = items[0]["max_bid"] or 0
@@ -348,6 +352,35 @@ def said_ago(age):
         return f"{hours} hour{'s' if hours > 1 else ''} ago"
     days = hours // 24
     return f"{days} day{'s' if days > 1 else ''} ago"
+
+
+def refresh_waivers(conn, db_path):
+    """Work this week's proposals out again. Returns an error, or None.
+
+    Unlike the start/sit check this never happens on its own. A new run is a
+    new set of proposals, and the page shows the newest, so refreshing while
+    you are part way through reviewing would move the list out from under
+    you. Anything already approved still submits: the submitter reads
+    approved-and-unsubmitted across every run, not just the latest.
+    """
+    import run_weekly
+
+    username = os.environ.get("FANTASY_USER", "")
+    if not username:
+        return "FANTASY_USER is not set on the host, so I cannot look up " \
+               "your leagues."
+    try:
+        run_weekly.main_for(username, db_path, force=True)
+        return None
+    except Exception as exc:
+        traceback.print_exc()
+        return scrub(f"{type(exc).__name__}: {exc}")
+
+
+def refresh_button(label):
+    return (f"<form method='post' action='/waivers/refresh'>"
+            f"<button class='decline' style='width:100%;margin-bottom:12px'>"
+            f"{e(label)}</button></form>")
 
 
 def refresh_lineup(conn):
@@ -709,6 +742,23 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(200, {"ok": True})
             finally:
                 conn.close()
+            return
+
+        if path == "/waivers/refresh":
+            if not self._authed():
+                self.send_response(303)
+                self.send_header("Location", "/login")
+                self.end_headers()
+                return
+            self.rfile.read(length)
+            conn = self._conn()
+            try:
+                refresh_waivers(conn, self.db_path)
+            finally:
+                conn.close()
+            self.send_response(303)
+            self.send_header("Location", "/")
+            self.end_headers()
             return
 
         if path == "/lineup/refresh":

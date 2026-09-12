@@ -197,8 +197,9 @@ first-party option now.
 Then set three repository secrets in GitHub (Settings, Secrets and
 variables, Actions) so the scheduled jobs can reach it: `FANTASY_API_URL`
 (your Vercel URL), `FANTASY_API_TOKEN` (the same token), and `FANTASY_USER`
-(your Sleeper username). Waivers run Tuesday morning and start/sit Sunday
-morning; both can also be run by hand from the Actions tab.
+(your Sleeper username). Waivers run Monday night after the last game, so they are waiting on
+Tuesday morning; start/sit runs Sunday morning. Both can be run by hand
+from the Actions tab, and from a button on the page itself.
 
 Finally, point the local half at the host by adding two lines to `.env`:
 

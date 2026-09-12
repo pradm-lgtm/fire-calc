@@ -7,10 +7,13 @@ name: weekly waiver job
 
 on:
   schedule:
-    # 08:30 US Eastern. GitHub cron is UTC and ignores daylight saving, so
-    # both offsets are listed; the host ignores a second run in the same week.
-    - cron: "30 12 * * 2"   # 08:30 EDT
-    - cron: "30 13 * * 2"   # 08:30 EST
+    # Monday 21:00 US Pacific, after Monday night football, so the proposals
+    # account for the last game of the week and are waiting on Tuesday
+    # morning. That is Tuesday in UTC, which is what cron reads. GitHub cron
+    # ignores daylight saving, so both offsets are listed; the host ignores a
+    # second run in the same week.
+    - cron: "0 4 * * 2"   # Mon 21:00 PDT
+    - cron: "0 5 * * 2"   # Mon 21:00 PST
   workflow_dispatch:
     inputs:
       force:
