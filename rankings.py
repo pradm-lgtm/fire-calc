@@ -37,15 +37,17 @@ def load_sources():
     return []
 
 
-def ranks_from_text(text, players, gazetteer):
+def ranks_from_text(text, players, gazetteer, positions=None,
+                    overall=False):
     """{position: {player_id: rank}} from one ranking page.
 
     Rank is position in the order of first appearance, counted separately
     per position, so one page of overall rankings yields RB1..RBn, WR1..WRn
     and so on.
     """
+    overall_allowed = overall
     seen, per_position = set(), {}
-    overall = {}
+    overall_order = {}
     for pid, _start, _end in ex.find_mentions(text, gazetteer):
         if pid in seen:
             continue          # a repeat is never the rank
@@ -56,14 +58,23 @@ def ranks_from_text(text, players, gazetteer):
         pos = player.get("position")
         if not pos:
             continue
+        # A quarterback page is not a ranking of receivers. Names appear all
+        # over these pages - navigation, sidebars, links to other rankings -
+        # and counting them produces an ordering that means nothing but is
+        # indistinguishable from a real one once merged.
+        if positions and pos not in positions:
+            continue
         bucket = per_position.setdefault(pos, {})
         bucket[str(pid)] = len(bucket) + 1
         # Kept alongside, because positional ranks cannot be compared across
         # positions: asking whether WR3 beats RB2 for a flex slot is
         # meaningless, and the page's own order is the only thing that can
         # answer it.
-        overall[str(pid)] = len(overall) + 1
-    per_position[OVERALL] = overall
+        overall_order[str(pid)] = len(overall_order) + 1
+    # Only a genuinely cross-positional page can order players against each
+    # other; a receiver page's order says nothing about running backs.
+    if overall_allowed:
+        per_position[OVERALL] = overall_order
     return per_position
 
 

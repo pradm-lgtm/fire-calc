@@ -13,8 +13,8 @@ most pages do not need it.
 import re
 
 # Ranked tables often live below the fold and load as you scroll.
-SCROLL_STEPS = 6
-SETTLE_MS = 1500
+SCROLL_STEPS = 18
+SETTLE_MS = 2500
 
 
 def available():

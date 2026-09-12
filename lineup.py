@@ -49,6 +49,20 @@ BENCH_SLOTS = {"BN", "IR", "TAXI"}
 RED_GAP = 8
 YELLOW_GAP = 3
 
+# Ranking disagreement is only meaningful relative to depth. Ten places apart
+# near the top of a position is a different decision from ten places apart in
+# the eighties, where the rankings themselves are guesswork, so the gap has to
+# grow with the rank being questioned.
+RED_FRACTION = 0.20
+YELLOW_FRACTION = 0.08
+
+
+def thresholds(rank):
+    if rank is None:
+        return YELLOW_GAP, RED_GAP
+    return (max(YELLOW_GAP, rank * YELLOW_FRACTION),
+            max(RED_GAP, rank * RED_FRACTION))
+
 SIT_STATUSES = {"out", "ir", "doubtful", "suspended", "pup"}
 
 
@@ -61,7 +75,10 @@ def gather_rankings(urls, players, verbose=True):
     per_source = {}
     for entry in sources:
         text = ew.fetch_url(entry["url"])
-        ranked = (rk.ranks_from_text(text, players, gazetteer) if text else {})
+        want = entry.get("positions")
+        ranked = (rk.ranks_from_text(text, players, gazetteer, want,
+                                     entry.get("overall", False))
+                  if text else {})
         total = sum(len(v) for v in ranked.values() if v)
 
         if total < 10:
@@ -71,7 +88,8 @@ def gather_rankings(urls, players, verbose=True):
                 print(f"  . {entry['name']}: nothing in the raw HTML, "
                       "loading it in a browser")
             text = render.fetch_rendered(entry["url"], quiet=not verbose)
-            ranked = (rk.ranks_from_text(text, players, gazetteer)
+            ranked = (rk.ranks_from_text(text, players, gazetteer, want,
+                                        entry.get("overall", False))
                       if text else {})
             total = sum(len(v) for v in ranked.values() if v)
 
@@ -152,11 +170,12 @@ def assess(league, roster, players, consensus):
             if gap > best_gap:
                 best, best_gap = cand_id, gap
 
+        yellow_at, red_at = thresholds(mine)
         if must_sit(player):
             colour = "RED"
-        elif best is None or best_gap < YELLOW_GAP:
+        elif best is None or best_gap < yellow_at:
             colour = "GREEN"
-        elif best_gap >= RED_GAP:
+        elif best_gap >= red_at:
             colour = "RED"
         else:
             colour = "YELLOW"

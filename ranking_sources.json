@@ -1,17 +1,34 @@
 [
   {
-    "name": "FantasyPros half-PPR flex",
-    "url": "https://www.fantasypros.com/nfl/rankings/half-point-ppr-flex.php",
-    "note": "Consensus of many analysts. Table is built in JavaScript, so it is read by rendering the page."
-  },
-  {
-    "name": "FantasyPros half-PPR QB",
+    "name": "FantasyPros QB",
     "url": "https://www.fantasypros.com/nfl/rankings/half-point-ppr-qb.php",
-    "note": "Quarterbacks are not on the flex page."
+    "positions": ["QB"]
   },
   {
-    "name": "FantasyPros half-PPR TE",
+    "name": "FantasyPros RB",
+    "url": "https://www.fantasypros.com/nfl/rankings/half-point-ppr-rb.php",
+    "positions": ["RB"]
+  },
+  {
+    "name": "FantasyPros WR",
+    "url": "https://www.fantasypros.com/nfl/rankings/half-point-ppr-wr.php",
+    "positions": ["WR"]
+  },
+  {
+    "name": "FantasyPros TE",
     "url": "https://www.fantasypros.com/nfl/rankings/half-point-ppr-te.php",
-    "note": "Deeper tight end coverage than the flex page gives."
+    "positions": ["TE"]
+  },
+  {
+    "name": "FantasyPros DST",
+    "url": "https://www.fantasypros.com/nfl/rankings/dst.php",
+    "positions": ["DEF"]
+  },
+  {
+    "name": "FantasyPros FLEX",
+    "url": "https://www.fantasypros.com/nfl/rankings/half-point-ppr-flex.php",
+    "positions": ["RB", "WR", "TE"],
+    "overall": true,
+    "note": "The only page that orders positions against each other, so the only one allowed to supply an overall rank for flex slots."
   }
 ]
