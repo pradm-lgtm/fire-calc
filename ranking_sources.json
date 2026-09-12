@@ -1,12 +1,17 @@
 [
   {
-    "name": "FantasyPros half-PPR",
+    "name": "FantasyPros half-PPR flex",
     "url": "https://www.fantasypros.com/nfl/rankings/half-point-ppr-flex.php",
-    "note": "Consensus of many analysts; the closest thing to a neutral baseline."
+    "note": "Consensus of many analysts. Table is built in JavaScript, so it is read by rendering the page."
   },
   {
     "name": "FantasyPros half-PPR QB",
     "url": "https://www.fantasypros.com/nfl/rankings/half-point-ppr-qb.php",
-    "note": "Quarterbacks are excluded from the flex page."
+    "note": "Quarterbacks are not on the flex page."
+  },
+  {
+    "name": "FantasyPros half-PPR TE",
+    "url": "https://www.fantasypros.com/nfl/rankings/half-point-ppr-te.php",
+    "note": "Deeper tight end coverage than the flex page gives."
   }
 ]

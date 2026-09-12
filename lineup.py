@@ -28,6 +28,7 @@ import sys
 import expert_extract as ex
 import expert_waivers as ew
 import rankings as rk
+import render
 import sleeper_client as sc
 import waiver_analyzer as wa
 
@@ -60,14 +61,24 @@ def gather_rankings(urls, players, verbose=True):
     per_source = {}
     for entry in sources:
         text = ew.fetch_url(entry["url"])
-        if not text:
-            continue
-        ranked = rk.ranks_from_text(text, players, gazetteer)
-        total = sum(len(v) for v in ranked.values())
+        ranked = (rk.ranks_from_text(text, players, gazetteer) if text else {})
+        total = sum(len(v) for v in ranked.values() if v)
+
+        if total < 10:
+            # A rankings table is usually built by JavaScript, so the HTML a
+            # server sends contains no players at all. Run the page properly.
+            if verbose:
+                print(f"  . {entry['name']}: nothing in the raw HTML, "
+                      "loading it in a browser")
+            text = render.fetch_rendered(entry["url"], quiet=not verbose)
+            ranked = (rk.ranks_from_text(text, players, gazetteer)
+                      if text else {})
+            total = sum(len(v) for v in ranked.values() if v)
+
         if total < 10:
             if verbose:
-                print(f"  - {entry['name']}: only {total} players found; "
-                      "the page may render its table in JavaScript")
+                print(f"  - {entry['name']}: only {total} players found "
+                      "even after rendering; skipping")
             continue
         per_source[entry["name"]] = ranked
         if verbose:
