@@ -24,20 +24,30 @@ FILES=(
   expert_extract.py expert_waivers.py install_schedule.py run_weekly.py
   sleeper_client.py source_discovery.py store.py submitter.py
   waiver_analyzer.py webapp.py yahoo_auth_check.py
-  never_drops.json selectors.json sources.json
+  db.py lineup.py rankings.py render.py test_rankings.py
+  never_drops.json selectors.json sources.json ranking_sources.json
+  vercel.json requirements.txt
   Dockerfile fly.toml .env.example README.md
 )
+
+# Copied with their directory structure rather than flattened into the root.
+TREES=(api .github)
 
 # Every module the agent imports, checked after copying. A hand-kept file
 # list silently drops whatever was added since it was written, and the first
 # symptom is the page failing to start.
-ENTRYPOINTS=(webapp submitter run_weekly expert_waivers check_sources
+ENTRYPOINTS=(webapp submitter run_weekly lineup expert_waivers check_sources
              source_discovery install_schedule)
 
 echo "==> creating $DEST"
 mkdir -p "$DEST"
 for f in "${FILES[@]}"; do
   [ -f "$SRC/$f" ] && cp "$SRC/$f" "$DEST/" && echo "    $f"
+done
+for t in "${TREES[@]}"; do
+  if [ -d "$SRC/$t" ]; then
+    cp -R "$SRC/$t" "$DEST/" && echo "    $t/"
+  fi
 done
 cp "$SRC/gitignore.fantasy" "$DEST/.gitignore" 2>/dev/null \
   || cp "$SRC/.gitignore.fantasy" "$DEST/.gitignore"
@@ -68,6 +78,11 @@ if [ "$missing" = "1" ]; then
 fi
 echo "    all good"
 
+if [ -f test_rankings.py ]; then
+  echo "==> running tests"
+  python3 test_rankings.py 2>&1 | tail -3 | sed 's/^/    /'
+fi
+
 if [ ! -d .git ]; then
   git init -q -b main
   git add .
@@ -79,6 +94,16 @@ page, and places the approved claims in Sleeper.
 
 Moved out of the fire-calc repository, where it was developed."
   echo "==> committed $(git rev-list --count HEAD) commit"
+else
+  # Re-running this is how changes made in fire-calc reach the live repo, so
+  # an update has to commit too; the first run is the only one that does not.
+  git add -A
+  if git diff --cached --quiet; then
+    echo "==> no changes to commit"
+  else
+    git commit -q -m "Sync agent files from the development copy"
+    echo "==> committed the updated files"
+  fi
 fi
 
 git remote remove origin 2>/dev/null || true
