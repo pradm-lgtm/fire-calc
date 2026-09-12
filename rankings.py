@@ -116,3 +116,83 @@ def describe(consensus, player_id, position):
             label += f", spread {entry['spread']}"
         label += ")"
     return label
+
+
+# ---------------------------------------------------------------- embedded data
+
+# Ranking sites ship the table as JSON in a script tag and draw it with
+# JavaScript. Reading that is exact; reading the rendered order is an
+# inference that silently truncates when a page does not fully load.
+_RANK_KEYS = ("rank_ecr", "rank", "ecr", "pos_rank", "rank_ave")
+_NAME_KEYS = ("player_name", "name", "player", "full_name")
+
+
+def _rows_from(value, out):
+    """Walk parsed JSON collecting anything shaped like a ranked player."""
+    if isinstance(value, dict):
+        name = next((value[k] for k in _NAME_KEYS
+                     if isinstance(value.get(k), str)), None)
+        rank = next((value[k] for k in _RANK_KEYS
+                     if isinstance(value.get(k), (int, float))), None)
+        if name and rank is not None:
+            out.append((str(name), float(rank)))
+            return
+        for sub in value.values():
+            _rows_from(sub, out)
+    elif isinstance(value, list):
+        for sub in value:
+            _rows_from(sub, out)
+
+
+def ranked_rows_from_html(html):
+    """[(player_name, rank)] found in embedded JSON, best effort."""
+    if not html:
+        return []
+    import json as _json
+    import re as _re
+    best = []
+    for match in _re.finditer(r"(\{.{200,}?\})\s*;?\s*</script>", html, _re.S):
+        blob = match.group(1)
+        try:
+            parsed = _json.loads(blob)
+        except ValueError:
+            continue
+        rows = []
+        _rows_from(parsed, rows)
+        if len(rows) > len(best):
+            best = rows
+    for match in _re.finditer(r"=\s*(\[\s*\{.{200,}?\}\s*\])\s*;", html, _re.S):
+        try:
+            parsed = _json.loads(match.group(1))
+        except ValueError:
+            continue
+        rows = []
+        _rows_from(parsed, rows)
+        if len(rows) > len(best):
+            best = rows
+    return best
+
+
+def ranks_from_rows(rows, players, gazetteer, positions=None, overall=False):
+    """Turn (name, rank) pairs into the same shape ranks_from_text returns."""
+    resolved = []
+    for name, rank in rows:
+        pid = gazetteer.get(ex.normalize_name(name))
+        if pid:
+            resolved.append((float(rank), pid))
+    resolved.sort()
+
+    seen, per_position, overall_order = set(), {}, {}
+    for _rank, pid in resolved:
+        if pid in seen:
+            continue
+        seen.add(pid)
+        pos = (players.get(str(pid)) or {}).get("position")
+        if not pos or (positions and pos not in positions):
+            continue
+        bucket = per_position.setdefault(pos, {})
+        bucket[str(pid)] = len(bucket) + 1
+        overall_order[str(pid)] = len(overall_order) + 1
+    if overall:
+        per_position[OVERALL] = overall_order
+    return per_position

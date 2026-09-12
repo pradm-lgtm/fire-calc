@@ -39,6 +39,17 @@ def _chromium_path():
 
 def fetch_rendered(url, quiet=False):
     """Page text after JavaScript has run, or None."""
+    got = fetch_rendered_full(url, quiet=quiet)
+    return got["text"] if got else None
+
+
+def fetch_rendered_full(url, quiet=False):
+    """{'text', 'html'} after JavaScript has run, or None.
+
+    The HTML matters as well as the text: ranking sites ship the real table
+    as JSON inside a script tag, which is exact where reading the visible
+    order is an inference.
+    """
     if not available():
         if not quiet:
             print("    (needs playwright: pip3 install playwright "
@@ -98,10 +109,11 @@ def fetch_rendered(url, quiet=False):
                     pass
 
             text = page.evaluate("() => document.body.innerText")
+            html = page.content()
             browser.close()
     except Exception as exc:
         if not quiet:
             print(f"    (could not render: {type(exc).__name__}: "
                   f"{str(exc).splitlines()[0][:100]})")
         return None
-    return re.sub(r"[ \t]{2,}", " ", text or "")
+    return {"text": re.sub(r"[ \t]{2,}", " ", text or ""), "html": html or ""}

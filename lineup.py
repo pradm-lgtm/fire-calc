@@ -87,10 +87,25 @@ def gather_rankings(urls, players, verbose=True):
             if verbose:
                 print(f"  . {entry['name']}: nothing in the raw HTML, "
                       "loading it in a browser")
-            text = render.fetch_rendered(entry["url"], quiet=not verbose)
-            ranked = (rk.ranks_from_text(text, players, gazetteer, want,
-                                        entry.get("overall", False))
-                      if text else {})
+            got = render.fetch_rendered_full(entry["url"], quiet=not verbose)
+            if got:
+                # Prefer the data the page ships over the order it draws:
+                # reading the visible order infers rank and quietly truncates
+                # whenever a page does not fully render.
+                rows = rk.ranked_rows_from_html(got["html"])
+                if rows:
+                    ranked = rk.ranks_from_rows(rows, players, gazetteer, want,
+                                                entry.get("overall", False))
+                    if verbose and sum(len(v) for v in ranked.values() if v) >= 10:
+                        print(f"    (read {len(rows)} rows from the page's "
+                              "own data)")
+                if sum(len(v) for v in ranked.values() if v) < 10:
+                    ranked = rk.ranks_from_text(got["text"], players, gazetteer,
+                                                want, entry.get("overall", False))
+                    if verbose:
+                        chars = len(got["text"])
+                        print(f"    (no usable data found; read the rendered "
+                              f"text instead, {chars:,} chars)")
             total = sum(len(v) for v in ranked.values() if v)
 
         if total < 10:
