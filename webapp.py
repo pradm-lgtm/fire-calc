@@ -187,7 +187,20 @@ label { font-size:13px; color:var(--muted); }
        letter-spacing:-.02em; flex:none; color:var(--muted); }
 .score.up .pts { color:var(--ink); }
 .pts.small { font-size:15px; font-weight:600; color:var(--ink); }
-.toplay { color:var(--muted); font-size:12px; margin-left:8px; }
+.projline { display:flex; justify-content:space-between; gap:10px;
+            color:var(--muted); font-size:12px; margin:-6px 0 2px; }
+.pair { display:grid; grid-template-columns:1fr auto 1fr; gap:6px;
+        align-items:center; padding:7px 0; }
+.pair + .pair { border-top:1px solid var(--line); }
+.half { display:flex; align-items:center; gap:8px; min-width:0; }
+.half.them { flex-direction:row-reverse; text-align:right; }
+.half.pending { opacity:.6; }
+.half .who { display:flex; flex-direction:column; min-width:0; flex:1; }
+.half .pname { font-size:14px; font-weight:600; white-space:nowrap;
+               overflow:hidden; text-overflow:ellipsis; }
+.half .face { width:28px; height:28px; }
+.slotchip { color:var(--muted); font-size:11px; font-weight:700; width:42px;
+            text-align:center; flex:none; }
 .state { font-size:14px; font-weight:600; margin:12px 0 0; }
 .state.approved { color:var(--ok); } .state.declined { color:var(--no); }
 .state.submitted { color:var(--action); }
@@ -831,27 +844,45 @@ window.addEventListener('pageshow', function () {
 
 def scoreline(team, leading):
     if not team:
-        return "<div class='score'><span class='team'>No opponent this week"
-    left = (f"<span class='toplay'>{team['to_play']} to play</span>"
-            if team["to_play"] else "")
+        return ("<div class='score'><span class='team'>No opponent this week"
+                "</span></div>")
     return (f"<div class='score{' up' if leading else ''}'>"
-            f"<span class='team'>{e(team['name'])}{left}</span>"
-            f"<span class='pts'>{team['points']:g}</span></div>")
+            f"<span class='team'>{e(team['name'])}</span>"
+            f"<span class='pts'>{team['points']:g}</span></div>"
+            f"<div class='projline'><span>{len(team['to_play'])} to play"
+            + (f" ({e(', '.join(team['to_play']))})" if team["to_play"] else "")
+            + f"</span><span>{team['projected']:g} projected</span></div>")
 
 
-def lineup_detail(team):
-    if not team:
-        return ""
-    rows = []
-    for p in team["lineup"]:
-        where = " &middot; ".join(x for x in (e(p["matchup"] or ""),
-                                              "to play" if p["to_play"] else "")
-                                  if x)
-        rows.append(f"<div class='player'>{headshot(p)}"
-                    f"<span class='who'><span class='pname'>{e(p['name'])}"
-                    f"</span><span class='under'>{where}</span></span>"
-                    f"<span class='pts small'>{p['points']:g}</span></div>")
-    return "".join(rows)
+def half(player, mine):
+    """One side of a paired lineup row."""
+    if not player:
+        return "<div class='half'></div>"
+    live = f"{player['points']:g}"
+    if player["to_play"]:
+        expected = (f"{player['projection']:g} proj"
+                    if player["projection"] is not None else "to play")
+        under = " &middot; ".join(x for x in (e(player["matchup"] or ""),
+                                              e(expected)) if x)
+    else:
+        under = e(player["matchup"] or "")
+    return (f"<div class='half{' them' if not mine else ''}"
+            f"{' pending' if player['to_play'] else ''}'>"
+            f"{headshot(player)}"
+            f"<span class='who'><span class='pname'>{e(player['name'])}</span>"
+            f"<span class='under'>{under}</span></span>"
+            f"<span class='pts small'>{live}</span></div>")
+
+
+def matchup_rows(board):
+    out = []
+    for row in board["rows"]:
+        out.append("<div class='pair'>"
+                   + half(row["mine"], True)
+                   + f"<span class='slotchip'>{e(row['slot'])}</span>"
+                   + half(row["theirs"], False)
+                   + "</div>")
+    return "".join(out)
 
 
 def render_scores(username):
@@ -879,22 +910,27 @@ def render_scores(username):
 
     for b in got["leagues"]:
         us, them, margin = b["us"], b["them"], b["margin"]
+        ahead = margin is not None and margin > 0
         if margin is None:
             verdict = ""
-        elif margin > 0:
-            verdict = f"ahead by {margin:g}"
-        elif margin < 0:
-            verdict = f"behind by {abs(margin):g}"
+        elif margin:
+            verdict = (f"{'ahead' if ahead else 'behind'} by {abs(margin):g}")
         else:
             verdict = "level"
+        # Where it is heading matters more than where it is when half the
+        # lineup has not kicked off.
+        end = b["projected_margin"]
+        if end is not None and verdict:
+            verdict += (f", projected to {'win' if end > 0 else 'lose'} by "
+                        f"{abs(end):g}" if end else ", projected to tie")
         out.append(
             "<article class='match'>"
             f"<div class='calltop'><div><h3>{e(b['league_name'] or '')}</h3>"
             f"<p class='why'>{e(verdict)}</p></div></div>"
-            + scoreline(us, margin is not None and margin > 0)
+            + scoreline(us, ahead)
             + scoreline(them, margin is not None and margin < 0)
-            + "<details class='others'><summary>Your lineup</summary>"
-            + lineup_detail(us) + "</details></article>")
+            + "<details class='others'><summary>Both lineups</summary>"
+            + matchup_rows(b) + "</details></article>")
 
     out.append("<form method='get' action='/scores'>"
                "<button class='ghost' style='width:100%;margin-top:18px'>"

@@ -30,13 +30,13 @@ def team_names(users, rosters):
     return out
 
 
-def side(entry, names, players, week):
-    """One team in a matchup: its score and who is still to play."""
+def side(entry, names, players, week, slots):
+    """One team in a matchup: its score, its lineup, and what is still to come."""
     if not entry:
         return None
-    starters = [str(p) for p in (entry.get("starters") or []) if p and p != "0"]
+    starters = [str(p) for p in (entry.get("starters") or [])]
     points = entry.get("starters_points") or []
-    lineup, waiting = [], 0
+    lineup, waiting, projected = [], [], 0.0
     for i, pid in enumerate(starters):
         player = players.get(pid) or {}
         team = (player.get("team") or "").upper()
@@ -44,18 +44,28 @@ def side(entry, names, players, week):
         # what is left rather than inventing points that may never arrive.
         to_play = bool(week["kickoffs"]) and not nfl_week.started(
             week["kickoffs"], team)
-        waiting += 1 if to_play else 0
+        scored = round(float(points[i]), 1) if i < len(points) else 0.0
+        projection = week["points"].get(pid)
+        # What he has already scored, or what he is expected to. Adding a
+        # projection to a finished game would count the same points twice.
+        projected += projection if (to_play and projection is not None) else scored
+        if to_play:
+            waiting.append(player.get("position") or "?")
         lineup.append({
-            "player_id": pid,
-            "name": sc.player_label(players, pid).split(" [")[0],
+            "player_id": pid if pid and pid != "0" else None,
+            "name": (sc.player_label(players, pid).split(" [")[0]
+                     if pid and pid != "0" else "Empty"),
             "pos": player.get("position"),
-            "points": round(float(points[i]), 1) if i < len(points) else 0.0,
+            "slot": slots[i] if i < len(slots) else "",
+            "points": scored,
+            "projection": projection,
             "matchup": week["games"].get(team),
             "to_play": to_play,
         })
     return {"roster_id": entry.get("roster_id"),
             "name": names.get(entry.get("roster_id"), "Unclaimed"),
             "points": round(float(entry.get("points") or 0), 1),
+            "projected": round(projected, 1),
             "to_play": waiting, "lineup": lineup}
 
 
@@ -75,11 +85,25 @@ def league_board(league, user_id, players, week_no, week):
                    if m.get("matchup_id") == ours.get("matchup_id")
                    and m.get("roster_id") != my_id), None)
 
-    us, them = side(ours, names, players, week), side(theirs, names, players, week)
+    slots = [s for s in (league.get("roster_positions") or [])
+             if s not in ("BN", "IR", "TAXI")]
+    us = side(ours, names, players, week, slots)
+    them = side(theirs, names, players, week, slots)
+
+    # Paired by slot, the way both apps show it: the choice you made in a
+    # slot only means anything next to the one they made in the same slot.
+    rows = []
+    for i in range(max(len(us["lineup"]), len(them["lineup"]) if them else 0)):
+        mine = us["lineup"][i] if i < len(us["lineup"]) else None
+        yours = (them["lineup"][i] if them and i < len(them["lineup"]) else None)
+        rows.append({"slot": (mine or yours or {}).get("slot", ""),
+                     "mine": mine, "theirs": yours})
     return {"league_id": str(league["league_id"]),
             "league_name": league.get("name"),
-            "us": us, "them": them,
-            "margin": round(us["points"] - them["points"], 1) if them else None}
+            "us": us, "them": them, "rows": rows,
+            "margin": round(us["points"] - them["points"], 1) if them else None,
+            "projected_margin": (round(us["projected"] - them["projected"], 1)
+                                 if them else None)}
 
 
 def board(username, week_no=None):
@@ -117,8 +141,10 @@ def main():
             if not team:
                 print("  (no opponent this week)")
                 continue
-            left = f"  {team['to_play']} to play" if team["to_play"] else ""
-            print(f"  {team['name'][:30]:<32}{team['points']:>7.1f}{left}")
+            left = (f"  {len(team['to_play'])} to play "
+                    f"({', '.join(team['to_play'])})" if team["to_play"] else "")
+            print(f"  {team['name'][:30]:<32}{team['points']:>7.1f}"
+                  f"{team['projected']:>9.1f} proj{left}")
         if b["margin"] is not None:
             print(f"  {'ahead by' if b['margin'] >= 0 else 'behind by':>32}"
                   f"{abs(b['margin']):>7.1f}")

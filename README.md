@@ -62,9 +62,14 @@ python3 scores.py YOUR_SLEEPER_USERNAME
 ```
 
 Every league's current matchup side by side, closest game first, read live
-from Sleeper on each load rather than stored. Each one shows both scores, who
-is leading, and how many of your starters have not played yet. Checking four
-leagues meant four apps.
+from Sleeper on each load rather than stored. Checking four leagues meant
+four apps.
+
+Each shows both scores, where the game is heading, and how many starters on
+each side have yet to kick off. The projected total counts real points for a
+finished game and a projection only for one still to come, so nothing is
+counted twice. Both lineups open paired slot by slot, because the choice you
+made at flex only means something next to the one they made there.
 
 ## Start/sit
 
