@@ -154,5 +154,40 @@ class RosterSpots(unittest.TestCase):
         self.assertEqual(tv.replacement_value(self.VALUES, "K", set()), 0)
 
 
+class Offline(unittest.TestCase):
+    """Every fetch degrades to nothing rather than raising.
+
+    Twice now an edit has removed a helper that is only reached at call
+    time, so importing the module proved nothing and the first sign was a
+    NameError in front of the user. These call the paths.
+    """
+
+    def silence(self, module):
+        real = module._get
+        module._get = lambda _url: {"__error__": "NetworkError: offline"}
+        self.addCleanup(lambda: setattr(module, "_get", real))
+
+    def test_values_come_back_empty_rather_than_failing(self):
+        self.silence(tv)
+        self.assertEqual(tv.fetch(), ({}, None))
+
+    def test_the_week_context_comes_back_empty_rather_than_failing(self):
+        import nfl_week
+        self.silence(nfl_week)
+        self.assertEqual(nfl_week.week_context(2026, 1),
+                         {"points": {}, "games": {}, "kickoffs": {}})
+
+    def test_the_schedule_comes_back_empty_rather_than_failing(self):
+        import nfl_week
+        self.silence(nfl_week)
+        self.assertEqual(nfl_week.scoreboard(2026, 1), {})
+        self.assertEqual(nfl_week.projection_rows(2026, 1), [])
+
+    def test_a_board_with_no_values_says_so(self):
+        self.silence(tv)
+        with self.assertRaises(RuntimeError):
+            trades.board("someone")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

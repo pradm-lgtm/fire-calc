@@ -57,76 +57,40 @@ def team_name(abbreviation):
     return ESPN_TO_SLEEPER.get(abbreviation, abbreviation)
 
 
-def schedule(season, week):
-    """{team: 'vs PHI'} or {team: 'at PHI'} for one week, best effort."""
+def scoreboard(season, week):
+    """{team: {matchup, kickoff}} from the published schedule, best effort.
+
+    The projection records name the opponent but carry no kickoff time, and
+    without one there is no way to tell a player who has not played from one
+    who played and scored nothing. This is where the clock comes from.
+    """
     data = _get(SCOREBOARD.format(season=season, week=week))
     if not isinstance(data, dict):
         return {}
     out = {}
     for event in data.get("events") or []:
+        when = _epoch(event.get("date"))
         for competition in event.get("competitions") or []:
+            when = _epoch(competition.get("date")) or when
             sides = competition.get("competitors") or []
             if len(sides) != 2:
                 continue
-            named = []
-            for side in sides:
-                team = (side.get("team") or {}).get("abbreviation")
-                named.append((team_name(team), side.get("homeAway") == "home"))
+            named = [(team_name((s.get("team") or {}).get("abbreviation")),
+                      s.get("homeAway") == "home") for s in sides]
             for i, (team, at_home) in enumerate(named):
                 other = named[1 - i][0]
                 if team and other:
-                    out[team] = f"{'vs' if at_home else 'at'} {other}"
+                    out[team] = {"matchup": f"{'vs' if at_home else 'at'} {other}",
+                                 "kickoff": when}
     return out
 
 
-def projection_rows(season, week):
-    """The week's projection records, as served. [] if unavailable."""
-    data = _get(PROJECTIONS.format(season=season, week=week))
-    rows = data if isinstance(data, list) else (data or {}).get("data")
-    return [r for r in rows if isinstance(r, dict)] if isinstance(rows, list) else []
+def schedule(season, week):
+    """{team: 'vs PHI'} for one week, best effort."""
+    return {team: got["matchup"] for team, got in
+            scoreboard(season, week).items() if got.get("matchup")}
 
 
-def points_from(rows):
-    """{player_id: points}."""
-    out = {}
-    for row in rows:
-        pid, stats = row.get("player_id"), row.get("stats")
-        if not pid or not isinstance(stats, dict):
-            continue
-        for key in POINT_KEYS:
-            value = stats.get(key)
-            if isinstance(value, (int, float)):
-                out[str(pid)] = round(float(value), 1)
-                break
-    return out
-
-
-def matchups_from(rows):
-    """{team: 'vs PHI'} read off the projection records.
-
-    The projections call already succeeds, and each record says who its
-    player faces, so the opponent comes free from a request being made
-    anyway rather than from a second service that may or may not answer.
-    """
-    out = {}
-    for row in rows:
-        team = team_name(_first(row, ("team", "team_abbr", "player_team")))
-        against = team_name(_first(row, ("opponent", "opp", "opponent_team",
-                                         "opp_team")))
-        if not team or not against or team == against:
-            continue
-        home = _first(row, ("home", "is_home"))
-        if home is None and _first(row, ("home_team",)) is not None:
-            home = _first(row, ("home_team",)) == team
-        # Naming the opponent without claiming a direction beats claiming
-        # the wrong one: every game reading as away is worse than none of
-        # them saying.
-        out[team] = (against if home is None
-                     else f"{'vs' if home else 'at'} {against}")
-    return out
-
-
-# Most precise first. A field holding only a date is not a kickoff.
 KICKOFF_KEYS = ("start_time", "kickoff", "game_time", "game_date", "date")
 
 
@@ -184,17 +148,80 @@ def _first(row, keys):
     return None
 
 
+def projection_rows(season, week):
+    """The week's projection records, as served. [] if unavailable."""
+    data = _get(PROJECTIONS.format(season=season, week=week))
+    rows = data if isinstance(data, list) else (data or {}).get("data")
+    return [r for r in rows if isinstance(r, dict)] if isinstance(rows, list) else []
+
+
+def points_from(rows):
+    """{player_id: points}."""
+    out = {}
+    for row in rows:
+        pid, stats = row.get("player_id"), row.get("stats")
+        if not pid or not isinstance(stats, dict):
+            continue
+        for key in POINT_KEYS:
+            value = stats.get(key)
+            if isinstance(value, (int, float)):
+                out[str(pid)] = round(float(value), 1)
+                break
+    return out
+
+
+def matchups_from(rows):
+    """{team: 'vs PHI'} read off the projection records.
+
+    The projections call already succeeds, and each record says who its
+    player faces, so the opponent comes free from a request being made
+    anyway rather than from a second service that may or may not answer.
+    """
+    out = {}
+    for row in rows:
+        team = team_name(_first(row, ("team", "team_abbr", "player_team")))
+        against = team_name(_first(row, ("opponent", "opp", "opponent_team",
+                                         "opp_team")))
+        if not team or not against or team == against:
+            continue
+        home = _first(row, ("home", "is_home"))
+        if home is None and _first(row, ("home_team",)) is not None:
+            home = _first(row, ("home_team",)) == team
+        # Naming the opponent without claiming a direction beats claiming
+        # the wrong one: every game reading as away is worse than none of
+        # them saying.
+        out[team] = (against if home is None
+                     else f"{'vs' if home else 'at'} {against}")
+    return out
+
+
 def projections(season, week):
     """{player_id: points} for one week, best effort."""
     return points_from(projection_rows(season, week))
 
 
 def week_context(season, week):
-    """Points, opponents and kickoff times, from as few calls as possible."""
+    """Points, opponents and kickoff times, from as few calls as possible.
+
+    The projection records answer reliably and carry the opponent, so they
+    go first. They have never carried a kickoff time, and the schedule is
+    asked only for what is still missing.
+    """
     rows = projection_rows(season, week)
-    games = matchups_from(rows) or schedule(season, week)
-    return {"points": points_from(rows), "games": games,
-            "kickoffs": kickoffs_from(rows)}
+    games = matchups_from(rows)
+    kickoffs = kickoffs_from(rows)
+
+    if not kickoffs or len(games) < 24:
+        published = scoreboard(season, week)
+        for team, got in published.items():
+            if got.get("kickoff") and team not in kickoffs:
+                kickoffs[team] = got["kickoff"]
+            # A direction read off the schedule beats a bare opponent name.
+            if got.get("matchup") and " " in got["matchup"]:
+                games[team] = got["matchup"]
+            elif team not in games and got.get("matchup"):
+                games[team] = got["matchup"]
+    return {"points": points_from(rows), "games": games, "kickoffs": kickoffs}
 
 
 def main():
@@ -233,13 +260,18 @@ def main():
     if not starts:
         print("    (none; nothing will be locked once games begin)")
 
-    if not from_rows:
-        games = schedule(season, week)
-        print(f"opponents from the scoreboard: {len(games)} teams")
-        for team, where in sorted(games.items())[:4]:
-            print(f"    {team:<4} {where}")
-        if not games:
-            print("    (neither answered; the page will omit opponents)")
+    # Always asked, because the records have never carried a kickoff time
+    # and that is the field the page actually needs.
+    published = scoreboard(season, week)
+    print(f"published schedule: {len(published)} teams")
+    for team, got in sorted(published.items())[:4]:
+        when = got.get("kickoff")
+        stamp = (datetime.fromtimestamp(when, timezone.utc).isoformat()
+                 if when else "no time")
+        print(f"    {team:<4} {got.get('matchup', '?'):<8} {stamp}")
+    if not published:
+        print("    (it did not answer; without it a player who has not "
+              "played cannot be told from one who scored nothing)")
     return 0
 
 

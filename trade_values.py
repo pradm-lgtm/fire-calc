@@ -24,12 +24,25 @@ TIMEOUT = 20
 SOURCES = [
     ("FantasyCalc",
      "https://api.fantasycalc.com/values/current"
-     "?isDynasty=false&numQbs=1&ppr=0.5"),
+     "?isDynasty=false&numQbs=1&ppr=0.5&numTeams=12&limit=600"),
 ]
 
 # Every row carries the player's Sleeper id, so values join to rosters by id
 # rather than by name. Name matching is where the article extraction spent
 # most of its bugs; none of that applies here.
+def _get(url):
+    req = urllib.request.Request(url, headers={
+        "User-Agent": "Mozilla/5.0 (personal fantasy tool; single user)",
+        "Accept": "application/json",
+    })
+    try:
+        with urllib.request.urlopen(req, timeout=TIMEOUT) as resp:
+            return json.loads(resp.read().decode("utf-8", "replace"))
+    except (urllib.error.HTTPError, urllib.error.URLError,
+            json.JSONDecodeError, TimeoutError, OSError) as exc:
+        return {"__error__": f"{type(exc).__name__}: {exc}"}
+
+
 def values_from(rows):
     """{sleeper_id: {name, position, value, rank, pos_rank}}."""
     out = {}
