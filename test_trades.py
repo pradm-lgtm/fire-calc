@@ -134,8 +134,7 @@ class NeverDrop(unittest.TestCase):
         # is the correct answer, so what matters is that he is not in one.
         loose = trades.offers(LEAGUE, Offers.MINE, Offers.THEIRS, self.NAMED,
                               values())
-        self.assertTrue(loose)
-        self.assertTrue(all("rb1" in o["give"] for o in loose))
+        self.assertTrue(any("rb1" in o["give"] for o in loose))
 
         held = trades.offers(LEAGUE, Offers.MINE, Offers.THEIRS, self.NAMED,
                              values(), protect={"keep him"})
@@ -143,28 +142,43 @@ class NeverDrop(unittest.TestCase):
             self.assertNotIn("rb1", offer["give"])
 
 
-class Holes(unittest.TestCase):
-    """A lineup you cannot legally fill is not a trade-off, it is a loss."""
+class EmptiedSlots(unittest.TestCase):
+    """A slot you empty is not a slot you leave empty."""
 
     SLOTS = trades.starting_slots(LEAGUE)
+    # A quarterback nobody has rostered, worth half of the one you start.
+    FREE = {"QB": 2500.0}
 
-    def test_an_unfillable_slot_is_spotted(self):
-        filled = trades.best_lineup(["rb1", "rb2", "wr1"], PLAYERS, values(),
-                                    self.SLOTS)
-        self.assertTrue(trades.leaves_a_hole(filled, self.SLOTS))
+    def test_a_gap_is_filled_from_the_wire_not_counted_as_zero(self):
+        # Trading your only quarterback costs the difference between him and
+        # whoever is available, not his whole value, and that difference is
+        # often worth paying.
+        whole = trades.lineup_value(["qb1", "rb1", "wr1", "rb2"], PLAYERS,
+                                    values(), self.SLOTS, self.FREE)
+        without = trades.lineup_value(["rb1", "wr1", "rb2"], PLAYERS,
+                                      values(), self.SLOTS, self.FREE)
+        self.assertEqual(whole - without, 2500)
 
-    def test_a_full_lineup_is_not_a_hole(self):
-        filled = trades.best_lineup(["qb1", "rb1", "wr1", "rb2"], PLAYERS,
-                                    values(), self.SLOTS)
-        self.assertFalse(trades.leaves_a_hole(filled, self.SLOTS))
+    def test_no_replacement_available_means_the_slot_is_worth_nothing(self):
+        without = trades.lineup_value(["rb1", "wr1", "rb2"], PLAYERS,
+                                      values(), self.SLOTS, {})
+        whole = trades.lineup_value(["qb1", "rb1", "wr1", "rb2"], PLAYERS,
+                                    values(), self.SLOTS, {})
+        self.assertEqual(whole - without, 5000)
 
-    def test_your_only_quarterback_is_not_traded_away(self):
-        # An empty slot is worth zero, which reads as merely bad next to a
-        # big gain elsewhere, so it has to be ruled out rather than priced.
-        mine = {"roster_id": 1, "players": ["qb1", "rb1", "rb2", "wr2"]}
-        theirs = {"roster_id": 2, "players": ["wr1", "wr4", "rb4", "qb2"]}
-        for offer in trades.offers(LEAGUE, mine, theirs, PLAYERS, values()):
-            self.assertNotIn("qb1", offer["give"])
+    def test_a_quarterback_may_be_traded_away(self):
+        # Forbidding it outright priced the wire at nothing, which is a
+        # different mistake from pricing an empty slot at zero.
+        found = trades.offers(LEAGUE, Offers.MINE, Offers.THEIRS, PLAYERS,
+                              values())
+        self.assertTrue(any("qb1" in o["give"] for o in found))
+
+    def test_who_is_free_is_read_from_the_whole_league(self):
+        taken = {"qb1", "rb1", "wr1"}
+        free = trades.free_agents(values(), taken)
+        self.assertEqual(free["QB"], 1000)      # qb2, the only one left
+        self.assertEqual(free["RB"], 8000)      # rb2
+        self.assertNotIn("K", free)
 
 
 class RosterSpots(unittest.TestCase):

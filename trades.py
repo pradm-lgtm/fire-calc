@@ -78,22 +78,38 @@ def best_lineup(player_ids, players, values, slots):
     return filled
 
 
-def lineup_value(player_ids, players, values, slots):
-    filled = best_lineup(player_ids, players, values, slots)
-    return sum(values.get(pid, {}).get("value", 0.0)
-               for pid in filled.values() if pid)
+def free_agents(values, taken):
+    """{position: value of the best player nobody has}.
 
-
-def leaves_a_hole(filled, slots):
-    """Would this roster be unable to field a legal lineup?
-
-    A slot with nobody in it is not a small loss worth a big gain elsewhere:
-    it is a week you cannot set your lineup. The value of an empty slot is
-    zero, which reads as merely bad, so it has to be ruled out rather than
-    priced.
+    A slot you empty is not a slot you leave empty. Trading your only
+    quarterback costs you the difference between him and whoever is on the
+    wire, not his whole value, and that difference is often worth paying.
     """
-    return any(filled.get(i) is None for i, slot in enumerate(slots)
-               if SLOT_ELIGIBILITY.get(slot))
+    best = {}
+    for pid, entry in values.items():
+        if pid in taken:
+            continue
+        pos = entry.get("position")
+        if pos and entry.get("value", 0) > best.get(pos, 0):
+            best[pos] = entry["value"]
+    return best
+
+
+def lineup_value(player_ids, players, values, slots, free=None):
+    """The best lineup this roster could field, filling gaps off the wire."""
+    free = free or {}
+    filled = best_lineup(player_ids, players, values, slots)
+    total = 0.0
+    for i, slot in enumerate(slots):
+        allowed = SLOT_ELIGIBILITY.get(slot)
+        if not allowed:
+            continue
+        pid = filled.get(i)
+        if pid:
+            total += values.get(pid, {}).get("value", 0.0)
+        else:
+            total += max((free.get(p, 0.0) for p in allowed), default=0.0)
+    return total
 
 
 def value_of(ids, values):
@@ -153,15 +169,16 @@ def _protected(players, pid, protect):
     return bool(full) and full in protect
 
 
-def offers(league, mine, theirs, players, values, protect=()):
+def offers(league, mine, theirs, players, values, protect=(), free=None):
     """Every package where both starting lineups come out better."""
     slots = starting_slots(league)
     my_ids = [str(p) for p in (mine.get("players") or []) if p and p != "0"]
     their_ids = [str(p) for p in (theirs.get("players") or []) if p and p != "0"]
-    rostered = set(my_ids) | set(their_ids)
+    free = free if free is not None else free_agents(
+        values, set(my_ids) | set(their_ids))
 
-    my_before = lineup_value(my_ids, players, values, slots)
-    their_before = lineup_value(their_ids, players, values, slots)
+    my_before = lineup_value(my_ids, players, values, slots, free)
+    their_before = lineup_value(their_ids, players, values, slots, free)
 
     can_send = [pid for pid in tradeable(mine, players, values, MAX_SEND)
                 if pid not in protect and not _protected(players, pid, protect)]
@@ -177,15 +194,8 @@ def offers(league, mine, theirs, players, values, protect=()):
         their_roster = [p for p in their_ids if p not in get] + give
         my_filled = best_lineup(my_roster, players, values, slots)
         their_filled = best_lineup(their_roster, players, values, slots)
-        # Neither side may be left unable to field a lineup, however well
-        # the numbers come out.
-        if leaves_a_hole(my_filled, slots) or leaves_a_hole(their_filled, slots):
-            continue
-
-        my_after = sum(values.get(p, {}).get("value", 0.0)
-                       for p in my_filled.values() if p)
-        their_after = sum(values.get(p, {}).get("value", 0.0)
-                          for p in their_filled.values() if p)
+        my_after = lineup_value(my_roster, players, values, slots, free)
+        their_after = lineup_value(their_roster, players, values, slots, free)
         my_gain = my_after - my_before
         their_gain = their_after - their_before
         if my_gain <= 0 or their_gain <= 0:
@@ -193,8 +203,8 @@ def offers(league, mine, theirs, players, values, protect=()):
 
         spots = max(0, len(give) - len(get))
         position = (values.get(get[0], {}).get("position") or "RB")
-        replacement = tv.replacement_value(values, position, rostered)
-        sent, received = fairness(give, get, values, spots, replacement)
+        sent, received = fairness(give, get, values, spots,
+                                  free.get(position, 0.0))
         if max(sent, received) <= 0:
             continue
         tilt = (received - sent) / max(sent, received)
@@ -238,11 +248,15 @@ def league_offers(league, user_id, players, values, protect=()):
     if not mine:
         return None
     users = sc.league_users(league["league_id"])
+    # Who is actually free in this league, not merely off these two rosters.
+    taken = {str(p) for r in rosters for p in (r.get("players") or []) if p}
+    free = free_agents(values, taken)
     out = []
     for other in rosters:
         if other.get("roster_id") == mine.get("roster_id"):
             continue
-        for offer in offers(league, mine, other, players, values, protect):
+        for offer in offers(league, mine, other, players, values, protect,
+                            free):
             offer["with"] = team_label(users, rosters, other.get("roster_id"))
             offer["their_record"] = record(other)
             out.append(offer)

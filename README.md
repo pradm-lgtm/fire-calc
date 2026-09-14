@@ -171,11 +171,13 @@ is your third is a fact they cannot see — so they weigh a deal, they do not
 judge it. The lineup gain is the number that knows your roster, and it is the
 one to read first.
 
-Neither side may be left unable to field a legal lineup. An empty slot is
-worth zero, which reads as merely bad next to a big gain elsewhere, so it is
-ruled out rather than priced. Each offer names what changes in your starting
-lineup, because the cost of sending a starter is the man who replaces him and
-one number for the whole roster hides that.
+A slot you empty is not a slot you leave empty. Trading your only
+quarterback costs the difference between him and the best one nobody has
+rostered, not his whole value, and that difference is often worth paying.
+Who counts as free is read from every roster in the league, not just the two
+in the trade. Each offer names what changes in your starting lineup, because
+the cost of sending a starter is the man who replaces him and one number for
+the whole roster hides that.
 
 A package sending more players than it receives credits the other side with
 the roster spot they gain, valued at the best free agent at that position,
