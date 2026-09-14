@@ -117,6 +117,29 @@ CREATE TABLE IF NOT EXISTS lineup_done (
 
 CREATE INDEX IF NOT EXISTS idx_lineup_done_week ON lineup_done(season, week);
 
+-- Trade offers, worked out on a schedule rather than while you wait. The
+-- offers are stored already written out, so the page needs no player
+-- database and no value list to render them.
+CREATE TABLE IF NOT EXISTS trade_runs (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    created_at TEXT NOT NULL,
+    season     TEXT,
+    week       INTEGER,
+    source     TEXT
+);
+
+CREATE TABLE IF NOT EXISTS trade_leagues (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id      INTEGER NOT NULL REFERENCES trade_runs(id),
+    league_id   TEXT NOT NULL,
+    league_name TEXT,
+    summary     TEXT,
+    settings    TEXT,
+    offers      TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_trade_leagues_run ON trade_leagues(run_id);
+
 CREATE TABLE IF NOT EXISTS events (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     at          TEXT NOT NULL,
@@ -331,6 +354,39 @@ def write_lineup_check(conn, season, week, sources, rows):
     for row in rows:
         add_lineup_flag(conn, check_id, **row)
     return check_id
+
+
+def write_trade_run(conn, season, week, source, leagues):
+    """Store one run's offers. The newest run is the only one shown."""
+    cur = conn.execute(
+        "INSERT INTO trade_runs (created_at, season, week, source)"
+        " VALUES (?,?,?,?)", (now(), str(season), week, source))
+    run_id = cur.lastrowid
+    for league in leagues:
+        conn.execute(
+            "INSERT INTO trade_leagues (run_id, league_id, league_name,"
+            " summary, settings, offers) VALUES (?,?,?,?,?,?)",
+            (run_id, str(league["league_id"]), league.get("league_name"),
+             league.get("summary", ""),
+             json.dumps(league.get("settings") or {}),
+             json.dumps(league.get("offers") or [])))
+    conn.commit()
+    return run_id
+
+
+def latest_trade_run(conn):
+    return conn.execute(
+        "SELECT * FROM trade_runs ORDER BY id DESC LIMIT 1").fetchone()
+
+
+def trade_leagues(conn, run_id):
+    rows = conn.execute(
+        "SELECT * FROM trade_leagues WHERE run_id = ? ORDER BY id",
+        (run_id,)).fetchall()
+    return [{"league_id": r["league_id"], "league_name": r["league_name"],
+             "summary": r["summary"],
+             "settings": json.loads(r["settings"] or "{}"),
+             "offers": json.loads(r["offers"] or "[]")} for r in rows]
 
 
 def settle(conn, season, week, league_id, slot, player_id):

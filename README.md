@@ -164,9 +164,11 @@ python3 trades.py YOUR_SLEEPER_USERNAME
 python3 trades.py YOUR_SLEEPER_USERNAME --league LEHG
 ```
 
-Lives under **Trades** on the site, worked out on each load rather than
-stored: rosters move every week, and a package built around a player somebody
-has already traded away is not an offer.
+Lives under **Trades** on the site. Worked out Tuesday alongside the waiver
+job and stored, with a button to force it: building offers touches a value
+list, the player database and every roster in every league, which is a
+scheduled job's work rather than something to do while a page loads. Each
+offer is written out at save time, so reading a run is one query.
 
 A trade happens when both managers think they got better, so that is what
 this looks for: packages where your best starting lineup improves and theirs
@@ -188,8 +190,11 @@ receiver.
 Every priced player on both rosters is considered, not a shortlist: the piece
 that fits is often the ninth-most valuable man on the team.
 
-Each league opens with a paragraph describing the roster in the terms the
-offers are built from — record, what is thin, what is spare, who is hurt,
+Packages are built from lineup value alone. The record and the byes are
+described for you to read, not fed into any offer: a bye eight weeks out is
+context, not a reason to trade.
+
+Each league opens with a paragraph describing the roster — record, what is thin, what is spare, who is hurt,
 which byes are coming, and whether that argues for paying up or playing safe.
 Disagreeing with the paragraph finds a broken assumption faster than
 disagreeing with four packages out of twenty.

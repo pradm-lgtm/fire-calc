@@ -20,7 +20,6 @@ weigh a deal, they do not judge it. The lineup gain below is the part that
 knows your roster, and it is the number to read first.
 """
 
-import itertools
 import sys
 
 import localenv
@@ -178,6 +177,15 @@ def record(roster):
     return (s.get("wins", 0), s.get("losses", 0), s.get("ties", 0))
 
 
+def median_league(league):
+    """Does this league also score you against the weekly median?
+
+    Sleeper counts that second result into wins and losses itself, so the
+    record already includes it. Worth saying which record you are reading.
+    """
+    return bool((league.get("settings") or {}).get("league_average_match"))
+
+
 def tradeable(roster, players, values):
     """Every player on the roster anyone can price, most valuable first.
 
@@ -239,6 +247,7 @@ def shape(league, roster, players, values, byes=None, week=1):
     settings = roster.get("settings") or {}
     return {
         "record": (wins, losses, ties),
+        "median": median_league(league),
         "points_for": settings.get("fpts", 0),
         "points_against": settings.get("fpts_against", 0),
         "depth": depth,
@@ -246,6 +255,52 @@ def shape(league, roster, players, values, byes=None, week=1):
         "byes": upcoming,
         "starters_value": lineup_value(ids, players, values, slots),
     }
+
+
+def in_band(sent, received):
+    """Is this close enough to fair that anyone would read it?
+
+    Nobody accepts your best player for their worst, and nobody offers it,
+    so there is no reason to price either lineup first.
+    """
+    if max(sent, received) <= 0:
+        return None
+    tilt = (received - sent) / max(sent, received)
+    return tilt if abs(tilt) <= FAIRNESS else None
+
+
+def candidates(can_send, can_get, values, free):
+    """Packages worth pricing, as (give, get).
+
+    Both lists are sorted by value, so the senders that could balance a
+    given target sit together; stopping once a pair has overshot avoids
+    building most of the combinations at all. Rebuilding two lineups is the
+    expensive part, and whole rosters made twenty times as many pairs.
+    """
+    def worth(pid):
+        return values.get(pid, {}).get("value", 0.0)
+
+    for target in can_get:
+        want = worth(target)
+        spare = free.get(values.get(target, {}).get("position") or "RB", 0.0)
+        for one in can_send:
+            if in_band(worth(one), want) is not None:
+                yield [one], [target]
+        # The band a package has to land in. Both lists run from most
+        # valuable to least, so as the second man moves down the list the
+        # pair only gets cheaper: too dear means keep looking, too cheap
+        # means every pair after it is cheaper still.
+        ceiling = (want + spare) / (1 - FAIRNESS)
+        floor = (want + spare) * (1 - FAIRNESS)
+        for i, first in enumerate(can_send):
+            if worth(first) > ceiling:
+                continue          # past the band before a second is added
+            for second in can_send[i + 1:]:
+                pair = worth(first) + worth(second)
+                if pair < floor:
+                    break
+                if in_band(pair, want + spare) is not None:
+                    yield [first, second], [target]
 
 
 def offers(league, mine, theirs, players, values, protect=(), free=None):
@@ -264,22 +319,14 @@ def offers(league, mine, theirs, players, values, protect=(), free=None):
     can_get = tradeable(theirs, players, values)
 
     found = []
-    packages = ([([a], [b]) for a in can_send for b in can_get]
-                + [(list(pair), [b]) for pair in itertools.combinations(can_send, 2)
-                   for b in can_get])
     my_lineup_before = best_lineup(my_ids, players, values, slots)
-    for give, get in packages:
-        # Whole rosters make this loop twenty times longer, so the cheap
-        # test comes first: most pairs are nowhere near a fair package, and
-        # rebuilding two lineups to discover that is the expensive part.
+    for give, get in candidates(can_send, can_get, values, free):
         spots = max(0, len(give) - len(get))
         position = (values.get(get[0], {}).get("position") or "RB")
         sent, received = fairness(give, get, values, spots,
                                   free.get(position, 0.0))
-        if max(sent, received) <= 0:
-            continue
-        tilt = (received - sent) / max(sent, received)
-        if abs(tilt) > FAIRNESS:
+        tilt = in_band(sent, received)
+        if tilt is None:
             continue
 
         my_roster = [p for p in my_ids if p not in give] + get
@@ -416,8 +463,12 @@ def lineup_changes(offer, players):
 def posture(shape_of_team):
     """Buying, selling, or neither, from the record alone."""
     wins, losses, _ties = shape_of_team["record"]
-    played = wins + losses
-    if played < 3:
+    played = wins + losses + shape_of_team["record"][2]
+    # A record needs results behind it. Reading anything into 0-0, or into
+    # one week of a season, is reading noise.
+    if played == 0:
+        return "unplayed"
+    if played < 3 or (shape_of_team.get("median") and played < 6):
         return "early"
     if wins >= losses * 2:
         return "buying"
@@ -447,7 +498,13 @@ def summary(shape_of_team, players, league_name=""):
     deep = sorted(p for p, spare in shape_of_team["depth"].items()
                   if spare >= 1.5)
 
-    said = [f"{OPENING[stance]} at {record}."]
+    if stance == "unplayed":
+        said = ["No games have counted yet, so nothing here reads the "
+                "season — only the roster."]
+    else:
+        counted = (", counting the weekly median result"
+                   if shape_of_team.get("median") else "")
+        said = [f"{OPENING[stance]} at {record}{counted}."]
     if thin:
         said.append(f"You are thin at {listed(thin)}, which is where an offer "
                     "will try to bring somebody in.")
@@ -475,6 +532,8 @@ def summary(shape_of_team, players, league_name=""):
         said.append("Worth paying slightly over the odds for a starter.")
     elif stance == "selling":
         said.append("Worth taking the safer half of a close deal.")
+    # Byes and the record describe the roster; they are not inputs to any
+    # package. Every offer here is built from lineup value alone.
     return " ".join(said)
 
 
@@ -500,12 +559,69 @@ def describe(offer, players, values):
     return f"It is {lean}{spare}."
 
 
+def written_out(got, players):
+    """The board with every offer already turned into text.
+
+    Stored this way so the page needs neither the player database nor a
+    value list to render it: reading a run becomes one query.
+    """
+    leagues = []
+    for league in got["leagues"]:
+        offers = []
+        for offer in league["offers"]:
+            wins, losses, ties = offer["their_record"]
+            offers.append({
+                "with": offer["with"],
+                "their_record": f"{wins}-{losses}" + (f"-{ties}" if ties else ""),
+                "send": [short(players, p) for p in offer["give"]],
+                "get": [short(players, p) for p in offer["get"]],
+                "changes": lineup_changes(offer, players),
+                "my_pct": offer["my_pct"], "their_pct": offer["their_pct"],
+                "verdict": describe(offer, players, {}),
+            })
+        leagues.append({"league_id": league["league_id"],
+                        "league_name": league["league_name"],
+                        "summary": league["summary"],
+                        "settings": league["settings"], "offers": offers})
+    return leagues
+
+
+def run_and_store(username, db_path=None, protect=()):
+    """Work the offers out and save them. Returns the run id."""
+    import store as st
+
+    got = board(username, protect=protect)
+    players = sc.all_players()
+    conn = st.connect(db_path) if db_path else st.connect()
+    try:
+        return st.write_trade_run(conn, got["season"], got["week"],
+                                  got["source"], written_out(got, players))
+    finally:
+        conn.close()
+
+
 def main():
     localenv.load()
     args = sys.argv[1:]
     if not args or args[0].startswith("--"):
         print("usage: python3 trades.py YOUR_SLEEPER_USERNAME [--league NAME]")
         return 1
+    if "--save" in args:
+        import cloud_client
+        import waiver_analyzer as wa
+        protect = wa.never_drop_names()
+        if cloud_client.configured():
+            got = board(args[0], protect=protect)
+            result = cloud_client.push_trades(
+                got["season"], got["week"], got["source"],
+                written_out(got, sc.all_players()))
+            print(f"Sent offers for {result.get('written', 0)} league(s) to "
+                  f"{cloud_client.base_url()}.")
+        else:
+            run = run_and_store(args[0], protect=protect)
+            print(f"Saved trade run {run}.")
+        return 0
+
     league_filter = None
     if "--league" in args:
         try:

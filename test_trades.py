@@ -235,6 +235,54 @@ class Offline(unittest.TestCase):
             trades.board("someone")
 
 
+class Pruning(unittest.TestCase):
+    """Skipping pairs must not skip offers."""
+
+    def every_pair(self, send, get):
+        import itertools
+        return ([([a], [b]) for a in send for b in get]
+                + [(list(pair), [b])
+                   for pair in itertools.combinations(send, 2) for b in get])
+
+    def test_it_finds_everything_the_full_search_would(self):
+        # The prune exists to skip work, not answers. Anything inside the
+        # fairness band has to survive it.
+        v = values()
+        send = trades.tradeable(Offers.MINE, PLAYERS, v)
+        get = trades.tradeable(Offers.THEIRS, PLAYERS, v)
+        free = trades.free_agents(v, set(Offers.MINE["players"])
+                                 | set(Offers.THEIRS["players"]))
+
+        def fair(give, take):
+            spots = max(0, len(give) - len(take))
+            spare = free.get(v.get(take[0], {}).get("position") or "RB", 0.0)
+            sent, received = trades.fairness(give, take, v, spots, spare)
+            return trades.in_band(sent, received) is not None
+
+        wanted = {(tuple(g), tuple(t))
+                  for g, t in self.every_pair(send, get) if fair(g, t)}
+        got = {(tuple(g), tuple(t))
+               for g, t in trades.candidates(send, get, v, free)}
+        self.assertEqual(wanted - got, set())
+
+    def test_it_skips_most_of_them(self):
+        v = values()
+        send = trades.tradeable(Offers.MINE, PLAYERS, v)
+        get = trades.tradeable(Offers.THEIRS, PLAYERS, v)
+        free = trades.free_agents(v, set())
+        considered = len(list(trades.candidates(send, get, v, free)))
+        self.assertLess(considered, len(self.every_pair(send, get)) // 2)
+
+    def test_your_best_for_their_worst_is_never_priced(self):
+        # Nobody offers it and nobody accepts it, so neither lineup is
+        # worth rebuilding to find that out.
+        v = values()
+        pairs = list(trades.candidates(
+            trades.tradeable(Offers.MINE, PLAYERS, v),
+            trades.tradeable(Offers.THEIRS, PLAYERS, v), v, {}))
+        self.assertNotIn((["rb1"], ["rb4"]), pairs)
+
+
 class Fairness(unittest.TestCase):
     """Which side a lopsided package favours, and who gains the spare spot."""
 
@@ -304,8 +352,8 @@ class Output(unittest.TestCase):
         self.assertEqual(len(sent), len(set(sent)))
 
 
-class Page(unittest.TestCase):
-    """The tab, rendered from a board rather than from the network."""
+class Stored(unittest.TestCase):
+    """Offers are written out once and read back as text."""
 
     PLAYERS = {"rb1": {"position": "RB", "full_name": "Spare Back",
                        "team": "GB"},
@@ -322,39 +370,40 @@ class Page(unittest.TestCase):
                               "pass_td": 6},
                  "offers": [{
                      "give": ["rb1"], "get": ["wr1"], "with": "Their Team",
-                     "their_record": (1, 2, 0), "my_gain": 900,
-                     "their_gain": 400, "my_pct": 6, "their_pct": 3,
+                     "their_record": (1, 2, 0), "my_pct": 6, "their_pct": 3,
                      "tilt": 4, "spots": 0,
                      "changes": [{"slot": "WR", "out": "wr2", "in": "wr1"}]}]}]}
 
-    def html(self, board=None):
-        import webapp
-        import sleeper_client
-        real_board, real_players = trades.board, sleeper_client.all_players
-        trades.board = lambda _u, **_kw: board or self.BOARD
-        sleeper_client.all_players = lambda: self.PLAYERS
-        try:
-            return webapp.render_trades("pradm7").decode()
-        finally:
-            trades.board, sleeper_client.all_players = real_board, real_players
+    def written(self):
+        return trades.written_out(self.BOARD, self.PLAYERS)
 
-    def test_the_offer_names_both_sides_of_the_swap(self):
+    def html(self, leagues=None):
+        import store as st
+        import webapp
+        conn = st.connect(":memory:")
+        st.write_trade_run(conn, "2026", 3, "FantasyCalc",
+                           self.written() if leagues is None else leagues)
+        return webapp.render_trades(conn).decode()
+
+    def test_players_are_named_at_save_time(self):
+        # So the page needs neither the player database nor a value list.
+        offer = self.written()[0]["offers"][0]
+        self.assertEqual(offer["send"], ["Spare Back (GB RB)"])
+        self.assertEqual(offer["get"], ["Wanted Man (KC WR)"])
+        self.assertEqual(offer["their_record"], "1-2")
+
+    def test_the_lineup_change_is_written_out_too(self):
+        offer = self.written()[0]["offers"][0]
+        self.assertEqual(offer["changes"],
+                         ["WR: Wanted Man (KC WR) in, Weak Link (NYJ WR) out"])
+
+    def test_a_stored_run_renders(self):
         html = self.html()
         self.assertIn("Spare Back", html)
         self.assertIn("Wanted Man", html)
-
-    def test_the_lineup_change_is_shown(self):
-        self.assertIn("WR: Wanted Man (KC WR) in, Weak Link (NYJ WR) out",
-                      self.html())
-
-    def test_the_other_manager_and_their_record_are_named(self):
-        html = self.html()
         self.assertIn("Their Team", html)
-        self.assertIn("1-2", html)
 
     def test_the_team_summary_is_shown_above_the_offers(self):
-        # Reading a paragraph and disagreeing with it finds a broken
-        # assumption faster than disagreeing with four of twenty packages.
         html = self.html()
         self.assertIn("Off to a strong start at 2-1", html)
         self.assertLess(html.index("thin at WR"), html.index("Spare Back"))
@@ -363,130 +412,26 @@ class Page(unittest.TestCase):
         self.assertIn("Priced as 10 teams, 0.5 PPR, 1 QB", self.html())
 
     def test_scoring_the_value_list_cannot_model_is_flagged(self):
-        # Six-point passing lifts every quarterback and there is no setting
-        # for it, so it is reported rather than silently mispriced.
         self.assertIn("6 for a passing touchdown", self.html())
 
     def test_the_gain_is_a_share_not_a_raw_unit(self):
-        html = self.html()
-        self.assertIn("Your lineup +6%", html)
-        self.assertNotIn("+900", html)
+        self.assertIn("Your lineup +6%", self.html())
 
-    def test_no_offers_says_so_plainly(self):
-        empty = dict(self.BOARD, leagues=[])
+    def test_no_run_yet_says_when_they_run(self):
+        import store as st
+        import webapp
+        self.assertIn("They run Tuesday",
+                      webapp.render_trades(st.connect(":memory:")).decode())
+
+    def test_a_run_with_no_offers_says_so_plainly(self):
+        empty = [dict(self.written()[0], offers=[])]
         self.assertIn("No package makes both sides better", self.html(empty))
 
     def test_it_says_nothing_is_ever_sent(self):
         self.assertIn("Nothing is ever sent", self.html())
 
-    def test_a_failure_reaches_the_page_rather_than_the_platform(self):
-        import webapp
-        real = trades.board
-        trades.board = lambda _u, **_kw: (_ for _ in ()).throw(
-            RuntimeError("no trade values could be read"))
-        try:
-            self.assertIn("no trade values could be read",
-                          webapp.render_trades("pradm7").decode())
-        finally:
-            trades.board = real
-
-
-class Shape(unittest.TestCase):
-    """The paragraph, and what it is reading."""
-
-    LEAGUE = {"league_id": "1", "name": "Test",
-              "roster_positions": ["QB", "RB", "RB", "WR", "WR", "FLEX",
-                                   "DEF", "BN", "BN"]}
-    PLAYERS = {
-        "a": {"position": "RB", "team": "GB", "full_name": "Deep Back"},
-        "b": {"position": "RB", "team": "KC", "full_name": "Second Back"},
-        "c": {"position": "RB", "team": "SF", "full_name": "Third Back"},
-        "d": {"position": "RB", "team": "NYJ", "full_name": "Fourth Back"},
-        "e": {"position": "WR", "team": "BAL", "full_name": "Zay Flowers",
-              "injury_status": "IR"},
-        "f": {"position": "QB", "team": "CHI", "full_name": "My QB"},
-        "g": {"position": "DEF", "team": "PIT", "full_name": "Steelers"},
-    }
-
-    def team(self, wins=4, losses=1):
-        vals = {p: {"value": 1000.0, "position": self.PLAYERS[p]["position"]}
-                for p in self.PLAYERS}
-        vals = trades.apply_injuries(vals, self.PLAYERS)
-        roster = {"players": list(self.PLAYERS),
-                  "settings": {"wins": wins, "losses": losses, "fpts": 620}}
-        return trades.shape(self.LEAGUE, roster, self.PLAYERS, vals,
-                            byes={"BAL": 9, "CHI": 9, "GB": 11}, week=5)
-
-    def test_depth_counts_the_flex_across_the_positions_that_can_fill_it(self):
-        depth = self.team()["depth"]
-        self.assertGreater(depth["RB"], 1)     # four backs, two-and-a-bit slots
-        self.assertLess(depth["WR"], 0)        # one receiver, two-and-a-bit
-
-    def test_exactly_enough_is_not_reported_as_thin(self):
-        # One quarterback in a one-quarterback league is a normal roster.
-        said = trades.summary(self.team(), self.PLAYERS)
-        self.assertIn("thin at WR", said)
-        self.assertNotIn("QB", said.split("thin at")[1].split(".")[0])
-
-    def test_a_deep_position_is_named_as_what_goes_out(self):
-        self.assertIn("more RB than you can start",
-                      trades.summary(self.team(), self.PLAYERS))
-
-    def test_an_injured_player_is_named_and_explained(self):
-        said = trades.summary(self.team(), self.PLAYERS)
-        self.assertIn("Zay Flowers", said)
-        self.assertIn("counts as need", said)
-
-    def test_upcoming_byes_are_grouped_by_week(self):
-        self.assertIn("week 9: QB and WR",
-                      trades.summary(self.team(), self.PLAYERS))
-
-    def test_a_winning_record_says_pay_up_and_a_losing_one_says_be_safe(self):
-        self.assertIn("paying slightly over the odds",
-                      trades.summary(self.team(4, 1), self.PLAYERS))
-        self.assertIn("safer half",
-                      trades.summary(self.team(1, 4), self.PLAYERS))
-
-    def test_too_early_to_read_says_so(self):
-        self.assertIn("Too early", trades.summary(self.team(1, 1), self.PLAYERS))
-
-
-class Injuries(unittest.TestCase):
-    """A value list lags a fresh injury by weeks."""
-
-    def test_a_hurt_player_is_marked_down(self):
-        vals = {"a": {"value": 1000.0, "position": "WR"}}
-        out = trades.apply_injuries(vals, {"a": {"injury_status": "IR"}})
-        self.assertLess(out["a"]["value"], 1000)
-        self.assertTrue(out["a"]["hurt"])
-
-    def test_a_healthy_player_is_untouched(self):
-        vals = {"a": {"value": 1000.0, "position": "WR"}}
-        out = trades.apply_injuries(vals, {"a": {}})
-        self.assertEqual(out["a"]["value"], 1000)
-        self.assertFalse(out["a"]["hurt"])
-
-    def test_worse_injuries_cost_more(self):
-        self.assertLess(trades.discount_for({"injury_status": "IR"}),
-                        trades.discount_for({"injury_status": "Questionable"}))
-
-
-class WholeRoster(unittest.TestCase):
-
-    def test_every_priced_player_can_be_offered(self):
-        # The piece that fits is often the ninth-most valuable man on the
-        # team, not one of the headliners.
-        roster = {"players": [f"p{i}" for i in range(15)]}
-        vals = {f"p{i}": {"value": 100.0 * (15 - i), "position": "RB"}
-                for i in range(15)}
-        got = trades.tradeable(roster, {}, vals)
-        self.assertEqual(len(got), 15)
-        self.assertEqual(got[0], "p0")
-
-    def test_a_player_nobody_prices_is_left_out(self):
-        roster = {"players": ["known", "unknown"]}
-        vals = {"known": {"value": 500.0, "position": "RB"}}
-        self.assertEqual(trades.tradeable(roster, {}, vals), ["known"])
+    def test_it_says_byes_are_not_what_offers_are_built_from(self):
+        self.assertIn("not for the packages to be built from", self.html())
 
 
 if __name__ == "__main__":

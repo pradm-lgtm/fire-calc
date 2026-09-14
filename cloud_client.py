@@ -80,6 +80,13 @@ def push_lineup(season, week, sources, flags):
     }, timeout=120)
 
 
+def push_trades(season, week, source, leagues):
+    """Send a run of trade offers to the page."""
+    return _call("/api/trades", {
+        "season": season, "week": week, "source": source, "leagues": leagues,
+    }, timeout=120)
+
+
 def recent_claims():
     """Approved and recently submitted claims, for auditing."""
     return _call("/api/claims?include=submitted").get("claims", [])

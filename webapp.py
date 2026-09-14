@@ -984,37 +984,47 @@ def trade_card(offer, players):
             "</article>")
 
 
-def render_trades(username):
-    """Offers worth sending, per league.
-
-    Worked out on each load like the scoreboard rather than stored: rosters
-    move every week, and a package built around a player somebody already
-    traded away is not an offer.
-    """
-    out = [nav("/trades"), "<h1>Trades</h1>"]
+def refresh_trades(conn, db_path):
+    """Work the offers out now and store them. Returns an error, or None."""
+    username = os.environ.get("FANTASY_USER", "")
     if not username:
-        return page("".join(out) + "<p class='empty'>FANTASY_USER is not set "
-                    "on the host, so I cannot look up your leagues.</p>",
-                    "Spike \u2014 trades")
+        return "FANTASY_USER is not set on the host, so I cannot look up " \
+               "your leagues."
     try:
         import waiver_analyzer as wa
         got = trades.board(username, protect=wa.never_drop_names())
-        players = sc.all_players()
+        st.write_trade_run(conn, got["season"], got["week"], got["source"],
+                           trades.written_out(got, sc.all_players()))
+        return None
     except Exception as exc:
         traceback.print_exc()
-        return page("".join(out) + f"<p class='empty'>{e(scrub(exc))}</p>",
-                    "Spike \u2014 trades")
+        return scrub(f"{type(exc).__name__}: {exc}")
 
-    out.append(f"<p class='sub'>Values from {e(got['source'] or 'nowhere')}"
-               "</p>")
-    if not got["leagues"]:
+
+def render_trades(conn):
+    """Offers worth sending, read from the last run rather than worked out.
+
+    Building them touches a value list, the player database and every roster
+    in every league, which is a scheduled job's work rather than something
+    to do while a page loads.
+    """
+    run = st.latest_trade_run(conn)
+    out = [nav("/trades"), "<h1>Trades</h1>"]
+    if not run:
+        return page("".join(out) + "<p class='empty'>No offers worked out "
+                    "yet. They run Tuesday, with the waiver job.</p>"
+                    + refresh_trades_button(), "Spike \u2014 trades")
+
+    leagues = st.trade_leagues(conn, run["id"])
+    out.append(f"<p class='sub'>Week {e(run['week'])} &middot; worked out "
+               f"{e(said_ago(age_of(run)))} &middot; values from "
+               f"{e(run['source'] or 'nowhere')}</p>")
+    if not any(l["offers"] for l in leagues):
         out.append("<p class='empty'>No package makes both sides better right "
                    "now. That is the usual answer; a trade needs two rosters "
                    "shaped the opposite way.</p>")
 
-    for league in got["leagues"]:
-        wins, losses, ties = league["my_record"]
-        record = f"{wins}-{losses}" + (f"-{ties}" if ties else "")
+    for league in leagues:
         settings = league.get("settings") or {}
         priced = (f"Priced as {settings.get('teams', '?')} teams, "
                   f"{settings.get('ppr', '?')} PPR, "
@@ -1025,21 +1035,46 @@ def render_trades(username):
                        "value list has no setting for it, so read quarterback "
                        "prices here as low.")
         out.append(f"<h2><span>{e(league['league_name'] or '')}</span>"
-                   f"<span class='meta'>you are {e(record)}</span></h2>"
+                   f"<span class='meta'>{len(league['offers'])} offers</span>"
+                   "</h2>"
                    f"<div class='bar'>{e(league.get('summary', ''))}</div>"
                    f"<p class='guide'>{e(priced)}</p>")
         for offer in league["offers"]:
-            out.append(trade_card(offer, players))
+            out.append(stored_trade_card(offer))
 
-    out.append("<form method='get' action='/trades'>"
-               "<button class='ghost' style='width:100%;margin-top:18px'>"
-               "Re-check trades</button></form>")
+    out.append(refresh_trades_button())
     out.append("<p class='foot'>Nothing is ever sent. These are packages "
                "where your best starting lineup improves and theirs does too, "
                "which is what makes an offer worth sending rather than merely "
-               "worth wanting. Values weigh a deal; they know nothing about "
-               "your roster.</p>")
+               "worth wanting. The paragraph above each league describes the "
+               "roster; byes and records are in it for you to read, not for "
+               "the packages to be built from.</p>")
     return page("".join(out), "Spike \u2014 trades")
+
+
+def refresh_trades_button():
+    return ("<form method='post' action='/trades/refresh'>"
+            "<button class='ghost' style='width:100%;margin-top:18px'>"
+            "Work out trades now</button></form>")
+
+
+def stored_trade_card(offer):
+    send, get = ", ".join(offer["send"]), ", ".join(offer["get"])
+    rows = "".join(f"<div class='swap'><span class='swaplabel'>{label}</span>"
+                   f"<span>{e(who)}</span></div>"
+                   for label, who in (("You send", send), ("You get", get)))
+    changes = "".join(f"<li>{e(line)}</li>" for line in offer["changes"])
+    return ("<article class='call close'>"
+            "<div class='calltop'>"
+            f"<div><h3>{e(get)}</h3></div>"
+            f"<span class='where'>{e(offer['with'])} &middot; "
+            f"{e(offer['their_record'])}</span></div>"
+            + rows
+            + (f"<p class='rowlabel'>Your lineup</p><ul class='changes'>"
+               f"{changes}</ul>" if changes else "")
+            + f"<p class='why'>Your lineup +{e(offer['my_pct'])}%, theirs "
+              f"+{e(offer['their_pct'])}%. {e(offer['verdict'])}</p>"
+            "</article>")
 
 
 def page(body, title):
@@ -1177,8 +1212,12 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_header("Location", "/login")
                 self.end_headers()
                 return
-            self._send(200, render_trades(
-                os.environ.get("FANTASY_USER", "")).decode())
+            conn = self._conn()
+            try:
+                body = render_trades(conn)
+            finally:
+                conn.close()
+            self._send(200, body.decode())
             return
 
         if path == "/scores":
@@ -1264,6 +1303,30 @@ class Handler(BaseHTTPRequestHandler):
                 conn.close()
             return
 
+        if path == "/api/trades":
+            if not auth.check_api_token(self.headers.get("Authorization")):
+                self._json(401, {"error": auth.token_complaint(
+                    self.headers.get("Authorization"))})
+                return
+            try:
+                payload = json.loads(self.rfile.read(length) or b"{}")
+            except json.JSONDecodeError:
+                self._json(400, {"error": "body was not JSON"})
+                return
+            leagues = payload.get("leagues") or []
+            conn = self._conn()
+            try:
+                run = st.write_trade_run(
+                    conn, payload.get("season"), payload.get("week"),
+                    payload.get("source"), leagues)
+                self._json(200, {"ok": True, "run": run,
+                                 "written": len(leagues)})
+            except Exception as exc:
+                self._json(500, {"error": f"{type(exc).__name__}: {exc}"})
+            finally:
+                conn.close()
+            return
+
         if path == "/api/lineup":
             if not auth.check_api_token(self.headers.get("Authorization")):
                 self._json(401, {"error": auth.token_complaint(
@@ -1343,6 +1406,23 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(200, {"ok": True})
             finally:
                 conn.close()
+            return
+
+        if path == "/trades/refresh":
+            if not self._authed():
+                self.send_response(303)
+                self.send_header("Location", "/login")
+                self.end_headers()
+                return
+            self.rfile.read(length)
+            conn = self._conn()
+            try:
+                refresh_trades(conn, self.db_path)
+            finally:
+                conn.close()
+            self.send_response(303)
+            self.send_header("Location", "/trades")
+            self.end_headers()
             return
 
         if path == "/waivers/refresh":
