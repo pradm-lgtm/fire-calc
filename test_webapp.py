@@ -364,7 +364,7 @@ class AfterKickoff(unittest.TestCase):
         # Hiding it claimed the lineup matched consensus, when what really
         # happened is that the chance to change it passed.
         html = self.played()
-        self.assertIn("Start Robinson over Zay Flowers", html)
+        self.assertIn("The call was Robinson over Zay Flowers", html)
         self.assertNotIn("Every starter matches", html)
 
     def test_an_injury_during_the_game_does_not_rewrite_it(self):
@@ -374,13 +374,45 @@ class AfterKickoff(unittest.TestCase):
 
     def test_it_reads_as_closed_rather_than_outstanding(self):
         html = self.played()
-        self.assertIn("call urgent shut", html)
+        self.assertIn(" shut'", html)
         self.assertIn("Kickoff has passed", html)
-        self.assertNotIn("still open", html)
+        self.assertIn("nothing to do", html)
+
+    def test_a_closed_call_is_never_phrased_as_an_instruction(self):
+        # "Start Robinson over Flowers" above "Kickoff has passed" tells you
+        # to do something and then that you cannot.
+        html = self.played()
+        self.assertIn("The call was Robinson over Zay Flowers", html)
+        self.assertNotIn("Start Robinson over", html)
+
+    def test_a_closed_call_does_not_sit_under_an_imperative_heading(self):
+        html = self.played()
+        self.assertIn("Already played", html)
+        self.assertNotIn("Fix these", html)
+
+    def test_a_closed_call_offers_no_start_marker(self):
+        html = self.played()
+        card = html[html.index("The call was"):]
+        self.assertNotIn(">Start<", card[:card.index("</article>")])
+
+    def test_both_kinds_can_appear_at_once(self):
+        import store as st
+        conn = st.connect(":memory:")
+        st.write_lineup_check(conn, "2026", 3, ["p"],
+                              [self.starter(), dict(self.BENCH)])
+        st.write_lineup_check(conn, "2026", 3, ["p"], [
+            self.starter(locked=1),
+            self.starter(position=1, player_id="11",
+                         player_name="Open Guy (KC WR)", locked=0),
+            dict(self.BENCH, locked=1)])
+        html = webapp.render_lineup(conn).decode()
+        self.assertLess(html.index("Fix these"), html.index("Already played"))
+        self.assertIn("Start Robinson over Open Guy", html)
+        self.assertIn("The call was Robinson over Zay Flowers", html)
 
     def test_a_closed_call_offers_no_action(self):
         html = self.played()
-        card = html[html.index("Start Robinson"):]
+        card = html[html.index("The call was"):]
         self.assertNotIn("Mark as done", card[:card.index("</article>")])
 
     def test_an_open_call_is_unaffected(self):

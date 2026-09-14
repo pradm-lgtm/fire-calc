@@ -119,8 +119,10 @@ opponent and projected points. Leagues where everything agrees are folded
 shut. Projections are shown, never used: they play no part in any verdict,
 which is what you asked for when you said you would do that part yourself.
 
-A call closes at kickoff rather than disappearing. It stays on the page as a
-record of what it said, marked closed and offering no action, and its verdict
+A call closes at kickoff rather than disappearing. It moves to its own
+section and is phrased as a record rather than an instruction — "the call was
+Robinson over Flowers", not "start Robinson over Flowers" above a note saying
+the game has gone. It offers no action, and its verdict
 is carried over from the last check taken before the game rather than
 recomputed: a starter who picks up an injury in the first quarter would
 otherwise read as a fresh disagreement with consensus. Hiding these entirely

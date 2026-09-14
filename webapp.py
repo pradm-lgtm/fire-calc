@@ -608,14 +608,16 @@ def short_name(label):
     return (label or "").split(" (")[0].strip()
 
 
-def player_line(row, kind="", flex_scale=False, both=False, note=""):
+def player_line(row, kind="", flex_scale=False, both=False, note="",
+                quiet=False):
     """One player. `kind` is what this row is here to say, not how loud."""
     ranks = [rank_label(row, flex_scale)]
     if both and row["overall_text"] and row["overall_text"] not in ranks:
         ranks.append(row["overall_text"])
     under = " &middot; ".join(
         x for x in [e(r) for r in ranks if r] + [where_and_points(row)] if x)
-    lock = "<span class='locked'>playing now</span>" if row["locked"] else ""
+    lock = ("<span class='locked'>playing now</span>"
+            if row["locked"] and not quiet else "")
     tail = (f"<span class='tick'>{e(note)}</span>" if note
             else f"<span class='slotname'>{e(row['slot'] or '')}</span>")
     return (f"<div class='player {kind}'>{headshot(row)}"
@@ -653,6 +655,7 @@ def call_card(row, bench, urgent):
     line under it, and the player to start is the only row on the card that
     looks different from the others.
     """
+    shut = bool(row["locked"])
     flex = len(SLOT_ELIGIBILITY.get(row["slot"], ())) > 1
     options = alternatives_for(row, bench)
     named = short_name(row["better_name"])
@@ -660,10 +663,17 @@ def call_card(row, bench, urgent):
     pick = options[0] if (named and options
                           and named in (options[0]["player_name"] or "")) else None
 
-    headline = (f"Start {named} over {short_name(row['player_name'])}"
-                if pick else f"Reconsider {short_name(row['player_name'])}")
+    # A closed call is a record, so it is never phrased as an instruction.
+    # "Start Robinson over Flowers" above "Kickoff has passed" tells you to
+    # do something and then that you cannot.
+    mine = short_name(row["player_name"])
+    if shut:
+        headline = f"The call was {named} over {mine}" if pick else \
+                   f"{mine} was flagged"
+    else:
+        headline = f"Start {named} over {mine}" if pick else \
+                   f"Reconsider {mine}"
 
-    shut = bool(row["locked"])
     classes = ("call " + ("urgent" if urgent else "close")
                + (" shut" if shut else ""))
     out = [f"<article class='{classes}'>",
@@ -675,12 +685,15 @@ def call_card(row, bench, urgent):
            f"{e(row['slot'] or '')}</span></div>"]
 
     if pick:
-        out.append(player_line(pick, "pick", flex_scale=flex, note="Start"))
-        out.append("<p class='rowlabel'>Instead of</p>")
-        out.append(player_line(row, "bench-out", flex_scale=flex))
+        # No "Start" on a call that has closed, and no "playing now" on
+        # either player: the footer already says the game has gone.
+        out.append(player_line(pick, "pick", flex_scale=flex,
+                               note="" if shut else "Start", quiet=shut))
+        out.append(f"<p class='rowlabel'>{'Rather than' if shut else 'Instead of'}</p>")
+        out.append(player_line(row, "bench-out", flex_scale=flex, quiet=shut))
         rest = options[1:]
     else:
-        out.append(player_line(row, "pick", flex_scale=flex))
+        out.append(player_line(row, "pick", flex_scale=flex, quiet=shut))
         rest = options
 
     if rest:
@@ -750,12 +763,13 @@ def render_lineup(conn, force=False):
             and key(r) in handled]
 
     def tier(colour):
-        rows = [r for r in open_calls if r["verdict"] == colour]
-        # Still actionable first; a closed call is a record, not a task.
-        return sorted(rows, key=lambda r: bool(r["locked"]))
+        return [r for r in open_calls
+                if r["verdict"] == colour and not r["locked"]]
 
     urgent, close = tier("RED"), tier("YELLOW")
-    actionable = sum(1 for r in open_calls if not r["locked"])
+    # Kept apart rather than sorted to the bottom of a list headed "Fix
+    # these", which tells you to act on something you cannot act on.
+    closed = [r for r in open_calls if r["locked"]]
 
     out = [nav("/lineup"), "<h1>Start / sit</h1>",
            f"<p class='sub'>Week {e(check['week'])} &middot; checked "
@@ -765,27 +779,25 @@ def render_lineup(conn, force=False):
                    f"refresh:</span> {e(problem)} Showing the last check."
                    "</div>")
 
-    def section(title, rows, urgent):
+    def section(title, rows, urgent, note=""):
         if not rows:
             return
-        shut = sum(1 for r in rows if r["locked"])
-        note = (f"{len(rows) - shut} still open" if len(rows) - shut
-                else "closed")
         out.append(f"<h2><span>{title}</span>"
-                   f"<span class='meta'>{note}</span></h2>")
+                   f"<span class='meta'>{e(note or len(rows))}</span></h2>")
         for row in rows:
             out.append(call_card(row, bench_by_league.get(row["league_id"], []),
                                  urgent=urgent))
 
-    section("Fix these", urgent, True)
-    section("Close calls", close, False)
-    if not open_calls:
+    section("Fix these", urgent, True, f"{len(urgent)} left")
+    section("Close calls", close, False, f"{len(close)} left")
+    if not (urgent or close):
         out.append("<h2><span>Nothing to change</span></h2>"
-                   "<p class='empty'>Every starter matches where analysts "
-                   "have them.</p>")
-    elif not actionable:
-        out.append("<p class='empty'>Every call above is closed; their games "
-                   "have started.</p>")
+                   "<p class='empty'>"
+                   + ("Every call this week has closed; their games have "
+                      "started." if closed else
+                      "Every starter matches where analysts have them.")
+                   + "</p>")
+    section("Already played", closed, False, "nothing to do")
 
     playing = sum(1 for r in started if r["locked"])
     out.append("<h2><span>Full lineups</span>"
@@ -798,8 +810,7 @@ def render_lineup(conn, force=False):
     for lid, lname in seen:
         mine = [r for r in started if r["league_id"] == lid]
         out.append(league_fold(lname or "", mine, bench_by_league.get(lid, []),
-                               sum(1 for r in mine
-                                   if r in open_calls and not r["locked"])))
+                               sum(1 for r in mine if r in urgent or r in close)))
 
     if done:
         out.append(f"<h2><span>Settled</span><span class='meta'>{len(done)}"
