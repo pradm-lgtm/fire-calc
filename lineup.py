@@ -251,7 +251,7 @@ def context_for(player, pid, week):
     return {"pos": player.get("position"),
             "matchup": week["games"].get(team),
             "projection": week["points"].get(str(pid)),
-            "locked": 1 if nfl_week.started(week["kickoffs"], team) else 0}
+            "locked": 0 if nfl_week.yet_to_play(week, team) else 1}
 
 
 def bench_rows(league, roster, players, consensus, week):

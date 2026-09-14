@@ -19,7 +19,7 @@ PLAYERS = {
     "3": {"position": "QB", "team": "KC", "full_name": "Their Guy"},
 }
 NAMES = {1: "My Team", 2: "Their Team"}
-WEEK = {"kickoffs": {"GB": 1_000_000_000, "DAL": 9e18, "KC": 1_000_000_000},
+WEEK = {"kickoffs": {"GB": 1_000_000_000, "DAL": 9e18, "KC": 1_000_000_000}, "statuses": {},
         "games": {"GB": "at CHI", "DAL": "vs PHI", "KC": "at DEN"},
         "points": {"1": 11.0, "2": 9.5, "3": 18.0}}
 
@@ -49,14 +49,14 @@ class OneSide(unittest.TestCase):
         # The schedule is the part that goes missing, so a scored player is
         # settled whatever it says - otherwise he reads as still to come all
         # evening and his projection is added on top of his real points.
-        blank = dict(WEEK, kickoffs={})
+        blank = dict(WEEK, kickoffs={}, statuses={})
         got = scores.side(MINE, NAMES, PLAYERS, blank, SLOTS)
         self.assertEqual([p["to_play"] for p in got["lineup"]], [False, True])
 
     def test_a_scoreless_player_with_no_kickoff_is_still_to_come(self):
         # This is the case that was wrong: a later game read as finished, so
         # the opponent's projected total stopped at what they already had.
-        blank = dict(WEEK, kickoffs={})
+        blank = dict(WEEK, kickoffs={}, statuses={})
         entry = dict(MINE, starters=["2"], starters_points=[0])
         got = scores.side(entry, NAMES, PLAYERS, blank, SLOTS)
         self.assertEqual(got["to_play"], ["WR"])
@@ -192,6 +192,43 @@ class Rendering(unittest.TestCase):
                           webapp.render_scores("pradm7").decode())
         finally:
             scores.board = real
+
+
+class GameState(unittest.TestCase):
+    """A published status beats inferring one from points."""
+
+    WEEK = {"statuses": {"ATL": "complete", "KC": "pre_game"},
+            "kickoffs": {}, "games": {}, "points": {}}
+
+    def test_a_finished_game_with_no_points_is_still_finished(self):
+        # A tight end who played and caught nothing is not yet to play, and
+        # scoring alone cannot tell the two apart.
+        import nfl_week
+        self.assertFalse(nfl_week.yet_to_play(self.WEEK, "ATL", 0.0))
+
+    def test_a_game_that_has_not_kicked_off_is_yet_to_play(self):
+        import nfl_week
+        self.assertTrue(nfl_week.yet_to_play(self.WEEK, "KC", 0.0))
+
+    def test_a_kickoff_time_is_used_when_no_status_is_published(self):
+        import nfl_week
+        week = {"statuses": {}, "kickoffs": {"GB": 1}, "games": {}}
+        self.assertFalse(nfl_week.yet_to_play(week, "GB", 0.0))
+
+    def test_scoring_decides_only_when_nothing_else_is_known(self):
+        import nfl_week
+        week = {"statuses": {}, "kickoffs": {}, "games": {}}
+        self.assertFalse(nfl_week.yet_to_play(week, "GB", 8.0))
+        self.assertTrue(nfl_week.yet_to_play(week, "GB", 0.0))
+
+    def test_the_lineup_uses_it(self):
+        got = scores.side(
+            {"roster_id": 1, "points": 0, "starters": ["1"],
+             "starters_points": [0.0]},
+            {1: "T"}, {"1": {"position": "TE", "team": "ATL"}},
+            dict(self.WEEK, points={"1": 7.7}), ["TE"])
+        self.assertEqual(got["to_play"], [])
+        self.assertEqual(got["projected"], 0.0)
 
 
 if __name__ == "__main__":

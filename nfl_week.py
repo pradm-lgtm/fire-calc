@@ -39,6 +39,20 @@ PROJECTIONS = ("https://api.sleeper.com/projections/nfl/{season}/{week}"
 POINT_KEYS = ("pts_half_ppr", "pts_ppr", "pts_std")
 
 
+# Sleeper publishes the season's schedule with a status on each game, which
+# answers the only question the page has - has this team played yet - without
+# arithmetic on a clock. A timestamp has to be compared against now, in the
+# right zone, and has been wrong three times; a status is just read.
+SCHEDULE_SOURCES = [
+    "https://api.sleeper.com/schedule/nfl/regular/{season}",
+    "https://api.sleeper.app/schedule/nfl/regular/{season}",
+]
+
+PRE_GAME = "pre_game"
+# Everything Sleeper might call a game that has not kicked off.
+NOT_STARTED = {"pre_game", "pregame", "scheduled", "upcoming", "not_started"}
+
+
 def _get(url):
     req = urllib.request.Request(url, headers={
         "User-Agent": "Mozilla/5.0 (personal fantasy tool; single user)",
@@ -55,6 +69,51 @@ def _get(url):
 def team_name(abbreviation):
     abbreviation = (abbreviation or "").upper()
     return ESPN_TO_SLEEPER.get(abbreviation, abbreviation)
+
+
+def statuses(season, week):
+    """{team: status} for one week, from the published schedule.
+
+    A status of pre_game is the whole answer to "yet to play". Anything
+    else - in progress, complete, postponed - means his points are on the
+    board, however few.
+    """
+    want = str(week)
+    for template in SCHEDULE_SOURCES:
+        data = _get(template.format(season=season))
+        rows = data if isinstance(data, list) else (
+            data.get("games") if isinstance(data, dict) else None)
+        if not isinstance(rows, list):
+            continue
+        out = {}
+        for row in rows:
+            if not isinstance(row, dict) or str(row.get("week")) != want:
+                continue
+            status = str(row.get("status") or "").lower()
+            for key in ("home", "away"):
+                team = team_name(row.get(key))
+                if team and status:
+                    out[team] = status
+        if out:
+            return out
+    return {}
+
+
+def yet_to_play(week, team, points=0.0):
+    """Has this team's game not started?
+
+    Three signals, most trustworthy first: a published status, then a
+    kickoff time, then whether he has scored. The last one cannot tell a
+    player who has not played from one who played and scored nothing, which
+    is exactly the case the first one exists to settle.
+    """
+    team = (team or "").upper()
+    status = (week.get("statuses") or {}).get(team)
+    if status:
+        return status in NOT_STARTED
+    if (week.get("kickoffs") or {}).get(team):
+        return not started(week["kickoffs"], team)
+    return not points
 
 
 def scoreboard(season, week):
@@ -210,8 +269,9 @@ def week_context(season, week):
     rows = projection_rows(season, week)
     games = matchups_from(rows)
     kickoffs = kickoffs_from(rows)
+    state = statuses(season, week)
 
-    if not kickoffs or len(games) < 24:
+    if not (kickoffs or state) or len(games) < 24:
         published = scoreboard(season, week)
         for team, got in published.items():
             if got.get("kickoff") and team not in kickoffs:
@@ -221,7 +281,8 @@ def week_context(season, week):
                 games[team] = got["matchup"]
             elif team not in games and got.get("matchup"):
                 games[team] = got["matchup"]
-    return {"points": points_from(rows), "games": games, "kickoffs": kickoffs}
+    return {"points": points_from(rows), "games": games,
+            "kickoffs": kickoffs, "statuses": state}
 
 
 def main():
@@ -259,6 +320,14 @@ def main():
         print(f"    {team:<4} {datetime.fromtimestamp(when, timezone.utc)}")
     if not starts:
         print("    (none; nothing will be locked once games begin)")
+
+    state = statuses(season, week)
+    print(f"game statuses: {len(state)} teams")
+    for team, status in sorted(state.items())[:6]:
+        print(f"    {team:<4} {status}")
+    if not state:
+        print("    (none; falling back to kickoff times, then to whether he "
+              "has scored)")
 
     # Always asked, because the records have never carried a kickoff time
     # and that is the field the page actually needs.

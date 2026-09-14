@@ -49,7 +49,7 @@ python3 submitter.py YOUR_USERNAME --audit    # what is really queued
 | `submitter.py` | drives Sleeper's UI to place approved claims |
 | `lineup.py` | flags starters that disagree with analyst rankings |
 | `rankings.py` | reads ranked players out of the data a page ships |
-| `nfl_week.py` | opponents, projected points and kickoff times |
+| `nfl_week.py` | opponents, projected points and whether a game has begun |
 | `scores.py` | every league's live matchup, on one page |
 | `trades.py` | packages both sides would take, per league |
 | `trade_values.py` | player trade values, joined to rosters by id |
@@ -68,7 +68,10 @@ from Sleeper on each load rather than stored. Checking four leagues meant
 four apps.
 
 Each shows both scores, where the game is heading, and how many starters on
-each side have yet to kick off. The projected total counts real points for a
+each side have yet to kick off. Whether a game has begun is read from
+Sleeper's published schedule, which carries a status per game, rather than
+compared against a clock: a tight end who played and caught nothing is not
+still to come, and points alone cannot tell those apart. The projected total counts real points for a
 finished game and a projection only for one still to come, so nothing is
 counted twice. Both lineups open paired slot by slot, because the choice you
 made at flex only means something next to the one they made there.

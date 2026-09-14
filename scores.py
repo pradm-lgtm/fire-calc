@@ -41,11 +41,7 @@ def side(entry, names, players, week, slots):
         player = players.get(pid) or {}
         team = (player.get("team") or "").upper()
         scored = round(float(points[i]), 1) if i < len(points) else 0.0
-        # Points on the board settle it whatever the schedule says, which
-        # matters because the schedule is the part that can be missing: a
-        # team with no kickoff time would otherwise read as still to come
-        # all evening and keep adding a projection to a finished game.
-        to_play = not (scored or nfl_week.started(week["kickoffs"], team))
+        to_play = nfl_week.yet_to_play(week, team, scored)
         projection = week["points"].get(pid)
         # What he has already scored, or what he is expected to. Adding a
         # projection to a finished game would count the same points twice.

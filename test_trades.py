@@ -175,7 +175,8 @@ class Offline(unittest.TestCase):
         import nfl_week
         self.silence(nfl_week)
         self.assertEqual(nfl_week.week_context(2026, 1),
-                         {"points": {}, "games": {}, "kickoffs": {}})
+                         {"points": {}, "games": {}, "kickoffs": {},
+                          "statuses": {}})
 
     def test_the_schedule_comes_back_empty_rather_than_failing(self):
         import nfl_week
