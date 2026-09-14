@@ -129,11 +129,42 @@ class NeverDrop(unittest.TestCase):
 
     def test_a_protected_player_is_never_in_a_package(self):
         # A waiver drop costs a roster spot; a trade hands him to a rival.
-        found = trades.offers(LEAGUE, Offers.MINE, Offers.THEIRS, self.NAMED,
-                              values(), protect={"keep him"})
-        self.assertTrue(found)
-        for offer in found:
+        # "Keep Him" is rb1, and every package the unprotected run finds
+        # sends him. Protecting him may well leave no trade at all, which
+        # is the correct answer, so what matters is that he is not in one.
+        loose = trades.offers(LEAGUE, Offers.MINE, Offers.THEIRS, self.NAMED,
+                              values())
+        self.assertTrue(loose)
+        self.assertTrue(all("rb1" in o["give"] for o in loose))
+
+        held = trades.offers(LEAGUE, Offers.MINE, Offers.THEIRS, self.NAMED,
+                             values(), protect={"keep him"})
+        for offer in held:
             self.assertNotIn("rb1", offer["give"])
+
+
+class Holes(unittest.TestCase):
+    """A lineup you cannot legally fill is not a trade-off, it is a loss."""
+
+    SLOTS = trades.starting_slots(LEAGUE)
+
+    def test_an_unfillable_slot_is_spotted(self):
+        filled = trades.best_lineup(["rb1", "rb2", "wr1"], PLAYERS, values(),
+                                    self.SLOTS)
+        self.assertTrue(trades.leaves_a_hole(filled, self.SLOTS))
+
+    def test_a_full_lineup_is_not_a_hole(self):
+        filled = trades.best_lineup(["qb1", "rb1", "wr1", "rb2"], PLAYERS,
+                                    values(), self.SLOTS)
+        self.assertFalse(trades.leaves_a_hole(filled, self.SLOTS))
+
+    def test_your_only_quarterback_is_not_traded_away(self):
+        # An empty slot is worth zero, which reads as merely bad next to a
+        # big gain elsewhere, so it has to be ruled out rather than priced.
+        mine = {"roster_id": 1, "players": ["qb1", "rb1", "rb2", "wr2"]}
+        theirs = {"roster_id": 2, "players": ["wr1", "wr4", "rb4", "qb2"]}
+        for offer in trades.offers(LEAGUE, mine, theirs, PLAYERS, values()):
+            self.assertNotIn("qb1", offer["give"])
 
 
 class RosterSpots(unittest.TestCase):
@@ -188,6 +219,51 @@ class Offline(unittest.TestCase):
         self.silence(tv)
         with self.assertRaises(RuntimeError):
             trades.board("someone")
+
+
+class Output(unittest.TestCase):
+    """What an offer says about itself."""
+
+    NAMES = {"rb1": {"position": "RB", "full_name": "Spare Back", "team": "GB"},
+             "wr1": {"position": "WR", "full_name": "Wanted Man", "team": "KC"},
+             "wr2": {"position": "WR", "full_name": "Weak Link", "team": "NYJ"}}
+
+    def offer(self, **kw):
+        base = {"give": ["rb1"], "get": ["wr1"], "tilt": 3, "spots": 0,
+                "changes": [{"slot": "WR", "out": "wr2", "in": "wr1"}]}
+        base.update(kw)
+        return base
+
+    def test_the_lineup_change_names_both_players(self):
+        self.assertEqual(trades.lineup_changes(self.offer(), self.NAMES),
+                         ["WR: Wanted Man (KC WR) in, "
+                          "Weak Link (NYJ WR) out"])
+
+    def test_a_newly_filled_slot_has_nobody_going_out(self):
+        offer = self.offer(changes=[{"slot": "FLEX", "out": None, "in": "wr1"}])
+        self.assertEqual(trades.lineup_changes(offer, self.NAMES),
+                         ["FLEX: Wanted Man (KC WR) in"])
+
+    def test_a_close_package_reads_as_even(self):
+        self.assertIn("about even", trades.describe(self.offer(), self.NAMES, {}))
+
+    def test_the_lean_is_stated_from_their_side(self):
+        # Whether they would accept is the question; how good it is for you
+        # is already the lineup number above it.
+        said = trades.describe(self.offer(tilt=18), self.NAMES, {})
+        self.assertIn("in their favour", said)
+
+    def test_a_freed_roster_spot_is_mentioned(self):
+        said = trades.describe(self.offer(spots=1), self.NAMES, {})
+        self.assertIn("frees them 1 roster spot", said)
+
+    def test_one_offer_per_player_sent(self):
+        # Three variations on trading the same quarterback read as three
+        # ideas and are one.
+        found = trades.offers(LEAGUE, Offers.MINE, Offers.THEIRS, PLAYERS,
+                              values())
+        sent = [p for o in found for p in o["give"]]
+        self.assertEqual(len(sent), len(set(sent)))
 
 
 if __name__ == "__main__":

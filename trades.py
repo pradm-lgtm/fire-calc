@@ -50,8 +50,8 @@ def starting_slots(league):
     return [s for s in (league.get("roster_positions") or []) if s not in BENCH]
 
 
-def lineup_value(player_ids, players, values, slots):
-    """The best legal starting lineup you could field, by trade value.
+def best_lineup(player_ids, players, values, slots):
+    """{slot: player_id} for the best legal lineup you could field.
 
     Filled most-constrained slot first: a quarterback slot has one kind of
     answer and a flex has three, so letting flex pick first would strand the
@@ -60,8 +60,9 @@ def lineup_value(player_ids, players, values, slots):
     pool = {pid: values.get(pid, {}).get("value", 0.0) for pid in player_ids}
     positions = {pid: (players.get(pid) or {}).get("position")
                  for pid in player_ids}
-    used, total = set(), 0.0
-    for slot in sorted(slots, key=lambda s: len(SLOT_ELIGIBILITY.get(s, ()))):
+    used, filled = set(), {}
+    for i, slot in sorted(enumerate(slots),
+                          key=lambda s: len(SLOT_ELIGIBILITY.get(s[1], ()))):
         allowed = SLOT_ELIGIBILITY.get(slot)
         if not allowed:
             continue
@@ -73,8 +74,26 @@ def lineup_value(player_ids, players, values, slots):
                 best, best_value = pid, pool[pid]
         if best:
             used.add(best)
-            total += best_value
-    return total
+        filled[i] = best
+    return filled
+
+
+def lineup_value(player_ids, players, values, slots):
+    filled = best_lineup(player_ids, players, values, slots)
+    return sum(values.get(pid, {}).get("value", 0.0)
+               for pid in filled.values() if pid)
+
+
+def leaves_a_hole(filled, slots):
+    """Would this roster be unable to field a legal lineup?
+
+    A slot with nobody in it is not a small loss worth a big gain elsewhere:
+    it is a week you cannot set your lineup. The value of an empty slot is
+    zero, which reads as merely bad, so it has to be ruled out rather than
+    priced.
+    """
+    return any(filled.get(i) is None for i, slot in enumerate(slots)
+               if SLOT_ELIGIBILITY.get(slot))
 
 
 def value_of(ids, values):
@@ -152,12 +171,21 @@ def offers(league, mine, theirs, players, values, protect=()):
     packages = ([([a], [b]) for a in can_send for b in can_get]
                 + [(list(pair), [b]) for pair in itertools.combinations(can_send, 2)
                    for b in can_get])
+    my_lineup_before = best_lineup(my_ids, players, values, slots)
     for give, get in packages:
-        my_after = lineup_value([p for p in my_ids if p not in give] + get,
-                                players, values, slots)
-        their_after = lineup_value(
-            [p for p in their_ids if p not in get] + give, players, values,
-            slots)
+        my_roster = [p for p in my_ids if p not in give] + get
+        their_roster = [p for p in their_ids if p not in get] + give
+        my_filled = best_lineup(my_roster, players, values, slots)
+        their_filled = best_lineup(their_roster, players, values, slots)
+        # Neither side may be left unable to field a lineup, however well
+        # the numbers come out.
+        if leaves_a_hole(my_filled, slots) or leaves_a_hole(their_filled, slots):
+            continue
+
+        my_after = sum(values.get(p, {}).get("value", 0.0)
+                       for p in my_filled.values() if p)
+        their_after = sum(values.get(p, {}).get("value", 0.0)
+                          for p in their_filled.values() if p)
         my_gain = my_after - my_before
         their_gain = their_after - their_before
         if my_gain <= 0 or their_gain <= 0:
@@ -173,8 +201,16 @@ def offers(league, mine, theirs, players, values, protect=()):
         if abs(tilt) > FAIRNESS:
             continue
 
+        # What actually changes in your starting eleven, so the cost of
+        # sending a starter is visible rather than buried in one number.
+        changes = []
+        for i, slot in enumerate(slots):
+            was, now = my_lineup_before.get(i), my_filled.get(i)
+            if was != now:
+                changes.append({"slot": slot, "out": was, "in": now})
+
         found.append({
-            "give": give, "get": get,
+            "give": give, "get": get, "changes": changes,
             "my_gain": round(my_gain), "their_gain": round(their_gain),
             "sent_value": round(sent), "received_value": round(received),
             "tilt": round(tilt * 100),
@@ -183,7 +219,17 @@ def offers(league, mine, theirs, players, values, protect=()):
     # Best for you first, then by how obviously good it is for them, which
     # is what decides whether the offer gets accepted.
     found.sort(key=lambda o: (o["my_gain"], o["their_gain"]), reverse=True)
-    return found[:TOP_OFFERS]
+
+    # One offer per player you send. Three variations on trading the same
+    # quarterback read as three ideas and are one.
+    seen, unique = set(), []
+    for offer in found:
+        key = tuple(sorted(offer["give"]))
+        if any(p in seen for p in key):
+            continue
+        seen.update(key)
+        unique.append(offer)
+    return unique[:TOP_OFFERS]
 
 
 def league_offers(league, user_id, players, values, protect=()):
@@ -229,18 +275,31 @@ def board(username, league_filter=None, protect=()):
             "leagues": out}
 
 
+def short(players, pid):
+    return sc.player_label(players, pid).split(" [")[0] if pid else "nobody"
+
+
+def lineup_changes(offer, players):
+    """"QB: Lawrence out, Williams in" for every slot that moves.
+
+    The cost of sending a starter is the man who replaces him, and one
+    number for the whole roster hides that entirely.
+    """
+    return [f"{c['slot']}: {short(players, c['in'])} in"
+            + (f", {short(players, c['out'])} out" if c["out"] else "")
+            for c in offer["changes"]]
+
+
 def describe(offer, players, values):
-    """One sentence saying what the trade does for you."""
-    got = ", ".join(sc.player_label(players, p).split(" [")[0] for p in offer["get"])
-    positions = sorted({values.get(p, {}).get("position") for p in offer["get"]})
-    lean = ("even" if abs(offer["tilt"]) < 6 else
-            f"{abs(offer['tilt'])}% their way" if offer["tilt"] > 0
-            else f"{abs(offer['tilt'])}% your way")
-    spare = (f" You send {offer['spots']} more player"
-             f"{'s' if offer['spots'] > 1 else ''} than you get back."
-             if offer["spots"] else "")
-    return (f"{got} starts for you at {'/'.join(p for p in positions if p)}. "
-            f"By value the package is {lean}.{spare}")
+    """One sentence on whether they would take it."""
+    # Stated from their side, because that is the question: an offer is
+    # only worth sending if the other manager sees a reason to accept.
+    lean = ("about even by value" if abs(offer["tilt"]) < 6 else
+            f"{abs(offer['tilt'])}% in their favour by value" if offer["tilt"] > 0
+            else f"{abs(offer['tilt'])}% in your favour by value")
+    spare = (f", and frees them {offer['spots']} roster spot"
+             f"{'s' if offer['spots'] > 1 else ''}" if offer["spots"] else "")
+    return f"It is {lean}{spare}."
 
 
 def main():
@@ -281,8 +340,10 @@ def main():
             print(f"  To {offer['with']} ({ow}-{ol}{f'-{ot}' if ot else ''})")
             print(f"    Send    {give}")
             print(f"    Get     {get}")
-            print(f"    Your lineup +{offer['my_gain']:,}, "
-                  f"theirs +{offer['their_gain']:,}")
+            for change in lineup_changes(offer, players):
+                print(f"    Lineup  {change}")
+            print(f"    Value   you +{offer['my_gain']:,}, "
+                  f"them +{offer['their_gain']:,}")
             print(f"    {describe(offer, players, got['values'])}")
     if not got["leagues"]:
         print("\nNo package makes both sides better right now.")

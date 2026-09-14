@@ -314,33 +314,21 @@ def main():
            for r in rows[:3]]
     print(f"kickoff fields on the first rows: {raw}")
 
-    starts = kickoffs_from(rows)
-    print(f"kickoff times: {len(starts)} teams")
-    for team, when in sorted(starts.items())[:4]:
-        print(f"    {team:<4} {datetime.fromtimestamp(when, timezone.utc)}")
-    if not starts:
-        print("    (none; nothing will be locked once games begin)")
-
     state = statuses(season, week)
-    print(f"game statuses: {len(state)} teams")
+    print(f"game statuses: {len(state)} teams  <- this is the one that matters")
     for team, status in sorted(state.items())[:6]:
         print(f"    {team:<4} {status}")
-    if not state:
+    if state:
+        print("    a team is 'yet to play' only while its game reads pre_game")
+    else:
         print("    (none; falling back to kickoff times, then to whether he "
               "has scored)")
 
-    # Always asked, because the records have never carried a kickoff time
-    # and that is the field the page actually needs.
+    # Both of these are fallbacks for when the statuses above are missing.
+    starts = kickoffs_from(rows)
+    print(f"fallback, kickoff times in the records: {len(starts)} teams")
     published = scoreboard(season, week)
-    print(f"published schedule: {len(published)} teams")
-    for team, got in sorted(published.items())[:4]:
-        when = got.get("kickoff")
-        stamp = (datetime.fromtimestamp(when, timezone.utc).isoformat()
-                 if when else "no time")
-        print(f"    {team:<4} {got.get('matchup', '?'):<8} {stamp}")
-    if not published:
-        print("    (it did not answer; without it a player who has not "
-              "played cannot be told from one who scored nothing)")
+    print(f"fallback, published schedule: {len(published)} teams")
     return 0
 
 
