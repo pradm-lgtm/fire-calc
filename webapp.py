@@ -34,6 +34,8 @@ import cloud_auth as auth
 import db
 import localenv
 import scores
+import sleeper_client as sc
+import trades
 from lineup import SLOT_ELIGIBILITY
 import store as st
 
@@ -201,6 +203,13 @@ label { font-size:13px; color:var(--muted); }
 .half .face { width:28px; height:28px; }
 .slotchip { color:var(--muted); font-size:11px; font-weight:700; width:42px;
             text-align:center; flex:none; }
+.swap { display:flex; gap:10px; padding:7px 0; align-items:baseline; }
+.swap + .swap { border-top:1px solid var(--line); }
+.swaplabel { color:var(--muted); font-size:12.5px; width:74px;
+             flex:none; }
+.changes { margin:4px 0 0; padding-left:18px; color:var(--muted);
+           font-size:13px; }
+.changes li { margin:2px 0; }
 .state { font-size:14px; font-weight:600; margin:12px 0 0; }
 .state.approved { color:var(--ok); } .state.declined { color:var(--no); }
 .state.submitted { color:var(--action); }
@@ -468,7 +477,7 @@ def brand():
 
 def nav(here):
     tabs = (("/scores", "Scores"), ("/", "Waivers"),
-            ("/lineup", "Start / sit"))
+            ("/lineup", "Start / sit"), ("/trades", "Trades"))
     return brand() + "<nav>" + "".join(
         f"<a class='{'on' if path == here else ''}' href='{path}'>{label}</a>"
         for path, label in tabs) + "</nav>"
@@ -938,6 +947,77 @@ def render_scores(username):
     return page("".join(out), "Spike \u2014 scores")
 
 
+def trade_card(offer, players):
+    """One offer, headed by the swap and then by what it costs your lineup."""
+    send = ", ".join(trades.short(players, p) for p in offer["give"])
+    get = ", ".join(trades.short(players, p) for p in offer["get"])
+    wins, losses, ties = offer["their_record"]
+    record = f"{wins}-{losses}" + (f"-{ties}" if ties else "")
+
+    rows = "".join(f"<div class='swap'><span class='swaplabel'>{label}</span>"
+                   f"<span>{e(who)}</span></div>"
+                   for label, who in (("You send", send), ("You get", get)))
+    changes = "".join(f"<li>{e(line)}</li>"
+                      for line in trades.lineup_changes(offer, players))
+    return ("<article class='call close'>"
+            "<div class='calltop'>"
+            f"<div><h3>{e(get)}</h3></div>"
+            f"<span class='where'>{e(offer['with'])} &middot; {e(record)}"
+            "</span></div>"
+            + rows
+            + (f"<p class='rowlabel'>Your lineup</p><ul class='changes'>"
+               f"{changes}</ul>" if changes else "")
+            + f"<p class='why'>{e(trades.describe(offer, players, {}))}</p>"
+            "</article>")
+
+
+def render_trades(username):
+    """Offers worth sending, per league.
+
+    Worked out on each load like the scoreboard rather than stored: rosters
+    move every week, and a package built around a player somebody already
+    traded away is not an offer.
+    """
+    out = [nav("/trades"), "<h1>Trades</h1>"]
+    if not username:
+        return page("".join(out) + "<p class='empty'>FANTASY_USER is not set "
+                    "on the host, so I cannot look up your leagues.</p>",
+                    "Spike \u2014 trades")
+    try:
+        import waiver_analyzer as wa
+        got = trades.board(username, protect=wa.never_drop_names())
+        players = sc.all_players()
+    except Exception as exc:
+        traceback.print_exc()
+        return page("".join(out) + f"<p class='empty'>{e(scrub(exc))}</p>",
+                    "Spike \u2014 trades")
+
+    out.append(f"<p class='sub'>Values from {e(got['source'] or 'nowhere')}"
+               "</p>")
+    if not got["leagues"]:
+        out.append("<p class='empty'>No package makes both sides better right "
+                   "now. That is the usual answer; a trade needs two rosters "
+                   "shaped the opposite way.</p>")
+
+    for league in got["leagues"]:
+        wins, losses, ties = league["my_record"]
+        record = f"{wins}-{losses}" + (f"-{ties}" if ties else "")
+        out.append(f"<h2><span>{e(league['league_name'] or '')}</span>"
+                   f"<span class='meta'>you are {e(record)}</span></h2>")
+        for offer in league["offers"]:
+            out.append(trade_card(offer, players))
+
+    out.append("<form method='get' action='/trades'>"
+               "<button class='ghost' style='width:100%;margin-top:18px'>"
+               "Re-check trades</button></form>")
+    out.append("<p class='foot'>Nothing is ever sent. These are packages "
+               "where your best starting lineup improves and theirs does too, "
+               "which is what makes an offer worth sending rather than merely "
+               "worth wanting. Values weigh a deal; they know nothing about "
+               "your roster.</p>")
+    return page("".join(out), "Spike \u2014 trades")
+
+
 def page(body, title):
     return (f"<!doctype html><html><head><meta charset='utf-8'>"
             f"<meta name='viewport' content='width=device-width,initial-scale=1'>"
@@ -1067,6 +1147,16 @@ class Handler(BaseHTTPRequestHandler):
             finally:
                 conn.close()
             return
+        if path == "/trades":
+            if not self._authed():
+                self.send_response(303)
+                self.send_header("Location", "/login")
+                self.end_headers()
+                return
+            self._send(200, render_trades(
+                os.environ.get("FANTASY_USER", "")).decode())
+            return
+
         if path == "/scores":
             if not self._authed():
                 self.send_response(303)

@@ -280,5 +280,68 @@ class Output(unittest.TestCase):
         self.assertEqual(len(sent), len(set(sent)))
 
 
+class Page(unittest.TestCase):
+    """The tab, rendered from a board rather than from the network."""
+
+    PLAYERS = {"rb1": {"position": "RB", "full_name": "Spare Back",
+                       "team": "GB"},
+               "wr1": {"position": "WR", "full_name": "Wanted Man",
+                       "team": "KC"},
+               "wr2": {"position": "WR", "full_name": "Weak Link",
+                       "team": "NYJ"}}
+
+    BOARD = {"season": "2026", "source": "FantasyCalc", "values": {},
+             "leagues": [{
+                 "league_id": "5", "league_name": "LEHG", "my_record": (2, 1, 0),
+                 "offers": [{
+                     "give": ["rb1"], "get": ["wr1"], "with": "Their Team",
+                     "their_record": (1, 2, 0), "my_gain": 900,
+                     "their_gain": 400, "tilt": 4, "spots": 0,
+                     "changes": [{"slot": "WR", "out": "wr2", "in": "wr1"}]}]}]}
+
+    def html(self, board=None):
+        import webapp
+        import sleeper_client
+        real_board, real_players = trades.board, sleeper_client.all_players
+        trades.board = lambda _u, **_kw: board or self.BOARD
+        sleeper_client.all_players = lambda: self.PLAYERS
+        try:
+            return webapp.render_trades("pradm7").decode()
+        finally:
+            trades.board, sleeper_client.all_players = real_board, real_players
+
+    def test_the_offer_names_both_sides_of_the_swap(self):
+        html = self.html()
+        self.assertIn("Spare Back", html)
+        self.assertIn("Wanted Man", html)
+
+    def test_the_lineup_change_is_shown(self):
+        self.assertIn("WR: Wanted Man (KC WR) in, Weak Link (NYJ WR) out",
+                      self.html())
+
+    def test_the_other_manager_and_their_record_are_named(self):
+        html = self.html()
+        self.assertIn("Their Team", html)
+        self.assertIn("1-2", html)
+
+    def test_no_offers_says_so_plainly(self):
+        empty = dict(self.BOARD, leagues=[])
+        self.assertIn("No package makes both sides better", self.html(empty))
+
+    def test_it_says_nothing_is_ever_sent(self):
+        self.assertIn("Nothing is ever sent", self.html())
+
+    def test_a_failure_reaches_the_page_rather_than_the_platform(self):
+        import webapp
+        real = trades.board
+        trades.board = lambda _u, **_kw: (_ for _ in ()).throw(
+            RuntimeError("no trade values could be read"))
+        try:
+            self.assertIn("no trade values could be read",
+                          webapp.render_trades("pradm7").decode())
+        finally:
+            trades.board = real
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

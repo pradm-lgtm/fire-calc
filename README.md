@@ -159,6 +159,10 @@ python3 trades.py YOUR_SLEEPER_USERNAME
 python3 trades.py YOUR_SLEEPER_USERNAME --league LEHG
 ```
 
+Lives under **Trades** on the site, worked out on each load rather than
+stored: rosters move every week, and a package built around a player somebody
+has already traded away is not an offer.
+
 A trade happens when both managers think they got better, so that is what
 this looks for: packages where your best starting lineup improves and theirs
 does too. Two teams with opposite surpluses can both gain, and every roster
