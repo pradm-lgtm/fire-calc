@@ -50,6 +50,8 @@ CREATE TABLE IF NOT EXISTS proposals (
     drop_position   TEXT,
     bid             INTEGER,
     max_bid         INTEGER,
+    bid_low         INTEGER,
+    bid_high        INTEGER,
     consensus       INTEGER DEFAULT 0,
     sources         TEXT,
     rationale       TEXT,
@@ -136,6 +138,8 @@ MIGRATIONS = [
     "ALTER TABLE lineup_flags ADD COLUMN projection REAL",
     "ALTER TABLE lineup_flags ADD COLUMN overall_text TEXT",
     "ALTER TABLE lineup_flags ADD COLUMN locked INTEGER DEFAULT 0",
+    "ALTER TABLE proposals ADD COLUMN bid_low INTEGER",
+    "ALTER TABLE proposals ADD COLUMN bid_high INTEGER",
 ]
 
 
@@ -228,6 +232,7 @@ def add_proposal(conn, run_id, **f):
         drop_player_name=f.get("drop_player_name"),
         drop_position=f.get("drop_position"),
         bid=f.get("bid"), max_bid=f.get("max_bid"),
+        bid_low=f.get("bid_low"), bid_high=f.get("bid_high"),
         consensus=f.get("consensus", 0),
         sources=json.dumps(f.get("sources", [])),
         rationale=f.get("rationale", ""), quote=f.get("quote", ""),

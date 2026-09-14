@@ -122,7 +122,28 @@ def proposals_for_league(league, user_id, players, trending, texts, max_moves):
             bid = 1
 
         add = players.get(pid) or {}
-        quote = info["contexts"][0][1] if info["contexts"] else ""
+        # The first source that actually said something. Sources that only
+        # listed him contribute nothing to quote.
+        quote = next((text for _s, text in info["contexts"] if text), "")
+
+        # What the analysts themselves bid, as a range, so the number in the
+        # box has something to be judged against.
+        faabs = info.get("faab_values") or []
+        low = high = None
+        if faabs and remaining:
+            low = max(1, round(remaining * min(faabs) / 100))
+            high = max(low, round(remaining * max(faabs) / 100))
+
+        drop_pos = drop_player.get("position", "?")
+        drop_count = len((ew.roster_by_position(mine, players)
+                          .get(drop_pos) or []))
+        if drop_label == "deep":
+            why = (f"You roster {drop_count} {drop_pos}s, more than you can "
+                   "start, so this one is spare.")
+        elif drop_label == "thin":
+            why = f"You only roster {drop_count} {drop_pos}s, so this one costs you depth."
+        else:
+            why = f"You roster {drop_count} {drop_pos}s."
         out.append(dict(
             platform="sleeper",
             league_id=league["league_id"],
@@ -133,9 +154,9 @@ def proposals_for_league(league, user_id, players, trending, texts, max_moves):
             drop_player_id=drop_pid,
             drop_player_name=sc.player_label(players, drop_pid),
             drop_position=drop_player.get("position"),
-            bid=bid, max_bid=remaining,
+            bid=bid, max_bid=remaining, bid_low=low, bid_high=high,
             consensus=info["count"], sources=info["sources"],
-            rationale=f"{drop_player.get('position','?')} is {drop_label} for you",
+            rationale=why,
             quote=quote, rank=len(out) + 1,
         ))
         protect.add(drop_pid)

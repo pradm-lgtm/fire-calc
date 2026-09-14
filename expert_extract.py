@@ -335,6 +335,34 @@ def _sentence_bounds(text, index):
     return start, end
 
 
+# Sentences that name a player without saying anything about him. Ranking
+# sites wrap their tables in furniture like "Below are some popular searches
+# and comparisons from our Who To Pickup tool", which names a dozen players
+# and analyses none of them. Quoting one of those as the reason to spend FAAB
+# is worse than quoting nothing.
+_BOILERPLATE = re.compile(
+    r"\b(?:popular searches|who to (?:pick ?up|start)|our .{0,24}tool|"
+    r"below are|above are|click here|sign up|subscribe|free trial|"
+    r"see (?:the )?full (?:list|rankings)|compare .{0,20}players|"
+    r"advertisement|read more|related articles?|"
+    r"comparisons? from)\b", re.IGNORECASE)
+
+# More than a couple of other names in one sentence means a list, not
+# analysis: nothing in it is about the player being recommended.
+MAX_OTHER_NAMES = 2
+MIN_QUOTE_CHARS = 40
+
+
+def usable_quote(sentence, other_names):
+    """Is this sentence actually about the player, or is it furniture?"""
+    text = " ".join((sentence or "").split())
+    if len(text) < MIN_QUOTE_CHARS:
+        return False
+    if _BOILERPLATE.search(text):
+        return False
+    return other_names <= MAX_OTHER_NAMES
+
+
 def extract_recommendations(text, gazetteer, source=None, players=None,
                             trace=None):
     """{player_id: {faab, context, source}} for players this article recommends.
@@ -402,11 +430,17 @@ def extract_recommendations(text, gazetteer, source=None, players=None,
         prior = results.get(pid)
         if prior and prior.get("faab") is not None and faab is None:
             continue  # keep the richer earlier mention
+        # Quote the player's own sentence, not the wider matching window —
+        # the window deliberately spans neighbours and reads as noise. And
+        # only if the sentence says something: an empty quote is honest,
+        # where a scraped list of unrelated names pretending to be a reason
+        # is not.
+        others = sum(1 for other, m_start, _ in mentions
+                     if sent_lo <= m_start < sent_hi and other != pid)
+        quote = " ".join(text[sent_lo:sent_hi].split())[:240]
         results[pid] = {
             "faab": faab,
-            # Quote the player's own sentence, not the wider matching window —
-            # the window deliberately spans neighbours and reads as noise.
-            "context": " ".join(text[sent_lo:sent_hi].split())[:240],
+            "context": quote if usable_quote(quote, others) else "",
             "source": source,
         }
     return results

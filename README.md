@@ -120,6 +120,16 @@ page actually yields:
 python3 rankings.py https://www.fantasypros.com/nfl/rankings/half-point-ppr-wr.php
 ```
 
+A card shows how many analysts named the player, what they bid as a range,
+and a sentence from the one who wrote about him. Where no source wrote
+anything, it says so: ranking pages wrap their tables in furniture that names
+a dozen players and analyses none of them, and quoting one of those as the
+reason to spend FAAB is worse than quoting nothing.
+
+Bids are editable, the approve button always reads the number in the box
+beside it, and each league's budget line says what approving every pending
+bid would leave.
+
 ## Safety model
 
 Nothing reaches a league without a recorded approval.

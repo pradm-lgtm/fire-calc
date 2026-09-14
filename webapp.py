@@ -172,6 +172,8 @@ label { font-size:13px; color:var(--muted); }
 .why { color:var(--muted); font-size:13px; margin:10px 0 0; }
 .quote { border-left:2px solid var(--line-2); padding-left:10px; margin:8px 0 0;
          color:var(--muted); font-size:13px; font-style:italic; }
+.quote.muted { border-left-style:dashed; font-style:normal; }
+.guide { color:var(--muted); font-size:12.5px; margin:14px 0 0; }
 .state { font-size:14px; font-weight:600; margin:12px 0 0; }
 .state.approved { color:var(--ok); } .state.declined { color:var(--no); }
 .state.submitted { color:var(--action); }
@@ -259,14 +261,14 @@ def render(conn):
     run = st.latest_run(conn)
     if not run:
         return page(nav("/") + "<h1>Waiver proposals</h1>"
-                    + refresh_button("Work out this week's moves")
+                    + refresh_button("Re-check waivers")
                     + "<p class='empty'>Nothing yet. The weekly job runs "
                       "Monday night, after the last game.</p>", "Spike — waivers")
 
     rows = st.proposals_for_run(conn, run["id"])
     if not rows:
         return page(nav("/") + "<h1>Waiver proposals</h1>"
-                    + refresh_button("Look again")
+                    + refresh_button("Re-check waivers")
                     + "<p class='empty'>That run produced no proposals.</p>",
                     "Spike — waivers")
 
@@ -289,18 +291,26 @@ def render(conn):
            f"{e(said_ago(age_of(run)))} &middot; nothing is submitted until "
            f"you approve it</div>"
            f"<div class='counts'>{counts}</div>",
-           refresh_button("Work them out again")]
+           refresh_button("Re-check waivers")]
 
     for (lid, lname), items in by_league.items():
         budget = items[0]["max_bid"] or 0
         committed = st.budget_committed(conn, lid)
-        bar = (f"FAAB committed here: <strong>{committed}</strong>"
-               f"{f' of {budget}' if budget else ''}")
-        if budget and committed > budget:
-            bar += " <span class='warn'>— over budget</span>"
-        pending = sum(1 for i in items if i["status"] == st.PENDING)
+        waiting = [i for i in items if i["status"] == st.PENDING]
+        asked = sum(i["bid"] or 0 for i in waiting)
+
+        # The number you actually need before approving three bids in one
+        # league is what is left after all three, not what is left now.
+        parts = [f"<strong>{budget - committed}</strong> of {budget} left"]
+        if waiting:
+            parts.append(f"approving all {len(waiting)} costs {asked}, "
+                         f"leaving <strong>{budget - committed - asked}"
+                         "</strong>")
+        bar = " &middot; ".join(parts)
+        if budget and committed + asked > budget:
+            bar += " <span class='warn'>— that is more than you have</span>"
         out.append(f"<h2><span>{e(lname)}</span><span class='meta'>"
-                   f"{pending} of {len(items)} to review</span></h2>"
+                   f"{len(waiting)} of {len(items)} to review</span></h2>"
                    f"<div class='bar'>{bar}</div>")
         for r in items:
             out.append(card(r))
@@ -322,21 +332,38 @@ def card(r):
                  pos_chip(r["drop_position"]),
                  f"<span class='drop'>{e(strip_paren(r['drop_player_name']))}</span>",
                  "</div>"]
-    bits.append(f"<p class='why'>{e(r['consensus'])} source(s): {e(src_txt)}"
+    named = (f"Named by {r['consensus']} analyst"
+             f"{'s' if (r['consensus'] or 0) != 1 else ''} ({src_txt})")
+    bits.append(f"<p class='why'>{e(named)}"
                 + (f" &middot; {e(r['rationale'])}" if r["rationale"] else "")
                 + "</p>")
     if r["quote"]:
         bits.append(f"<p class='quote'>{e(r['quote'])}</p>")
+    else:
+        # Saying nothing was found beats quoting the furniture a ranking
+        # page wraps its tables in, which names a dozen players and analyses
+        # none of them.
+        bits.append("<p class='quote muted'>No write-up found for him, only "
+                    "a listing.</p>")
 
     if r["status"] in (st.PENDING,):
+        bid = r["bid"] if r["bid"] is not None else 0
+        if r["bid_low"] is not None and r["bid_high"] is not None:
+            span = (f"{r['bid_low']}" if r["bid_low"] == r["bid_high"]
+                    else f"{r['bid_low']} to {r['bid_high']}")
+            guide = f"Analysts bid {span}"
+        else:
+            guide = "No analyst put a number on him"
         bits.append(
+            f"<p class='guide'>{e(guide)}</p>"
             "<form class='row' method='post' action='/decide'>"
             f"<input type='hidden' name='id' value='{e(r['id'])}'>"
             "<span class='bidwrap'><label>Bid</label>"
             f"<input type='number' name='bid' inputmode='numeric' min='0'"
-            f" max='{e(r['max_bid'] or 100)}'"
-            f" value='{e(r['bid'] if r['bid'] is not None else 0)}'></span>"
-            "<button class='approve' name='action' value='approve'>Approve</button>"
+            f" max='{e(r['max_bid'] or 100)}' data-bid"
+            f" value='{e(bid)}'></span>"
+            f"<button class='approve' name='action' value='approve'"
+            f" data-approve>Approve at {e(bid)}</button>"
             "<button class='decline' name='action' value='decline'>Decline</button>"
             "</form>")
     else:
@@ -751,7 +778,7 @@ def render_lineup(conn, force=False):
 
     out.append("<form method='post' action='/lineup/refresh'>"
                "<button class='ghost' style='width:100%;margin-top:18px'>"
-               "Check again</button></form>")
+               "Re-check start / sit</button></form>")
     out.append("<p class='foot'>Calls compare your starters against analyst "
                "consensus rankings. Projected points are shown for context "
                "and are never part of a verdict. A slot stops being a call "
@@ -774,6 +801,12 @@ document.addEventListener('click', function (e) {
   if (link && !link.classList.contains('on')) {
     document.body.classList.add('busy');
   }
+});
+document.addEventListener('input', function (e) {
+  var box = e.target.closest('[data-bid]');
+  if (!box) { return; }
+  var button = box.closest('form').querySelector('[data-approve]');
+  if (button) { button.textContent = 'Approve at ' + (box.value || 0); }
 });
 window.addEventListener('pageshow', function () {
   document.body.classList.remove('busy');
