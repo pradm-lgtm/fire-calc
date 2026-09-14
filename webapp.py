@@ -94,6 +94,20 @@ button { min-height:46px; padding:10px 18px; border-radius:8px;
 .counts { display:flex; gap:14px; font-size:13px; color:var(--muted);
           margin-bottom:16px; flex-wrap:wrap; }
 .counts b { color:var(--ink); }
+.brand { display:flex; align-items:center; gap:8px; font-weight:800;
+         font-size:19px; letter-spacing:-.02em; margin-bottom:12px;
+         color:var(--ink); }
+.mark { width:26px; height:26px; color:var(--accent); flex:none; }
+.progress { position:fixed; inset:0 auto auto 0; height:3px; width:0;
+            background:var(--accent); z-index:9; transition:width .35s ease; }
+body.busy .progress { width:82%; transition:width 14s cubic-bezier(0,.8,.2,1); }
+body.busy { cursor:progress; }
+body.busy nav a, body.busy .fold { opacity:.55; }
+button[disabled] { opacity:.7; cursor:progress; }
+.locked { font-size:10px; font-weight:800; letter-spacing:.05em;
+          text-transform:uppercase; color:var(--muted); margin-left:8px;
+          border:1px solid var(--line); border-radius:999px; padding:1px 7px;
+          vertical-align:middle; }
 nav { display:flex; gap:6px; margin-bottom:14px; }
 nav a { flex:1; text-align:center; padding:9px 8px; border-radius:8px;
         border:1px solid var(--line); background:var(--card); font-size:14px;
@@ -166,7 +180,8 @@ def e(v):
 
 LOGIN_HTML = """<form method='post' action='/login' class='card'
       style='max-width:340px;margin:12vh auto'>
-  <h1>Waiver proposals</h1>
+  %s
+  <h1>Spike</h1>
   <p class='why'>%s</p>
   <input type='password' name='password' placeholder='Password'
          autofocus autocomplete='current-password'
@@ -209,14 +224,14 @@ def render(conn):
         return page(nav("/") + "<h1>Waiver proposals</h1>"
                     + refresh_button("Work out this week's moves")
                     + "<p class='empty'>Nothing yet. The weekly job runs "
-                      "Monday night, after the last game.</p>", "Waivers")
+                      "Monday night, after the last game.</p>", "Spike — waivers")
 
     rows = st.proposals_for_run(conn, run["id"])
     if not rows:
         return page(nav("/") + "<h1>Waiver proposals</h1>"
                     + refresh_button("Look again")
                     + "<p class='empty'>That run produced no proposals.</p>",
-                    "Waivers")
+                    "Spike — waivers")
 
     by_league = {}
     for r in rows:
@@ -252,7 +267,7 @@ def render(conn):
                    f"<div class='bar'>{bar}</div>")
         for r in items:
             out.append(card(r))
-    return page("".join(out), "Waiver proposals")
+    return page("".join(out), "Spike — waivers")
 
 
 def card(r):
@@ -333,9 +348,36 @@ def short_source(url):
         return str(url)
 
 
+# A football at the moment it is spiked: pointed down, bouncing away. Inline
+# because one request that cannot fail beats an image that can.
+LOGO = ("<svg class='mark' viewBox='0 0 32 32' aria-hidden='true'>"
+        "<ellipse cx='16' cy='16' rx='7.5' ry='11' fill='currentColor'"
+        " transform='rotate(28 16 16)'/>"
+        "<path d='M10.6 21.4 21.4 10.6' stroke='var(--card)'"
+        " stroke-width='1.6' stroke-linecap='round'/>"
+        "<path d='M13.2 17.4h3.2M15.6 15h3.2' stroke='var(--card)'"
+        " stroke-width='1.4' stroke-linecap='round'/>"
+        "<path d='M25 7c1.6-1.2 3-1.4 4-0.6' stroke='currentColor'"
+        " stroke-width='1.6' fill='none' stroke-linecap='round'"
+        " opacity='.45'/></svg>")
+
+FAVICON = ("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg'"
+           " viewBox='0 0 32 32'%3E%3Cellipse cx='16' cy='16' rx='7.5'"
+           " ry='11' fill='%231a56db' transform='rotate(28 16 16)'/%3E"
+           "%3C/svg%3E")
+
+
+def login_page(message):
+    return LOGIN_HTML % (LOGO, e(message))
+
+
+def brand():
+    return f"<div class='brand'>{LOGO}<span>Spike</span></div>"
+
+
 def nav(here):
-    tabs = (("/", "Waivers"), ("/lineup", "Start / sit"))
-    return "<nav>" + "".join(
+    tabs = (("/", "Spike — waivers"), ("/lineup", "Spike — start / sit"))
+    return brand() + "<nav>" + "".join(
         f"<a class='{'on' if path == here else ''}' href='{path}'>{label}</a>"
         for path, label in tabs) + "</nav>"
 
@@ -453,6 +495,19 @@ def headshot(row):
     return f"<span class='face' style=\"background-image:url('{e(url)}')\"></span>"
 
 
+def rank_label(row, flex_scale):
+    """Where he ranks, on the scale the slot in question is decided on.
+
+    A positional rank cannot answer a flex question: WR12 against RB20 for
+    one spot is not a comparison. The page was mixing the two - the starter
+    shown on the flex scale and the bench players on their own - so the two
+    halves of the same card disagreed about what the numbers meant.
+    """
+    if flex_scale and row["overall_text"] and row["overall_text"] != "unranked":
+        return row["overall_text"]
+    return row["rank_text"] or ""
+
+
 def where_and_points(row):
     bits = [row["matchup"]]
     if row["projection"] is not None:
@@ -460,13 +515,18 @@ def where_and_points(row):
     return " &middot; ".join(e(b) for b in bits if b)
 
 
-def player_line(row, emphasis=""):
+def player_line(row, emphasis="", flex_scale=False, both=False):
     """One player: face, name, where he ranks, who he plays, what he may score."""
-    under = " &middot; ".join(x for x in (e(row["rank_text"] or ""),
-                                          where_and_points(row)) if x)
+    ranks = [rank_label(row, flex_scale)]
+    if both and row["overall_text"] and row["overall_text"] not in ranks:
+        ranks.append(row["overall_text"])
+    under = " &middot; ".join(x for x in
+                              [e(r) for r in ranks if r] + [where_and_points(row)]
+                              if x)
+    lock = ("<span class='locked'>game started</span>" if row["locked"] else "")
     return (f"<div class='player {emphasis}'>{headshot(row)}"
             f"<span class='who'><span class='pname'>{e(row['player_name'])}"
-            f"</span><span class='under'>{under}</span></span>"
+            f"{lock}</span><span class='under'>{under}</span></span>"
             f"<span class='slotname'>{e(row['slot'] or '')}</span></div>")
 
 
@@ -484,17 +544,20 @@ def decision_card(row, bench):
     # make the card disagree with its own headline.
     options.sort(key=lambda b: (named or "") not in (b["player_name"] or ""))
 
+    flex = len(SLOT_ELIGIBILITY.get(row["slot"], ())) > 1
     out = [f"<div class='decide {e(row['verdict'])}'>",
            f"<div class='decidehead'><span>{e(row['league_name'] or '')}</span>"
            f"<span class='verdict {e(row['verdict'])}'>"
            f"{e(VERDICT_NOTE.get(row['verdict'], ''))}</span></div>",
-           player_line(row, "starting")]
+           player_line(row, "starting", flex_scale=flex)]
     if row["detail"]:
         out.append(f"<p class='advice'>{e(row['detail'])}</p>")
     if options:
         out.append("<div class='alts'><span class='altlabel'>On your bench"
                    "</span>")
-        out.extend(player_line(b) for b in options[:4])
+        # The same scale as the starter above, or the card compares a
+        # positional rank against a cross-positional one and means nothing.
+        out.extend(player_line(b, flex_scale=flex) for b in options[:4])
         out.append("</div>")
     out.append("</div>")
     return "".join(out)
@@ -508,9 +571,11 @@ def league_fold(name, started, bench, flagged):
     return ("<details class='fold'" + (" open" if flagged else "") + ">"
             f"<summary><span>{e(name)}</span>"
             f"<span class='meta'>{summary}</span></summary>"
-            + "".join(player_line(r) for r in started)
+            + "".join(player_line(
+                r, flex_scale=len(SLOT_ELIGIBILITY.get(r["slot"], ())) > 1)
+                for r in started)
             + ("<div class='altlabel'>Bench</div>" if bench else "")
-            + "".join(player_line(r) for r in bench)
+            + "".join(player_line(r, both=True) for r in bench)
             + "</details>")
 
 
@@ -526,14 +591,18 @@ def render_lineup(conn, force=False):
     if not check:
         return page(nav("/lineup") + "<h1>Start / sit</h1>"
                     f"<p class='empty'>{e(problem or 'Nothing to show yet.')}"
-                    "</p>", "Start / sit")
+                    "</p>", "Spike — start / sit")
 
     rows = st.lineup_flags(conn, check["id"])
     started = [r for r in rows if (r["role"] or "starter") == "starter"]
     benched = [r for r in rows if (r["role"] or "starter") == "bench"]
     # Red before yellow, then by league: the order you would work through
     # them, not the order the database happened to return.
-    decisions = sorted((r for r in started if r["verdict"] in ATTENTION),
+    # A slot stops being a decision the moment the game kicks off. Sunday
+    # afternoon is when a starter picks up an injury, which reads as a
+    # disagreement with consensus and is really just news you cannot act on.
+    decisions = sorted((r for r in started
+                        if r["verdict"] in ATTENTION and not r["locked"]),
                        key=lambda r: (ATTENTION.index(r["verdict"]),
                                       r["league_name"] or "", r["position"]))
     unknown = sum(1 for r in started if r["verdict"] == "UNKNOWN")
@@ -542,8 +611,11 @@ def render_lineup(conn, force=False):
     for r in benched:
         bench_by_league.setdefault(r["league_id"], []).append(r)
 
+    playing = sum(1 for r in started if r["locked"])
     headline = (f"<b>{len(decisions)}</b> to decide" if decisions
                 else "<b>Nothing to change</b>")
+    if playing:
+        headline += f" &middot; <b>{playing}</b> already playing"
     if unknown:
         headline += f" &middot; <b>{unknown}</b> unranked"
 
@@ -577,15 +649,42 @@ def render_lineup(conn, force=False):
         mine = [r for r in started if r["league_id"] == lid]
         out.append(league_fold(lname or "", mine, bench_by_league.get(lid, []),
                                sum(1 for r in mine
-                                   if r["verdict"] in ATTENTION)))
-    return page("".join(out), "Start / sit")
+                                   if r["verdict"] in ATTENTION
+                                   and not r["locked"])))
+    return page("".join(out), "Spike — start / sit")
+
+
+# The page works without this. It only says that a slow request is under
+# way, which is the one thing a form post cannot express on its own: the
+# start/sit check fetches six ranking pages and a player database, and an
+# unmarked wait reads as a dead link.
+BUSY_JS = """
+document.addEventListener('submit', function (e) {
+  var form = e.target;
+  document.body.classList.add('busy');
+  var button = form.querySelector('button');
+  if (button) { button.disabled = true; button.dataset.was = button.textContent;
+                button.textContent = 'Working on it...'; }
+});
+document.addEventListener('click', function (e) {
+  var link = e.target.closest('nav a');
+  if (link && !link.classList.contains('on')) {
+    document.body.classList.add('busy');
+  }
+});
+window.addEventListener('pageshow', function () {
+  document.body.classList.remove('busy');
+});
+"""
 
 
 def page(body, title):
     return (f"<!doctype html><html><head><meta charset='utf-8'>"
             f"<meta name='viewport' content='width=device-width,initial-scale=1'>"
+            f"<link rel='icon' href=\"{FAVICON}\">"
             f"<title>{e(title)}</title><style>{CSS}</style></head>"
-            f"<body><div class='wrap'>{body}</div></body></html>").encode()
+            f"<body><div class='progress'></div><div class='wrap'>{body}</div>"
+            f"<script>{BUSY_JS}</script></body></html>").encode()
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -693,8 +792,8 @@ class Handler(BaseHTTPRequestHandler):
             self._send(200, f"{state} (db={db.backend()})", "text/plain")
             return
         if path == "/login":
-            self._send(200, page(LOGIN_HTML % "Sign in to review this week's"
-                                 " waiver proposals.", "Sign in"))
+            self._send(200, page(login_page(
+                "Sign in to review this week's waiver proposals."), "Spike"))
             return
         if path == "/api/claims":
             if not auth.check_api_token(self.headers.get("Authorization")):
@@ -747,8 +846,8 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_header("Set-Cookie", cookie)
                 self.end_headers()
             else:
-                self._send(401, page(LOGIN_HTML % "That password was not "
-                                     "right. Try again.", "Sign in"))
+                self._send(401, page(login_page(
+                    "That password was not right. Try again."), "Spike"))
             return
 
         if path == "/api/proposals":

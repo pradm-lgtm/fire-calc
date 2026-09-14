@@ -42,7 +42,8 @@ def consensus(qb1, qb2, rb1, rb2):
 class Verdicts(unittest.TestCase):
 
     def rows(self, **kw):
-        return lineup.flag_rows(LEAGUE, ROSTER, PLAYERS, consensus(**kw))
+        return lineup.flag_rows(LEAGUE, ROSTER, PLAYERS, consensus(**kw),
+                                lineup.EMPTY_WEEK)
 
     def test_a_small_gap_is_green(self):
         rows = self.rows(qb1=10, qb2=9, rb1=60, rb2=59)
@@ -58,7 +59,8 @@ class Verdicts(unittest.TestCase):
         # Counting an unjudgeable starter as agreement claims a check that
         # never happened.
         rows = lineup.flag_rows(LEAGUE, ROSTER, PLAYERS,
-                                rk.merge({"page": {"QB": {"qb1": 1, "qb2": 2}}}))
+                                rk.merge({"page": {"QB": {"qb1": 1, "qb2": 2}}}),
+                                lineup.EMPTY_WEEK)
         self.assertEqual(rows[1]["verdict"], "UNKNOWN")
 
     def test_flex_is_judged_on_the_overall_order(self):
@@ -71,7 +73,7 @@ class RowShape(unittest.TestCase):
 
     def test_every_row_is_accepted_by_the_database(self):
         rows = lineup.flag_rows(LEAGUE, ROSTER, PLAYERS,
-                                consensus(40, 2, 66, 20))
+                                consensus(40, 2, 66, 20), lineup.EMPTY_WEEK)
         conn = st.connect(":memory:")
         check_id = st.start_lineup_check(conn, "2026", 1, ["page"])
         for row in rows:
@@ -84,7 +86,7 @@ class RowShape(unittest.TestCase):
     def test_rows_survive_a_json_round_trip(self):
         import json
         rows = lineup.flag_rows(LEAGUE, ROSTER, PLAYERS,
-                                consensus(40, 2, 66, 20))
+                                consensus(40, 2, 66, 20), lineup.EMPTY_WEEK)
         self.assertEqual(json.loads(json.dumps(rows)), rows)
 
 

@@ -92,7 +92,9 @@ CREATE TABLE IF NOT EXISTS lineup_flags (
     role         TEXT DEFAULT 'starter',
     pos          TEXT,
     matchup      TEXT,
-    projection   REAL
+    projection   REAL,
+    overall_text TEXT,
+    locked       INTEGER DEFAULT 0
 );
 
 CREATE INDEX IF NOT EXISTS idx_lineup_flags_check ON lineup_flags(check_id);
@@ -116,6 +118,8 @@ MIGRATIONS = [
     "ALTER TABLE lineup_flags ADD COLUMN pos TEXT",
     "ALTER TABLE lineup_flags ADD COLUMN matchup TEXT",
     "ALTER TABLE lineup_flags ADD COLUMN projection REAL",
+    "ALTER TABLE lineup_flags ADD COLUMN overall_text TEXT",
+    "ALTER TABLE lineup_flags ADD COLUMN locked INTEGER DEFAULT 0",
 ]
 
 
@@ -248,6 +252,7 @@ def add_lineup_flag(conn, check_id, **f):
         better_name=f.get("better_name"), detail=f.get("detail", ""),
         role=f.get("role", "starter"), pos=f.get("pos"),
         matchup=f.get("matchup"), projection=f.get("projection"),
+        overall_text=f.get("overall_text"), locked=int(f.get("locked") or 0),
     )
     names = ", ".join(cols)
     marks = ", ".join("?" for _ in cols)

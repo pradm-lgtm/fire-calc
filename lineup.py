@@ -245,14 +245,16 @@ DOT = {"GREEN": "GREEN ", "YELLOW": "YELLOW", "RED": "RED   ",
        "UNKNOWN": "  ?   "}
 
 
-def context_for(player, pid, games, points):
-    """Opponent and projected points, when they could be read at all."""
+def context_for(player, pid, week):
+    """Opponent, projected points, and whether his game has begun."""
+    team = (player.get("team") or "").upper()
     return {"pos": player.get("position"),
-            "matchup": games.get((player.get("team") or "").upper()),
-            "projection": points.get(str(pid))}
+            "matchup": week["games"].get(team),
+            "projection": week["points"].get(str(pid)),
+            "locked": 1 if nfl_week.started(week["kickoffs"], team) else 0}
 
 
-def bench_rows(league, roster, players, consensus, games, points):
+def bench_rows(league, roster, players, consensus, week):
     """Everyone not starting, so the page can show what the choice was.
 
     A verdict that says to bench someone is only actionable next to who
@@ -275,9 +277,13 @@ def bench_rows(league, roster, players, consensus, games, points):
             "player_name": sc.player_label(players, pid).split(" [")[0],
             "rank_text": (rk.describe(consensus, pid, scale) if scale
                           else "unranked"),
+            # Both scales, because which one answers the question depends on
+            # the slot being filled: a positional rank cannot say whether
+            # this receiver beats that running back for one flex spot.
+            "overall_text": rk.describe(consensus, pid, rk.OVERALL),
             "better_name": None,
             "detail": injury_note(player),
-            **context_for(player, pid, games, points),
+            **context_for(player, pid, week),
         })
     rows.sort(key=lambda r: (r["projection"] is None, -(r["projection"] or 0)))
     for i, row in enumerate(rows):
@@ -285,13 +291,12 @@ def bench_rows(league, roster, players, consensus, games, points):
     return rows
 
 
-def flag_rows(league, roster, players, consensus, games=None, points=None):
+def flag_rows(league, roster, players, consensus, week):
     """One serialisable row per started player.
 
     The terminal report and the phone page both read these, so the two can
     never drift into saying different things about the same lineup.
     """
-    games, points = games or {}, points or {}
     rows = []
     for i, v in enumerate(assess(league, roster, players, consensus)):
         rank_text = (rk.describe(consensus, v["pid"], v["scale"])
@@ -318,21 +323,25 @@ def flag_rows(league, roster, players, consensus, games=None, points=None):
             "player_id": v["pid"],
             "player_name": sc.player_label(players, v["pid"]).split(" [")[0],
             "rank_text": rank_text, "better_name": better_name,
+            "overall_text": rk.describe(consensus, v["pid"], rk.OVERALL),
             "detail": "; ".join(reasons),
             "role": "starter",
-            **context_for(v["player"], v["pid"], games, points),
+            **context_for(v["player"], v["pid"], week),
         })
     return rows
 
 
-def league_rows(league, user_id, players, consensus, games=None, points=None):
+EMPTY_WEEK = {"points": {}, "games": {}, "kickoffs": {}}
+
+
+def league_rows(league, user_id, players, consensus, week=None):
+    week = week or EMPTY_WEEK
     rosters = sc.league_rosters(league["league_id"])
     mine = sc.my_roster(rosters, user_id)
     if not mine:
         return None
-    return (flag_rows(league, mine, players, consensus, games, points)
-            + bench_rows(league, mine, players, consensus,
-                         games or {}, points or {}))
+    return (flag_rows(league, mine, players, consensus, week)
+            + bench_rows(league, mine, players, consensus, week))
 
 
 def report(league, rows):
@@ -382,11 +391,11 @@ def check(username, week=None, urls=(), verbose=True):
 
     # Context for the page, never for the verdict: a missing opponent or
     # projection leaves a line blank and changes no colour.
-    points, games = nfl_week.week_context(season, week)
-    if verbose and not (games and points):
+    context = nfl_week.week_context(season, week)
+    if verbose and not (context["games"] and context["points"]):
         missing = " and ".join(
-            n for n, got in (("opponents", games), ("projections", points))
-            if not got)
+            n for n, got in (("opponents", context["games"]),
+                             ("projections", context["points"])) if not got)
         print(f"  (no {missing} this time; the page will leave them blank)")
 
     per_source = gather_rankings(list(urls), players, verbose=verbose)
@@ -399,7 +408,7 @@ def check(username, week=None, urls=(), verbose=True):
     found = []
     for league in leagues:
         found.append((league, league_rows(league, user["user_id"], players,
-                                          consensus, games, points)))
+                                          consensus, context)))
     return {"season": season, "week": week, "sources": sorted(per_source),
             "leagues": found,
             "rows": [r for _l, rows in found for r in (rows or [])]}

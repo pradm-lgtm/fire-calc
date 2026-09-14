@@ -49,7 +49,7 @@ python3 submitter.py YOUR_USERNAME --audit    # what is really queued
 | `submitter.py` | drives Sleeper's UI to place approved claims |
 | `lineup.py` | flags starters that disagree with analyst rankings |
 | `rankings.py` | reads ranked players out of the data a page ships |
-| `nfl_week.py` | this week's opponents and projected points, for context |
+| `nfl_week.py` | opponents, projected points and kickoff times |
 | `render.py` | loads a page in a browser when the HTML alone is empty |
 | `check_sources.py` | is a candidate site usable as a source? |
 | `selectors.json` | Sleeper's DOM selectors, kept out of the code |
@@ -85,11 +85,21 @@ beats RB20 for one spot.
 The thresholds widen with the rank being questioned: two places apart at the
 top of a position is a real disagreement, two places apart at RB90 is noise.
 
-The page leads with the slots that disagree, across every league at once,
+The page is called **Spike**. It leads with the slots that disagree, across
+every league at once,
 each shown next to the bench players who could take that slot, with their
 opponent and projected points. Leagues where everything agrees are folded
 shut. Projections are shown, never used: they play no part in any verdict,
 which is what you asked for when you said you would do that part yourself.
+
+A slot stops being a decision once its game kicks off. An injury picked up
+on Sunday afternoon reads as a disagreement with consensus, and it is news
+you cannot act on; those slots keep their place in the lineup with a badge
+instead.
+
+Flex slots and bench players are shown on the cross-positional scale, since
+WR12 against RB20 for one spot is not a comparison. Fixed slots stay within
+their position.
 
 A starter nobody ranks is reported as unjudged rather than counted as
 agreement. Saying a lineup matches consensus when a third of it was never

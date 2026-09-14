@@ -169,5 +169,65 @@ class LineupPage(unittest.TestCase):
             {"player_id": "1234", "pos": "RB"}))
 
 
+class Scales(unittest.TestCase):
+    """Which ranking a line shows depends on the slot it is answering."""
+
+    ROW = {"rank_text": "RB31", "overall_text": "overall 66"}
+
+    def test_a_flex_slot_is_answered_on_the_cross_positional_scale(self):
+        self.assertEqual(webapp.rank_label(self.ROW, True), "overall 66")
+
+    def test_a_fixed_slot_is_answered_within_its_position(self):
+        self.assertEqual(webapp.rank_label(self.ROW, False), "RB31")
+
+    def test_a_player_with_no_overall_rank_falls_back(self):
+        self.assertEqual(webapp.rank_label(
+            {"rank_text": "K3", "overall_text": "unranked"}, True), "K3")
+        self.assertEqual(webapp.rank_label(
+            {"rank_text": "K3", "overall_text": None}, True), "K3")
+
+
+class Locking(unittest.TestCase):
+    """A slot stops being a decision once its game has begun."""
+
+    def rows(self):
+        def row(**kw):
+            base = dict(league_id="1", league_name="OTG", slot="FLEX",
+                        position=0, verdict="RED", player_id="1",
+                        player_name="Playing Now", rank_text="RB31",
+                        overall_text="overall 66", better_name=None,
+                        detail="he is Out — he will not play", role="starter",
+                        pos="RB", matchup="at LV", projection=4.0, locked=1)
+            base.update(kw)
+            return base
+        return [row(),
+                row(position=1, player_id="2", player_name="Still Choosable",
+                    locked=0)]
+
+    def render(self):
+        import store as st
+        conn = st.connect(":memory:")
+        check_id = st.start_lineup_check(conn, "2026", 2, ["page"])
+        for r in self.rows():
+            st.add_lineup_flag(conn, check_id, **r)
+        return webapp.render_lineup(conn).decode()
+
+    def test_a_started_game_is_not_a_decision(self):
+        # An injury picked up during the game reads as a disagreement with
+        # consensus, and it is news you cannot act on.
+        html = self.render()
+        cards = html[html.index("Worth a look"):html.index("Everything else")]
+        self.assertIn("Still Choosable", cards)
+        self.assertNotIn("Playing Now", cards)
+
+    def test_the_count_says_how_many_are_already_playing(self):
+        self.assertIn("already playing", self.render())
+
+    def test_a_started_player_is_still_listed_with_a_badge(self):
+        html = self.render()
+        self.assertIn("Playing Now", html)
+        self.assertIn("game started", html)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

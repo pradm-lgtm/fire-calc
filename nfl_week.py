@@ -14,6 +14,8 @@ blank; it never blocks the verdict, which is the part that matters.
 
 import json
 import sys
+import time
+from datetime import datetime, timezone
 import urllib.error
 import urllib.request
 
@@ -119,6 +121,47 @@ def matchups_from(rows):
     return out
 
 
+KICKOFF_KEYS = ("start_time", "game_date", "kickoff", "date", "game_time")
+
+
+def _epoch(value):
+    """Seconds since the epoch from whatever shape a kickoff arrives in."""
+    if isinstance(value, (int, float)):
+        # Milliseconds if it is far too large to be seconds.
+        return float(value) / 1000 if value > 1e11 else float(value)
+    if not isinstance(value, str) or not value.strip():
+        return None
+    text = value.strip().replace("Z", "+00:00")
+    for parse in (datetime.fromisoformat,):
+        try:
+            when = parse(text)
+        except ValueError:
+            continue
+        if when.tzinfo is None:
+            when = when.replace(tzinfo=timezone.utc)
+        return when.timestamp()
+    return None
+
+
+def kickoffs_from(rows):
+    """{team: epoch seconds} for when each team's game starts."""
+    out = {}
+    for row in rows:
+        team = team_name(_first(row, ("team", "team_abbr", "player_team")))
+        when = _epoch(_first(row, KICKOFF_KEYS))
+        if team and when:
+            out[team] = when
+    return out
+
+
+def started(kickoffs, team, now=None):
+    """Has this team's game begun? Unknown kickoff means no."""
+    when = kickoffs.get((team or "").upper())
+    if not when:
+        return False
+    return (now if now is not None else time.time()) >= when
+
+
 def _first(row, keys):
     for key in keys:
         if row.get(key) not in (None, ""):
@@ -132,12 +175,11 @@ def projections(season, week):
 
 
 def week_context(season, week):
-    """({player_id: points}, {team: opponent}) from as few calls as possible."""
+    """Points, opponents and kickoff times, from as few calls as possible."""
     rows = projection_rows(season, week)
-    games = matchups_from(rows)
-    if not games:
-        games = schedule(season, week)
-    return points_from(rows), games
+    games = matchups_from(rows) or schedule(season, week)
+    return {"points": points_from(rows), "games": games,
+            "kickoffs": kickoffs_from(rows)}
 
 
 def main():
@@ -163,6 +205,13 @@ def main():
     print(f"opponents from those records: {len(from_rows)} teams")
     for team, where in sorted(from_rows.items())[:4]:
         print(f"    {team:<4} {where}")
+
+    starts = kickoffs_from(rows)
+    print(f"kickoff times: {len(starts)} teams")
+    for team, when in sorted(starts.items())[:4]:
+        print(f"    {team:<4} {datetime.fromtimestamp(when, timezone.utc)}")
+    if not starts:
+        print("    (none; nothing will be locked once games begin)")
 
     if not from_rows:
         games = schedule(season, week)
