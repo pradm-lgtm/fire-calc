@@ -51,6 +51,8 @@ python3 submitter.py YOUR_USERNAME --audit    # what is really queued
 | `rankings.py` | reads ranked players out of the data a page ships |
 | `nfl_week.py` | opponents, projected points and kickoff times |
 | `scores.py` | every league's live matchup, on one page |
+| `trades.py` | packages both sides would take, per league |
+| `trade_values.py` | player trade values, joined to rosters by id |
 | `render.py` | loads a page in a browser when the HTML alone is empty |
 | `check_sources.py` | is a candidate site usable as a source? |
 | `selectors.json` | Sleeper's DOM selectors, kept out of the code |
@@ -146,6 +148,34 @@ reason to spend FAAB is worse than quoting nothing.
 Bids are editable, the approve button always reads the number in the box
 beside it, and each league's budget line says what approving every pending
 bid would leave.
+
+## Trades
+
+```bash
+python3 trades.py YOUR_SLEEPER_USERNAME
+python3 trades.py YOUR_SLEEPER_USERNAME --league LEHG
+```
+
+A trade happens when both managers think they got better, so that is what
+this looks for: packages where your best starting lineup improves and theirs
+does too. Two teams with opposite surpluses can both gain, and every roster
+in the league is readable, so finding those pairs is arithmetic rather than
+guesswork.
+
+Values come from FantasyCalc, joined to rosters by Sleeper id rather than by
+name. They know the scoring but nothing about your roster — that a receiver
+is your third is a fact they cannot see — so they weigh a deal, they do not
+judge it. The lineup gain is the number that knows your roster, and it is the
+one to read first.
+
+A package sending more players than it receives credits the other side with
+the roster spot they gain, valued at the best free agent at that position,
+because a calculator counts that and ignoring it makes every two-for-one look
+worse for them than it is. Packages more lopsided than a quarter either way
+are dropped, and `never_drops.json` applies here as it does to waivers.
+
+Nothing is ever sent. Sleeper has no write API, and a trade is not a
+one-dollar waiver claim.
 
 ## Safety model
 

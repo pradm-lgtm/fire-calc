@@ -1,0 +1,297 @@
+#!/usr/bin/env python3
+"""Trade offers worth sending, per league.
+
+A trade happens when both sides think they got better, so that is what this
+looks for: packages where your best starting lineup improves and theirs does
+too. Two teams with opposite surpluses can both gain, and finding those pairs
+is arithmetic over rosters you can already see.
+
+Everything here is a suggestion. Nothing is ever sent; Sleeper has no write
+API and a trade is not a one-dollar waiver claim.
+
+    python3 trades.py YOUR_SLEEPER_USERNAME
+    python3 trades.py YOUR_SLEEPER_USERNAME --league LEHG
+
+WHAT THE NUMBERS MEAN, AND WHAT THEY DO NOT
+Values come from FantasyCalc, formed from trades people actually made in
+their calculator. They know your league's scoring but nothing about your
+roster - that a receiver is your third is a fact they cannot see - so they
+weigh a deal, they do not judge it. The lineup gain below is the part that
+knows your roster, and it is the number to read first.
+"""
+
+import itertools
+import sys
+
+import localenv
+import sleeper_client as sc
+import trade_values as tv
+
+# Slots a player may fill, mirroring the start/sit rules.
+SLOT_ELIGIBILITY = {
+    "QB": {"QB"}, "RB": {"RB"}, "WR": {"WR"}, "TE": {"TE"},
+    "K": {"K"}, "DEF": {"DEF"},
+    "FLEX": {"RB", "WR", "TE"}, "WRRB_FLEX": {"RB", "WR"},
+    "REC_FLEX": {"WR", "TE"}, "SUPER_FLEX": {"QB", "RB", "WR", "TE"},
+}
+BENCH = {"BN", "IR", "TAXI"}
+
+# How lopsided a package may be before nobody would look at it. A trade
+# calculator's own tolerance is roughly this wide.
+FAIRNESS = 0.25
+
+# Bounds on the search. Every extra player considered multiplies the pairs.
+MAX_SEND = 8
+MAX_RECEIVE = 8
+TOP_OFFERS = 4
+
+
+def starting_slots(league):
+    return [s for s in (league.get("roster_positions") or []) if s not in BENCH]
+
+
+def lineup_value(player_ids, players, values, slots):
+    """The best legal starting lineup you could field, by trade value.
+
+    Filled most-constrained slot first: a quarterback slot has one kind of
+    answer and a flex has three, so letting flex pick first would strand the
+    quarterback slot empty and undervalue the roster.
+    """
+    pool = {pid: values.get(pid, {}).get("value", 0.0) for pid in player_ids}
+    positions = {pid: (players.get(pid) or {}).get("position")
+                 for pid in player_ids}
+    used, total = set(), 0.0
+    for slot in sorted(slots, key=lambda s: len(SLOT_ELIGIBILITY.get(s, ()))):
+        allowed = SLOT_ELIGIBILITY.get(slot)
+        if not allowed:
+            continue
+        best, best_value = None, -1.0
+        for pid in player_ids:
+            if pid in used or positions.get(pid) not in allowed:
+                continue
+            if pool[pid] > best_value:
+                best, best_value = pid, pool[pid]
+        if best:
+            used.add(best)
+            total += best_value
+    return total
+
+
+def value_of(ids, values):
+    return sum(values.get(pid, {}).get("value", 0.0) for pid in ids)
+
+
+def fairness(give, get, values, gaining_side_spots, replacement):
+    """How lopsided the package is, and which way.
+
+    Sending more players than you receive hands the other side a roster
+    spot, and the spot is worth whatever they can put in it. A calculator
+    counts that; ignoring it makes every two-for-one read as worse for them
+    than it is.
+    """
+    mine = value_of(give, values)
+    theirs = value_of(get, values)
+    if gaining_side_spots > 0:
+        theirs += gaining_side_spots * replacement
+    return mine, theirs
+
+
+def team_label(users, rosters, roster_id):
+    by_user = {}
+    for u in users or []:
+        by_user[u.get("user_id")] = ((u.get("metadata") or {}).get("team_name")
+                                     or u.get("display_name") or "Someone")
+    for r in rosters or []:
+        if r.get("roster_id") == roster_id:
+            return by_user.get(r.get("owner_id"), "Unclaimed")
+    return "Unclaimed"
+
+
+def record(roster):
+    s = roster.get("settings") or {}
+    return (s.get("wins", 0), s.get("losses", 0), s.get("ties", 0))
+
+
+def tradeable(roster, players, values, limit):
+    """Players worth naming in a package, most valuable first.
+
+    Anyone with no value at all is left out: a package nobody can price is
+    not an offer.
+    """
+    ids = [str(p) for p in (roster.get("players") or []) if p and p != "0"]
+    ids = [pid for pid in ids if values.get(pid, {}).get("value")]
+    ids.sort(key=lambda pid: values[pid]["value"], reverse=True)
+    return ids[:limit]
+
+
+def _protected(players, pid, protect):
+    """Names on the never-drop list, matched the way that list is written."""
+    if not protect:
+        return False
+    player = players.get(pid) or {}
+    full = (player.get("full_name") or " ".join(filter(None, [
+        player.get("first_name"), player.get("last_name")]))).strip().lower()
+    return bool(full) and full in protect
+
+
+def offers(league, mine, theirs, players, values, protect=()):
+    """Every package where both starting lineups come out better."""
+    slots = starting_slots(league)
+    my_ids = [str(p) for p in (mine.get("players") or []) if p and p != "0"]
+    their_ids = [str(p) for p in (theirs.get("players") or []) if p and p != "0"]
+    rostered = set(my_ids) | set(their_ids)
+
+    my_before = lineup_value(my_ids, players, values, slots)
+    their_before = lineup_value(their_ids, players, values, slots)
+
+    can_send = [pid for pid in tradeable(mine, players, values, MAX_SEND)
+                if pid not in protect and not _protected(players, pid, protect)]
+    can_get = tradeable(theirs, players, values, MAX_RECEIVE)
+
+    found = []
+    packages = ([([a], [b]) for a in can_send for b in can_get]
+                + [(list(pair), [b]) for pair in itertools.combinations(can_send, 2)
+                   for b in can_get])
+    for give, get in packages:
+        my_after = lineup_value([p for p in my_ids if p not in give] + get,
+                                players, values, slots)
+        their_after = lineup_value(
+            [p for p in their_ids if p not in get] + give, players, values,
+            slots)
+        my_gain = my_after - my_before
+        their_gain = their_after - their_before
+        if my_gain <= 0 or their_gain <= 0:
+            continue
+
+        spots = max(0, len(give) - len(get))
+        position = (values.get(get[0], {}).get("position") or "RB")
+        replacement = tv.replacement_value(values, position, rostered)
+        sent, received = fairness(give, get, values, spots, replacement)
+        if max(sent, received) <= 0:
+            continue
+        tilt = (received - sent) / max(sent, received)
+        if abs(tilt) > FAIRNESS:
+            continue
+
+        found.append({
+            "give": give, "get": get,
+            "my_gain": round(my_gain), "their_gain": round(their_gain),
+            "sent_value": round(sent), "received_value": round(received),
+            "tilt": round(tilt * 100),
+            "spots": spots,
+        })
+    # Best for you first, then by how obviously good it is for them, which
+    # is what decides whether the offer gets accepted.
+    found.sort(key=lambda o: (o["my_gain"], o["their_gain"]), reverse=True)
+    return found[:TOP_OFFERS]
+
+
+def league_offers(league, user_id, players, values, protect=()):
+    rosters = sc.league_rosters(league["league_id"])
+    mine = sc.my_roster(rosters, user_id)
+    if not mine:
+        return None
+    users = sc.league_users(league["league_id"])
+    out = []
+    for other in rosters:
+        if other.get("roster_id") == mine.get("roster_id"):
+            continue
+        for offer in offers(league, mine, other, players, values, protect):
+            offer["with"] = team_label(users, rosters, other.get("roster_id"))
+            offer["their_record"] = record(other)
+            out.append(offer)
+    out.sort(key=lambda o: (o["my_gain"], o["their_gain"]), reverse=True)
+    return {"league_id": str(league["league_id"]),
+            "league_name": league.get("name"),
+            "my_record": record(mine),
+            "offers": out[:TOP_OFFERS * 2]}
+
+
+def board(username, league_filter=None, protect=()):
+    state = sc.current_state()
+    season = state.get("season")
+    values, source = tv.fetch()
+    if not values:
+        raise RuntimeError("no trade values could be read")
+    user = sc.resolve_user(username)
+    players = sc.all_players()
+
+    leagues = sc.user_leagues(user["user_id"], season)
+    if league_filter:
+        leagues = [l for l in leagues
+                   if league_filter.lower() in (l.get("name") or "").lower()]
+    out = []
+    for league in leagues:
+        got = league_offers(league, user["user_id"], players, values, protect)
+        if got and got["offers"]:
+            out.append(got)
+    return {"season": season, "source": source, "values": values,
+            "leagues": out}
+
+
+def describe(offer, players, values):
+    """One sentence saying what the trade does for you."""
+    got = ", ".join(sc.player_label(players, p).split(" [")[0] for p in offer["get"])
+    positions = sorted({values.get(p, {}).get("position") for p in offer["get"]})
+    lean = ("even" if abs(offer["tilt"]) < 6 else
+            f"{abs(offer['tilt'])}% their way" if offer["tilt"] > 0
+            else f"{abs(offer['tilt'])}% your way")
+    spare = (f" You send {offer['spots']} more player"
+             f"{'s' if offer['spots'] > 1 else ''} than you get back."
+             if offer["spots"] else "")
+    return (f"{got} starts for you at {'/'.join(p for p in positions if p)}. "
+            f"By value the package is {lean}.{spare}")
+
+
+def main():
+    localenv.load()
+    args = sys.argv[1:]
+    if not args or args[0].startswith("--"):
+        print("usage: python3 trades.py YOUR_SLEEPER_USERNAME [--league NAME]")
+        return 1
+    league_filter = None
+    if "--league" in args:
+        try:
+            league_filter = args[args.index("--league") + 1]
+        except IndexError:
+            print("--league needs a name")
+            return 1
+
+    import waiver_analyzer as wa
+    # The list of players you will not part with applies here too, and more
+    # so: a waiver drop costs a roster spot, a trade hands him to a rival.
+    protect = wa.never_drop_names()
+    got = board(args[0], league_filter, protect=protect)
+    players = sc.all_players()
+    print(f"Values from {got['source']}.")
+    for league in got["leagues"]:
+        print()
+        print("=" * 72)
+        w, l, t = league["my_record"]
+        print(f"{league['league_name']}   (you are {w}-{l}"
+              f"{f'-{t}' if t else ''})")
+        print("=" * 72)
+        for offer in league["offers"]:
+            give = ", ".join(sc.player_label(players, p).split(" [")[0]
+                             for p in offer["give"])
+            get = ", ".join(sc.player_label(players, p).split(" [")[0]
+                            for p in offer["get"])
+            ow, ol, ot = offer["their_record"]
+            print()
+            print(f"  To {offer['with']} ({ow}-{ol}{f'-{ot}' if ot else ''})")
+            print(f"    Send    {give}")
+            print(f"    Get     {get}")
+            print(f"    Your lineup +{offer['my_gain']:,}, "
+                  f"theirs +{offer['their_gain']:,}")
+            print(f"    {describe(offer, players, got['values'])}")
+    if not got["leagues"]:
+        print("\nNo package makes both sides better right now.")
+    print()
+    print("=" * 72)
+    print("Suggestions only. Nothing is sent anywhere.")
+    print("=" * 72)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
