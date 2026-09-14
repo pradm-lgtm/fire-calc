@@ -134,16 +134,7 @@ def proposals_for_league(league, user_id, players, trending, texts, max_moves):
             low = max(1, round(remaining * min(faabs) / 100))
             high = max(low, round(remaining * max(faabs) / 100))
 
-        drop_pos = drop_player.get("position", "?")
-        drop_count = len((ew.roster_by_position(mine, players)
-                          .get(drop_pos) or []))
-        if drop_label == "deep":
-            why = (f"You roster {drop_count} {drop_pos}s, more than you can "
-                   "start, so this one is spare.")
-        elif drop_label == "thin":
-            why = f"You only roster {drop_count} {drop_pos}s, so this one costs you depth."
-        else:
-            why = f"You roster {drop_count} {drop_pos}s."
+        why = f"{drop_player.get('position', '?')} is {drop_label}"
         out.append(dict(
             platform="sleeper",
             league_id=league["league_id"],

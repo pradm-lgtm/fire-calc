@@ -33,6 +33,7 @@ from urllib.parse import parse_qs, urlparse
 import cloud_auth as auth
 import db
 import localenv
+import scores
 from lineup import SLOT_ELIGIBILITY
 import store as st
 
@@ -174,6 +175,19 @@ label { font-size:13px; color:var(--muted); }
          color:var(--muted); font-size:13px; font-style:italic; }
 .quote.muted { border-left-style:dashed; font-style:normal; }
 .guide { color:var(--muted); font-size:12.5px; margin:14px 0 0; }
+.match { background:var(--card); border:1px solid var(--line);
+         border-radius:14px; padding:16px; margin-bottom:12px; }
+.score { display:flex; justify-content:space-between; align-items:baseline;
+         gap:10px; padding:10px 0; }
+.score + .score { border-top:1px solid var(--line); }
+.team { color:var(--muted); min-width:0; overflow:hidden;
+        text-overflow:ellipsis; white-space:nowrap; }
+.score.up .team { color:var(--ink); font-weight:650; }
+.pts { font-size:26px; font-weight:700; font-variant-numeric:tabular-nums;
+       letter-spacing:-.02em; flex:none; color:var(--muted); }
+.score.up .pts { color:var(--ink); }
+.pts.small { font-size:15px; font-weight:600; color:var(--ink); }
+.toplay { color:var(--muted); font-size:12px; margin-left:8px; }
 .state { font-size:14px; font-weight:600; margin:12px 0 0; }
 .state.approved { color:var(--ok); } .state.declined { color:var(--no); }
 .state.submitted { color:var(--action); }
@@ -440,7 +454,8 @@ def brand():
 
 
 def nav(here):
-    tabs = (("/", "Waivers"), ("/lineup", "Start / sit"))
+    tabs = (("/scores", "Scores"), ("/", "Waivers"),
+            ("/lineup", "Start / sit"))
     return brand() + "<nav>" + "".join(
         f"<a class='{'on' if path == here else ''}' href='{path}'>{label}</a>"
         for path, label in tabs) + "</nav>"
@@ -814,6 +829,79 @@ window.addEventListener('pageshow', function () {
 """
 
 
+def scoreline(team, leading):
+    if not team:
+        return "<div class='score'><span class='team'>No opponent this week"
+    left = (f"<span class='toplay'>{team['to_play']} to play</span>"
+            if team["to_play"] else "")
+    return (f"<div class='score{' up' if leading else ''}'>"
+            f"<span class='team'>{e(team['name'])}{left}</span>"
+            f"<span class='pts'>{team['points']:g}</span></div>")
+
+
+def lineup_detail(team):
+    if not team:
+        return ""
+    rows = []
+    for p in team["lineup"]:
+        where = " &middot; ".join(x for x in (e(p["matchup"] or ""),
+                                              "to play" if p["to_play"] else "")
+                                  if x)
+        rows.append(f"<div class='player'>{headshot(p)}"
+                    f"<span class='who'><span class='pname'>{e(p['name'])}"
+                    f"</span><span class='under'>{where}</span></span>"
+                    f"<span class='pts small'>{p['points']:g}</span></div>")
+    return "".join(rows)
+
+
+def render_scores(username):
+    """Every league's live matchup on one page.
+
+    Read straight from Sleeper on each load rather than stored: a scoreboard
+    that is minutes old is not a scoreboard.
+    """
+    out = [nav("/scores"), "<h1>Scores</h1>"]
+    if not username:
+        return page("".join(out) + "<p class='empty'>FANTASY_USER is not set "
+                    "on the host, so I cannot look up your leagues.</p>",
+                    "Spike \u2014 scores")
+    try:
+        got = scores.board(username)
+    except Exception as exc:
+        traceback.print_exc()
+        return page("".join(out) + f"<p class='empty'>{e(scrub(exc))}</p>",
+                    "Spike \u2014 scores")
+
+    out.append(f"<p class='sub'>Week {e(got['week'])} &middot; live from "
+               "Sleeper</p>")
+    if not got["leagues"]:
+        out.append("<p class='empty'>No matchups found for this week.</p>")
+
+    for b in got["leagues"]:
+        us, them, margin = b["us"], b["them"], b["margin"]
+        if margin is None:
+            verdict = ""
+        elif margin > 0:
+            verdict = f"ahead by {margin:g}"
+        elif margin < 0:
+            verdict = f"behind by {abs(margin):g}"
+        else:
+            verdict = "level"
+        out.append(
+            "<article class='match'>"
+            f"<div class='calltop'><div><h3>{e(b['league_name'] or '')}</h3>"
+            f"<p class='why'>{e(verdict)}</p></div></div>"
+            + scoreline(us, margin is not None and margin > 0)
+            + scoreline(them, margin is not None and margin < 0)
+            + "<details class='others'><summary>Your lineup</summary>"
+            + lineup_detail(us) + "</details></article>")
+
+    out.append("<form method='get' action='/scores'>"
+               "<button class='ghost' style='width:100%;margin-top:18px'>"
+               "Refresh</button></form>")
+    return page("".join(out), "Spike \u2014 scores")
+
+
 def page(body, title):
     return (f"<!doctype html><html><head><meta charset='utf-8'>"
             f"<meta name='viewport' content='width=device-width,initial-scale=1'>"
@@ -943,6 +1031,16 @@ class Handler(BaseHTTPRequestHandler):
             finally:
                 conn.close()
             return
+        if path == "/scores":
+            if not self._authed():
+                self.send_response(303)
+                self.send_header("Location", "/login")
+                self.end_headers()
+                return
+            body = render_scores(os.environ.get("FANTASY_USER", ""))
+            self._send(200, body.decode())
+            return
+
         if path not in ("/", "/lineup"):
             self._no_route(path)
             return

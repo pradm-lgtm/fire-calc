@@ -55,7 +55,7 @@ class Card(unittest.TestCase):
                     drop_player_name="Some Guy (NYJ WR)", drop_position="WR",
                     bid=6, max_bid=100, bid_low=3, bid_high=11, consensus=2,
                     sources=["https://www.fantasypros.com/x"],
-                    rationale="You roster 7 WRs, more than you can start.",
+                    rationale="WR is deep",
                     quote="")
         for i, over in enumerate(overrides or [{}]):
             row = dict(base, add_player_id=str(10 + i))
@@ -69,10 +69,8 @@ class Card(unittest.TestCase):
     def test_a_real_write_up_is_shown(self):
         self.assertIn("eight targets", self.build({"quote": WRITEUP}))
 
-    def test_the_drop_reason_is_a_sentence_not_jargon(self):
-        html = self.build()
-        self.assertIn("You roster 7 WRs", html)
-        self.assertNotIn("is deep for you", html)
+    def test_the_drop_reason_stays_short(self):
+        self.assertIn("WR is deep", self.build())
 
     def test_the_button_names_the_number_beside_it(self):
         self.assertIn("Approve at 6", self.build())

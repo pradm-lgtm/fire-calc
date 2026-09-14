@@ -50,9 +50,21 @@ python3 submitter.py YOUR_USERNAME --audit    # what is really queued
 | `lineup.py` | flags starters that disagree with analyst rankings |
 | `rankings.py` | reads ranked players out of the data a page ships |
 | `nfl_week.py` | opponents, projected points and kickoff times |
+| `scores.py` | every league's live matchup, on one page |
 | `render.py` | loads a page in a browser when the HTML alone is empty |
 | `check_sources.py` | is a candidate site usable as a source? |
 | `selectors.json` | Sleeper's DOM selectors, kept out of the code |
+
+## Scores
+
+```bash
+python3 scores.py YOUR_SLEEPER_USERNAME
+```
+
+Every league's current matchup side by side, closest game first, read live
+from Sleeper on each load rather than stored. Each one shows both scores, who
+is leading, and how many of your starters have not played yet. Checking four
+leagues meant four apps.
 
 ## Start/sit
 
