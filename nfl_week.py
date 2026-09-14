@@ -13,6 +13,7 @@ blank; it never blocks the verdict, which is the part that matters.
 """
 
 import json
+import re
 import sys
 import time
 from datetime import datetime, timezone
@@ -115,32 +116,46 @@ def matchups_from(rows):
         if not team or not against or team == against:
             continue
         home = _first(row, ("home", "is_home"))
-        if home is None:
+        if home is None and _first(row, ("home_team",)) is not None:
             home = _first(row, ("home_team",)) == team
-        out[team] = f"{'vs' if home else 'at'} {against}"
+        # Naming the opponent without claiming a direction beats claiming
+        # the wrong one: every game reading as away is worse than none of
+        # them saying.
+        out[team] = (against if home is None
+                     else f"{'vs' if home else 'at'} {against}")
     return out
 
 
-KICKOFF_KEYS = ("start_time", "game_date", "kickoff", "date", "game_time")
+# Most precise first. A field holding only a date is not a kickoff.
+KICKOFF_KEYS = ("start_time", "kickoff", "game_time", "game_date", "date")
 
 
 def _epoch(value):
-    """Seconds since the epoch from whatever shape a kickoff arrives in."""
+    """Seconds since the epoch, or None if this is not a moment in time.
+
+    A date with no time in it parses happily to midnight, and midnight UTC
+    on game day is the evening before in America - so every Sunday game read
+    as already started from Saturday night onward, and nobody was ever left
+    to play. A day is not a kickoff.
+    """
     if isinstance(value, (int, float)):
         # Milliseconds if it is far too large to be seconds.
         return float(value) / 1000 if value > 1e11 else float(value)
     if not isinstance(value, str) or not value.strip():
         return None
     text = value.strip().replace("Z", "+00:00")
-    for parse in (datetime.fromisoformat,):
-        try:
-            when = parse(text)
-        except ValueError:
-            continue
-        if when.tzinfo is None:
-            when = when.replace(tzinfo=timezone.utc)
-        return when.timestamp()
-    return None
+    if not _HAS_TIME.search(text):
+        return None
+    try:
+        when = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=timezone.utc)
+    return when.timestamp()
+
+
+_HAS_TIME = re.compile(r"\d{1,2}:\d{2}")
 
 
 def kickoffs_from(rows):
@@ -205,6 +220,11 @@ def main():
     print(f"opponents from those records: {len(from_rows)} teams")
     for team, where in sorted(from_rows.items())[:4]:
         print(f"    {team:<4} {where}")
+
+    raw = [(_first(r, ("team",)), {k: r.get(k) for k in KICKOFF_KEYS
+                                   if r.get(k) is not None})
+           for r in rows[:3]]
+    print(f"kickoff fields on the first rows: {raw}")
 
     starts = kickoffs_from(rows)
     print(f"kickoff times: {len(starts)} teams")

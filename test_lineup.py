@@ -158,5 +158,38 @@ class WeekContext(unittest.TestCase):
                          {})
 
 
+class Kickoffs(unittest.TestCase):
+    """A day is not a kickoff."""
+
+    import nfl_week as nw
+
+    def test_a_bare_date_is_not_a_time(self):
+        # It parses happily to midnight, and midnight UTC on game day is the
+        # evening before in America, so every Sunday game read as started
+        # from Saturday night onward.
+        self.assertIsNone(self.nw._epoch("2026-09-14"))
+
+    def test_a_real_timestamp_is_kept(self):
+        self.assertEqual(self.nw._epoch("2026-09-14T17:00:00Z"),
+                         self.nw._epoch("2026-09-14T17:00:00+00:00"))
+
+    def test_milliseconds_are_recognised(self):
+        self.assertEqual(self.nw._epoch(1789416900000),
+                         self.nw._epoch(1789416900))
+
+    def test_an_unknown_direction_names_the_opponent_without_guessing(self):
+        # Asserting "at" for every game because no field said otherwise is
+        # worse than saying only who they play.
+        self.assertEqual(self.nw.matchups_from([{"team": "JAX",
+                                                 "opponent": "CLE"}]),
+                         {"JAX": "CLE"})
+
+    def test_a_known_direction_is_used(self):
+        self.assertEqual(self.nw.matchups_from([{"team": "JAX",
+                                                 "opponent": "CLE",
+                                                 "home": True}]),
+                         {"JAX": "vs CLE"})
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

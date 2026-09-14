@@ -45,11 +45,22 @@ class OneSide(unittest.TestCase):
         self.assertEqual(got["lineup"][0]["points"], 12.5)
         self.assertEqual(got["lineup"][0]["matchup"], "at CHI")
 
-    def test_without_kickoff_times_nothing_is_claimed_to_be_pending(self):
-        # A missing schedule should understate what is left rather than
-        # invent points that may never arrive.
+    def test_points_on_the_board_mean_he_has_played(self):
+        # The schedule is the part that goes missing, so a scored player is
+        # settled whatever it says - otherwise he reads as still to come all
+        # evening and his projection is added on top of his real points.
         blank = dict(WEEK, kickoffs={})
-        self.assertEqual(scores.side(MINE, NAMES, PLAYERS, blank, SLOTS)["to_play"], [])
+        got = scores.side(MINE, NAMES, PLAYERS, blank, SLOTS)
+        self.assertEqual([p["to_play"] for p in got["lineup"]], [False, True])
+
+    def test_a_scoreless_player_with_no_kickoff_is_still_to_come(self):
+        # This is the case that was wrong: a later game read as finished, so
+        # the opponent's projected total stopped at what they already had.
+        blank = dict(WEEK, kickoffs={})
+        entry = dict(MINE, starters=["2"], starters_points=[0])
+        got = scores.side(entry, NAMES, PLAYERS, blank, SLOTS)
+        self.assertEqual(got["to_play"], ["WR"])
+        self.assertEqual(got["projected"], 9.5)
 
     def test_an_empty_slot_keeps_its_place_in_the_pairing(self):
         # Dropping it would shift every later slot against the wrong one.

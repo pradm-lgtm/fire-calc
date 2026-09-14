@@ -40,11 +40,12 @@ def side(entry, names, players, week, slots):
     for i, pid in enumerate(starters):
         player = players.get(pid) or {}
         team = (player.get("team") or "").upper()
-        # Unknown kickoff counts as played, so a missing schedule understates
-        # what is left rather than inventing points that may never arrive.
-        to_play = bool(week["kickoffs"]) and not nfl_week.started(
-            week["kickoffs"], team)
         scored = round(float(points[i]), 1) if i < len(points) else 0.0
+        # Points on the board settle it whatever the schedule says, which
+        # matters because the schedule is the part that can be missing: a
+        # team with no kickoff time would otherwise read as still to come
+        # all evening and keep adding a projection to a finished game.
+        to_play = not (scored or nfl_week.started(week["kickoffs"], team))
         projection = week["points"].get(pid)
         # What he has already scored, or what he is expected to. Adding a
         # projection to a finished game would count the same points twice.
@@ -125,11 +126,50 @@ def board(username, week_no=None):
     return {"season": season, "week": week_no, "leagues": out}
 
 
+def explain(username):
+    """Print what decides "to play" for every starter, per player.
+
+    Whether a game has begun is read from the schedule, and the schedule is
+    the part that goes missing. This shows the inputs rather than the answer.
+    """
+    from datetime import datetime, timezone
+
+    state = sc.current_state()
+    season, week_no = state.get("season"), state.get("week") or 1
+    week = nfl_week.week_context(season, week_no)
+    print(f"week {week_no}: {len(week['kickoffs'])} kickoff times, "
+          f"{len(week['games'])} opponents, {len(week['points'])} projections")
+
+    user = sc.resolve_user(username)
+    players = sc.all_players()
+    for league in sc.user_leagues(user["user_id"], season):
+        got = league_board(league, user["user_id"], players, week_no, week)
+        if not got:
+            continue
+        print()
+        print(got["league_name"])
+        for who in ("us", "them"):
+            if not got[who]:
+                continue
+            print(f"  {got[who]['name']}")
+            for p in got[who]["lineup"]:
+                team = ((players.get(p["player_id"]) or {}).get("team") or "?")
+                when = week["kickoffs"].get(team.upper())
+                stamp = (datetime.fromtimestamp(when, timezone.utc).isoformat()
+                         if when else "no kickoff time")
+                print(f"    {p['name'][:28]:<30} {team:<4} {p['points']:>6}"
+                      f" {str(p['projection']):>6} proj  "
+                      f"{'TO PLAY' if p['to_play'] else 'played ':<8} {stamp}")
+    return 0
+
+
 def main():
     localenv.load()
     if len(sys.argv) < 2:
-        print("usage: python3 scores.py YOUR_SLEEPER_USERNAME")
+        print("usage: python3 scores.py YOUR_SLEEPER_USERNAME [--why]")
         return 1
+    if "--why" in sys.argv:
+        return explain(sys.argv[1])
     got = board(sys.argv[1])
     print(f"NFL {got['season']}, week {got['week']}")
     for b in got["leagues"]:
