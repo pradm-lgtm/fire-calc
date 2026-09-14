@@ -116,19 +116,19 @@ def value_of(ids, values):
     return sum(values.get(pid, {}).get("value", 0.0) for pid in ids)
 
 
-def fairness(give, get, values, gaining_side_spots, replacement):
-    """How lopsided the package is, and which way.
+def fairness(give, get, values, freed_spots, replacement):
+    """What each side is really giving up, and so which way it tilts.
 
-    Sending more players than you receive hands the other side a roster
-    spot, and the spot is worth whatever they can put in it. A calculator
-    counts that; ignoring it makes every two-for-one read as worse for them
-    than it is.
+    Sending two players for one leaves you a player short and so a roster
+    spot free, and that spot is worth whatever you can put in it off the
+    wire. So the credit belongs to the side receiving fewer players - you,
+    in a two-for-one - which is also where a trade calculator puts it.
     """
-    mine = value_of(give, values)
-    theirs = value_of(get, values)
-    if gaining_side_spots > 0:
-        theirs += gaining_side_spots * replacement
-    return mine, theirs
+    sent = value_of(give, values)
+    received = value_of(get, values)
+    if freed_spots > 0:
+        received += freed_spots * replacement
+    return sent, received
 
 
 def team_label(users, rosters, roster_id):
@@ -308,11 +308,14 @@ def describe(offer, players, values):
     """One sentence on whether they would take it."""
     # Stated from their side, because that is the question: an offer is
     # only worth sending if the other manager sees a reason to accept.
+    # tilt is (received - sent), so a positive number is value coming your
+    # way. Both halves of this sentence said the opposite.
     lean = ("about even by value" if abs(offer["tilt"]) < 6 else
-            f"{abs(offer['tilt'])}% in their favour by value" if offer["tilt"] > 0
-            else f"{abs(offer['tilt'])}% in your favour by value")
-    spare = (f", and frees them {offer['spots']} roster spot"
-             f"{'s' if offer['spots'] > 1 else ''}" if offer["spots"] else "")
+            f"{abs(offer['tilt'])}% in your favour by value" if offer["tilt"] > 0
+            else f"{abs(offer['tilt'])}% in their favour by value")
+    spare = (f", and leaves you {offer['spots']} roster spot"
+             f"{'s' if offer['spots'] > 1 else ''} free"
+             if offer["spots"] else "")
     return f"It is {lean}{spare}."
 
 

@@ -235,6 +235,24 @@ class Offline(unittest.TestCase):
             trades.board("someone")
 
 
+class Fairness(unittest.TestCase):
+    """Which side a lopsided package favours, and who gains the spare spot."""
+
+    VALUES = values()
+
+    def test_receiving_more_than_you_send_tilts_your_way(self):
+        sent, received = trades.fairness(["rb3"], ["rb1"], self.VALUES, 0, 0)
+        self.assertGreater(received, sent)
+
+    def test_the_spare_spot_is_credited_to_the_side_sending_two(self):
+        # You send two and get one back, so you are a player short and a
+        # spot free; a trade calculator credits that side too.
+        plain = trades.fairness(["rb2"], ["wr1"], self.VALUES, 0, 0)[1]
+        two_for_one = trades.fairness(["rb2", "rb3"], ["wr1"], self.VALUES,
+                                      1, 500)[1]
+        self.assertEqual(two_for_one - plain, 500)
+
+
 class Output(unittest.TestCase):
     """What an offer says about itself."""
 
@@ -261,15 +279,21 @@ class Output(unittest.TestCase):
     def test_a_close_package_reads_as_even(self):
         self.assertIn("about even", trades.describe(self.offer(), self.NAMES, {}))
 
-    def test_the_lean_is_stated_from_their_side(self):
-        # Whether they would accept is the question; how good it is for you
-        # is already the lineup number above it.
-        said = trades.describe(self.offer(tilt=18), self.NAMES, {})
-        self.assertIn("in their favour", said)
+    def test_receiving_more_value_reads_as_your_favour(self):
+        # tilt is (received - sent), so a positive number is value coming
+        # your way. The sentence said the opposite.
+        self.assertIn("in your favour",
+                      trades.describe(self.offer(tilt=18), self.NAMES, {}))
 
-    def test_a_freed_roster_spot_is_mentioned(self):
+    def test_sending_more_value_reads_as_their_favour(self):
+        self.assertIn("in their favour",
+                      trades.describe(self.offer(tilt=-18), self.NAMES, {}))
+
+    def test_the_freed_roster_spot_is_yours(self):
+        # Sending two for one leaves you a player short, so the spare spot
+        # is on your roster, not theirs.
         said = trades.describe(self.offer(spots=1), self.NAMES, {})
-        self.assertIn("frees them 1 roster spot", said)
+        self.assertIn("leaves you 1 roster spot free", said)
 
     def test_one_offer_per_player_sent(self):
         # Three variations on trading the same quarterback read as three
