@@ -43,10 +43,18 @@ class Splitting(unittest.TestCase):
 class TheRealSchema(unittest.TestCase):
 
     def test_every_statement_is_something_postgres_can_run(self):
+        # Counting statements made this test fail every time a table was
+        # added, which says nothing about whether the schema is valid.
         got = db.statements(store.SCHEMA)
-        self.assertEqual(len(got), 8)
+        self.assertTrue(got)
         for statement in got:
             self.assertTrue(statement.upper().startswith("CREATE"), statement)
+
+    def test_every_table_the_code_writes_to_is_created(self):
+        made = " ".join(db.statements(store.SCHEMA))
+        for table in ("runs", "proposals", "events", "lineup_checks",
+                      "lineup_flags", "lineup_done"):
+            self.assertIn(f"CREATE TABLE IF NOT EXISTS {table} ", made)
 
     def test_no_statement_carries_a_comment_into_postgres(self):
         for statement in db.statements(store.SCHEMA):

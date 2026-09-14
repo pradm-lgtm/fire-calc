@@ -85,8 +85,13 @@ beats RB20 for one spot.
 The thresholds widen with the rank being questioned: two places apart at the
 top of a position is a real disagreement, two places apart at RB90 is noise.
 
-The page is called **Spike**. It leads with the slots that disagree, across
-every league at once,
+The page is called **Spike**. It leads with the calls to make, headed by what
+to do rather than by a colour: *Start Robinson over Flowers*, one sentence of
+reason under it, and the player to start rendered larger than the rest of the
+card. Must-fix calls come first and look heavier than marginal ones; each has
+a **Mark as done** control, and a settled call stays settled through later
+checks because dismissals are keyed to the slot, not to the check. Full
+lineups sit below, folded,
 each shown next to the bench players who could take that slot, with their
 opponent and projected points. Leagues where everything agrees are folded
 shut. Projections are shown, never used: they play no part in any verdict,

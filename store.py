@@ -99,6 +99,22 @@ CREATE TABLE IF NOT EXISTS lineup_flags (
 
 CREATE INDEX IF NOT EXISTS idx_lineup_flags_check ON lineup_flags(check_id);
 
+-- A decision you have already made. Keyed by the slot rather than by the
+-- check, because every refresh writes new rows: keying it to a check would
+-- resurrect every dismissal the moment the page looked again, which is the
+-- whole thing this is meant to stop.
+CREATE TABLE IF NOT EXISTS lineup_done (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    at         TEXT NOT NULL,
+    season     TEXT,
+    week       INTEGER,
+    league_id  TEXT NOT NULL,
+    slot       TEXT,
+    player_id  TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_lineup_done_week ON lineup_done(season, week);
+
 CREATE TABLE IF NOT EXISTS events (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     at          TEXT NOT NULL,
@@ -274,6 +290,35 @@ def lineup_flags(conn, check_id):
         "SELECT * FROM lineup_flags WHERE check_id = ?"
         " ORDER BY league_name, position, id", (check_id,)
     ).fetchall()
+
+
+def settle(conn, season, week, league_id, slot, player_id):
+    """Record that a lineup call has been dealt with."""
+    conn.execute(
+        "INSERT INTO lineup_done (at, season, week, league_id, slot, player_id)"
+        " VALUES (?,?,?,?,?,?)",
+        (now(), str(season), week, str(league_id), slot,
+         str(player_id) if player_id else None),
+    )
+    conn.commit()
+
+
+def unsettle(conn, season, week, league_id, slot, player_id):
+    conn.execute(
+        "DELETE FROM lineup_done WHERE season = ? AND week = ?"
+        " AND league_id = ? AND slot = ? AND player_id = ?",
+        (str(season), week, str(league_id), slot,
+         str(player_id) if player_id else None),
+    )
+    conn.commit()
+
+
+def settled(conn, season, week):
+    """{(league_id, slot, player_id)} already dealt with this week."""
+    rows = conn.execute(
+        "SELECT league_id, slot, player_id FROM lineup_done"
+        " WHERE season = ? AND week = ?", (str(season), week)).fetchall()
+    return {(r["league_id"], r["slot"], r["player_id"]) for r in rows}
 
 
 def latest_run(conn):

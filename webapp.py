@@ -37,128 +37,162 @@ from lineup import SLOT_ELIGIBILITY
 import store as st
 
 CSS = """
-:root { color-scheme: light dark; --bg:#f4f5f7; --card:#fff; --ink:#12141a;
-        --muted:#5c6370; --line:#e3e6ea; --ok:#0a7d28; --ok-ink:#fff;
-        --no:#b3261e; --accent:#1a56db;
+/* Colour carries one meaning each. Blue is the only thing you can press,
+   amber and red are the only things that need attention, and everything
+   structural is grey. Two alarms for one fact - a red rule and a red label
+   saying the same thing - is one alarm too many, so urgency lives in the
+   rule and the words, never in both at once. */
+:root { color-scheme: light dark;
+        --bg:#f6f7f9; --card:#fff; --raise:#fff; --ink:#11141a;
+        --muted:#646d7c; --line:#e4e7ec; --line-2:#d3d8e0;
+        --action:#1d4ed8; --action-ink:#fff;
+        --urgent:#c2321b; --warn:#8a5a00;
+        --ok:#0a7d28; --ok-ink:#fff; --no:#b3261e;
         --qb:#7c3aed; --rb:#0a7d28; --wr:#1a56db; --te:#c2410c; --def:#475569; }
 @media (prefers-color-scheme: dark) {
-  :root { --bg:#0f1115; --card:#181b21; --ink:#e8eaed; --muted:#9aa2ad;
-          --line:#272b33; --ok:#15803d; --ok-ink:#fff; --no:#f87171;
-          --accent:#7aa2f7;
+  :root { --bg:#0a0c10; --card:#13161c; --raise:#181c24; --ink:#eef1f6;
+          --muted:#8d96a6; --line:#222731; --line-2:#2c323d;
+          --action:#5b8cff; --action-ink:#0a0c10;
+          --urgent:#ff6b5e; --warn:#e3a33a;
+          --ok:#3ddc84; --ok-ink:#06210f; --no:#ff6b5e;
           --qb:#a78bfa; --rb:#4ade80; --wr:#7aa2f7; --te:#fb923c; --def:#94a3b8; }
 }
 * { box-sizing:border-box; -webkit-text-size-adjust:100%; }
-body { margin:0; padding:14px; background:var(--bg); color:var(--ink);
+body { margin:0; padding:18px 14px 40px; background:var(--bg); color:var(--ink);
        font:16px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }
-.wrap { max-width:720px; margin:0 auto; }
-h1 { font-size:21px; margin:0 0 4px; letter-spacing:-.01em; }
-.sub { color:var(--muted); font-size:13px; margin-bottom:18px; }
-h2 { font-size:17px; margin:24px 0 8px; display:flex; justify-content:space-between;
-     align-items:baseline; gap:8px; }
-.meta { color:var(--muted); font-size:12px; font-weight:normal; }
-.card { background:var(--card); border:1px solid var(--line); border-radius:12px;
-        padding:14px; margin-bottom:12px; }
+.wrap { max-width:680px; margin:0 auto; }
+
+/* Typography does the structuring. No tracked-out capitals: they read as
+   template chrome rather than as information. */
+h1 { font-size:26px; line-height:1.15; margin:0 0 2px; letter-spacing:-.02em; }
+h2 { font-size:13px; font-weight:650; color:var(--muted); margin:26px 0 10px;
+     display:flex; justify-content:space-between; align-items:baseline; gap:8px; }
+.sub { color:var(--muted); font-size:13px; margin:0 0 16px; }
+.meta { color:var(--muted); font-size:12px; font-weight:400; }
+.foot { color:var(--muted); font-size:12px; margin:28px 0 0;
+        border-top:1px solid var(--line); padding-top:12px; }
+
+.brand { display:flex; align-items:center; gap:8px; font-weight:750;
+         font-size:17px; letter-spacing:-.02em; margin-bottom:14px; }
+.mark { width:24px; height:24px; color:var(--action); flex:none; }
+nav { display:flex; gap:4px; margin-bottom:22px; padding:3px;
+      background:var(--card); border:1px solid var(--line); border-radius:10px; }
+nav a { flex:1; text-align:center; padding:8px; border-radius:7px;
+        font-size:14px; font-weight:600; text-decoration:none;
+        color:var(--muted); }
+nav a.on { background:var(--action); color:var(--action-ink); }
+
+/* One card shape, three weights of it. An urgent call is bigger, brighter
+   and higher on the page than a marginal one. */
+.call { background:var(--card); border:1px solid var(--line);
+        border-radius:14px; padding:16px; margin-bottom:12px;
+        border-left:3px solid var(--line-2); }
+.call.urgent { background:var(--raise); border-left-color:var(--urgent);
+               padding:20px; }
+.call.close { border-left-color:var(--warn); }
+.call h3 { margin:0; font-size:17px; line-height:1.25; letter-spacing:-.01em; }
+.call.urgent h3 { font-size:21px; }
+.call .why { color:var(--muted); font-size:14px; margin:6px 0 0; }
+.calltop { display:flex; justify-content:space-between; gap:10px;
+           align-items:baseline; margin-bottom:12px; }
+.where { color:var(--muted); font-size:12px; white-space:nowrap; }
+
+.player { display:flex; align-items:center; gap:11px; padding:9px 0; }
+.player + .player { border-top:1px solid var(--line); }
+.face { width:36px; height:36px; border-radius:50%; flex:none;
+        background:var(--line) center/cover no-repeat; }
+.player .who { display:flex; flex-direction:column; min-width:0; flex:1; }
+.pname { font-weight:600; line-height:1.3; }
+.under { color:var(--muted); font-size:12.5px; }
+.slotname { color:var(--muted); font-size:12px; flex:none; }
+
+/* The recommendation is the point of the card, so it is the one row that
+   looks different from the rest. */
+.player.pick { background:var(--bg); border-radius:10px; padding:9px 11px;
+               margin:2px -3px; border-top:0; }
+.player.pick .pname { font-size:17px; font-weight:700; }
+.player.pick .face { width:44px; height:44px; }
+.player.bench-out .pname { color:var(--muted); }
+.player.bench-out .face { filter:grayscale(1); opacity:.65; }
+.tick { font-size:12px; font-weight:700; color:var(--ok); flex:none; }
+.rowlabel { font-size:12.5px; color:var(--muted); margin:14px 0 0; }
+.others { margin-top:4px; }
+.others > summary { font-size:13px; color:var(--muted); cursor:pointer;
+                    padding:8px 0; list-style:none; }
+.others > summary::-webkit-details-marker { display:none; }
+
+.callfoot { display:flex; justify-content:space-between; align-items:center;
+            gap:10px; margin-top:14px; padding-top:12px;
+            border-top:1px solid var(--line); }
+.done { font-size:12.5px; color:var(--muted); }
+
+button { min-height:42px; padding:9px 16px; border-radius:9px;
+         border:1px solid transparent; font-weight:600; cursor:pointer;
+         font-size:15px; font-family:inherit; touch-action:manipulation; }
+.primary { background:var(--action); color:var(--action-ink); }
+.ghost { background:transparent; color:var(--ink); border-color:var(--line-2); }
+.link { background:none; border:0; color:var(--muted); font-size:13px;
+        padding:4px 0; min-height:0; text-decoration:underline; }
+.approve { background:var(--ok); color:var(--ok-ink); flex:1; }
+.decline { background:transparent; color:var(--no); border-color:var(--line);
+           flex:1; }
+form.row { display:flex; gap:8px; align-items:center; margin-top:14px;
+           flex-wrap:wrap; }
+.bidwrap { display:flex; align-items:center; gap:6px; }
+input[type=number] { width:84px; min-height:44px; padding:10px; font-size:16px;
+                     border:1px solid var(--line-2); border-radius:9px;
+                     background:var(--bg); color:var(--ink); }
+label { font-size:13px; color:var(--muted); }
+
+.fold { background:var(--card); border:1px solid var(--line);
+        border-radius:12px; padding:2px 16px 10px; margin-bottom:10px; }
+.fold > summary { display:flex; justify-content:space-between; gap:8px;
+                  align-items:baseline; padding:12px 0; cursor:pointer;
+                  font-weight:600; list-style:none; }
+.fold > summary::-webkit-details-marker { display:none; }
+.fold > summary::after { content:'+'; color:var(--muted); font-weight:400; }
+.fold[open] > summary::after { content:'\2212'; }
+
+.card { background:var(--card); border:1px solid var(--line);
+        border-radius:14px; padding:16px; margin-bottom:12px; }
 .move { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
 .move + .move { margin-top:6px; }
-.tag { font-size:10px; font-weight:800; letter-spacing:.06em; padding:3px 6px;
-       border-radius:4px; background:var(--line); color:var(--muted); }
-.pos { font-size:10px; font-weight:800; letter-spacing:.04em; padding:3px 6px;
-       border-radius:4px; color:#fff; }
+.tag { font-size:11px; font-weight:700; padding:3px 7px; border-radius:5px;
+       background:var(--line); color:var(--muted); }
+.pos { font-size:11px; font-weight:700; padding:3px 7px; border-radius:5px;
+       color:#fff; }
 .pos.QB{background:var(--qb)} .pos.RB{background:var(--rb)}
 .pos.WR{background:var(--wr)} .pos.TE{background:var(--te)}
 .pos.DEF,.pos.K{background:var(--def)}
 .add { font-weight:650; font-size:17px; }
 .drop { color:var(--muted); }
 .why { color:var(--muted); font-size:13px; margin:10px 0 0; }
-.quote { border-left:3px solid var(--line); padding-left:10px; margin:8px 0 0;
+.quote { border-left:2px solid var(--line-2); padding-left:10px; margin:8px 0 0;
          color:var(--muted); font-size:13px; font-style:italic; }
-form.row { display:flex; gap:8px; align-items:center; margin-top:14px;
-           flex-wrap:wrap; }
-.bidwrap { display:flex; align-items:center; gap:6px; }
-input[type=number] { width:84px; min-height:46px; padding:10px; font-size:16px;
-                     border:1px solid var(--line); border-radius:8px;
-                     background:var(--bg); color:var(--ink); }
-button { min-height:46px; padding:10px 18px; border-radius:8px;
-         border:1px solid transparent; font-weight:650; cursor:pointer;
-         font-size:16px; touch-action:manipulation; }
-.approve { background:var(--ok); color:var(--ok-ink); flex:1; }
-.decline { background:transparent; color:var(--no); border-color:var(--line);
-           flex:1; }
-.state { font-size:14px; font-weight:650; margin:12px 0 0; }
+.state { font-size:14px; font-weight:600; margin:12px 0 0; }
 .state.approved { color:var(--ok); } .state.declined { color:var(--no); }
-.state.submitted { color:var(--accent); }
-.empty { color:var(--muted); padding:24px 0; }
-.bar { background:var(--card); border:1px solid var(--line); border-radius:8px;
-       padding:9px 12px; font-size:13px; color:var(--muted); margin-bottom:10px; }
-.warn { color:var(--no); font-weight:650; }
+.state.submitted { color:var(--action); }
+.empty { color:var(--muted); padding:20px 0; }
+.bar { background:var(--card); border:1px solid var(--line); border-radius:10px;
+       padding:10px 13px; font-size:13px; color:var(--muted); margin-bottom:10px; }
+.warn { color:var(--urgent); font-weight:600; }
 .counts { display:flex; gap:14px; font-size:13px; color:var(--muted);
           margin-bottom:16px; flex-wrap:wrap; }
 .counts b { color:var(--ink); }
-.brand { display:flex; align-items:center; gap:8px; font-weight:800;
-         font-size:19px; letter-spacing:-.02em; margin-bottom:12px;
-         color:var(--ink); }
-.mark { width:26px; height:26px; color:var(--accent); flex:none; }
-.progress { position:fixed; inset:0 auto auto 0; height:3px; width:0;
-            background:var(--accent); z-index:9; transition:width .35s ease; }
+.locked { font-size:12px; color:var(--muted); margin-left:8px; }
+
+.progress { position:fixed; inset:0 auto auto 0; height:2px; width:0;
+            background:var(--action); z-index:9; transition:width .35s ease; }
 body.busy .progress { width:82%; transition:width 14s cubic-bezier(0,.8,.2,1); }
 body.busy { cursor:progress; }
-body.busy nav a, body.busy .fold { opacity:.55; }
-button[disabled] { opacity:.7; cursor:progress; }
-.locked { font-size:10px; font-weight:800; letter-spacing:.05em;
-          text-transform:uppercase; color:var(--muted); margin-left:8px;
-          border:1px solid var(--line); border-radius:999px; padding:1px 7px;
-          vertical-align:middle; }
-nav { display:flex; gap:6px; margin-bottom:14px; }
-nav a { flex:1; text-align:center; padding:9px 8px; border-radius:8px;
-        border:1px solid var(--line); background:var(--card); font-size:14px;
-        font-weight:650; text-decoration:none; color:var(--muted); }
-nav a.on { background:var(--accent); border-color:var(--accent); color:#fff; }
-.slot { display:flex; align-items:center; gap:10px; padding:11px 12px;
-        background:var(--card); border:1px solid var(--line);
-        border-radius:10px; margin-bottom:7px; border-left-width:4px; }
-.slot.GREEN { border-left-color:var(--ok); }
-.slot.YELLOW { border-left-color:#b58900; }
-.slot.RED { border-left-color:var(--no); }
-.slot.UNKNOWN { border-left-color:var(--line); }
-.slotname { font-size:10px; font-weight:800; letter-spacing:.06em;
-            color:var(--muted); width:44px; flex:none; }
-.who { font-weight:650; flex:1; min-width:0; }
-.rankt { color:var(--muted); font-size:12px; text-align:right; flex:none; }
-.advice { font-size:13px; color:var(--muted); margin:6px 0 0; }
-.player { display:flex; align-items:center; gap:10px; padding:9px 2px; }
-.player + .player { border-top:1px solid var(--line); }
-.face { width:34px; height:34px; border-radius:50%; flex:none;
-        background:var(--line) center/cover no-repeat; }
-.player .who { display:flex; flex-direction:column; min-width:0; flex:1; }
-.pname { font-weight:650; line-height:1.25; }
-.under { color:var(--muted); font-size:12px; }
-.player.starting .face { width:46px; height:46px; }
-.player.starting .pname { font-size:18px; }
-.decide { background:var(--card); border:1px solid var(--line);
-          border-left-width:4px; border-radius:12px; padding:12px 14px;
-          margin-bottom:12px; }
-.decide.RED { border-left-color:var(--no); }
-.decide.YELLOW { border-left-color:#b58900; }
-.decidehead { display:flex; justify-content:space-between; align-items:baseline;
-              gap:8px; font-size:12px; color:var(--muted);
-              text-transform:uppercase; letter-spacing:.05em; font-weight:700; }
-.verdict.RED { color:var(--no); } .verdict.YELLOW { color:#b58900; }
-.alts { margin-top:10px; padding-top:4px; border-top:1px solid var(--line); }
-.altlabel { display:block; font-size:11px; font-weight:800; letter-spacing:.06em;
-            text-transform:uppercase; color:var(--muted); margin:10px 0 2px; }
-.fold { background:var(--card); border:1px solid var(--line);
-        border-radius:12px; padding:4px 14px 10px; margin-bottom:10px; }
-.fold > summary { display:flex; justify-content:space-between; gap:8px;
-                  align-items:baseline; padding:10px 0; cursor:pointer;
-                  font-weight:650; list-style:none; }
-.fold > summary::-webkit-details-marker { display:none; }
-.fold > summary::after { content:'▸'; color:var(--muted); font-weight:400; }
-.fold[open] > summary::after { content:'▾'; }
-label { font-size:13px; color:var(--muted); }
+body.busy nav a, body.busy .call, body.busy .fold { opacity:.5; }
+button[disabled] { opacity:.6; cursor:progress; }
+
 @media (max-width:520px) {
-  body { padding:10px; }
-  .add { font-size:16px; }
-  form.row { gap:6px; }
+  body { padding:14px 12px 32px; }
+  h1 { font-size:23px; }
+  .call.urgent h3 { font-size:19px; }
+  .call, .call.urgent { padding:14px; }
   .bidwrap { width:100%; }
   input[type=number] { flex:1; width:auto; }
   .approve, .decline { flex:1 1 45%; }
@@ -376,20 +410,10 @@ def brand():
 
 
 def nav(here):
-    tabs = (("/", "Spike — waivers"), ("/lineup", "Spike — start / sit"))
+    tabs = (("/", "Waivers"), ("/lineup", "Start / sit"))
     return brand() + "<nav>" + "".join(
         f"<a class='{'on' if path == here else ''}' href='{path}'>{label}</a>"
         for path, label in tabs) + "</nav>"
-
-
-# Green is not a compliment and red is not an order: these compare one
-# lineup against one site's consensus, which is a second opinion, not a
-# verdict.
-VERDICT_NOTE = {
-    "RED": "well off consensus",
-    "YELLOW": "close, worth a look",
-    "UNKNOWN": "not in the rankings",
-}
 
 
 # How old a set of verdicts may be before the page works them out again.
@@ -451,7 +475,7 @@ def refresh_waivers(conn, db_path):
 
 def refresh_button(label):
     return (f"<form method='post' action='/waivers/refresh'>"
-            f"<button class='decline' style='width:100%;margin-bottom:12px'>"
+            f"<button class='ghost' style='width:100%;margin-bottom:12px'>"
             f"{e(label)}</button></form>")
 
 
@@ -481,8 +505,8 @@ ATTENTION = ("RED", "YELLOW")
 def headshot(row):
     """A player's face, or his team's badge for a defence.
 
-    The image is a background on a coloured circle, so a player the CDN has
-    no picture of shows the circle rather than a broken image, with no
+    A background image on a coloured circle, so a player the image service
+    has never heard of shows the circle rather than a broken icon, with no
     script needed to notice.
     """
     pid, pos = row["player_id"], (row["pos"] or "").upper()
@@ -499,9 +523,7 @@ def rank_label(row, flex_scale):
     """Where he ranks, on the scale the slot in question is decided on.
 
     A positional rank cannot answer a flex question: WR12 against RB20 for
-    one spot is not a comparison. The page was mixing the two - the starter
-    shown on the flex scale and the bench players on their own - so the two
-    halves of the same card disagreed about what the numbers meant.
+    one spot is not a comparison.
     """
     if flex_scale and row["overall_text"] and row["overall_text"] != "unranked":
         return row["overall_text"]
@@ -515,66 +537,105 @@ def where_and_points(row):
     return " &middot; ".join(e(b) for b in bits if b)
 
 
-def player_line(row, emphasis="", flex_scale=False, both=False):
-    """One player: face, name, where he ranks, who he plays, what he may score."""
+def short_name(label):
+    return (label or "").split(" (")[0].strip()
+
+
+def player_line(row, kind="", flex_scale=False, both=False, note=""):
+    """One player. `kind` is what this row is here to say, not how loud."""
     ranks = [rank_label(row, flex_scale)]
     if both and row["overall_text"] and row["overall_text"] not in ranks:
         ranks.append(row["overall_text"])
-    under = " &middot; ".join(x for x in
-                              [e(r) for r in ranks if r] + [where_and_points(row)]
-                              if x)
-    lock = ("<span class='locked'>game started</span>" if row["locked"] else "")
-    return (f"<div class='player {emphasis}'>{headshot(row)}"
+    under = " &middot; ".join(
+        x for x in [e(r) for r in ranks if r] + [where_and_points(row)] if x)
+    lock = "<span class='locked'>playing now</span>" if row["locked"] else ""
+    tail = (f"<span class='tick'>{e(note)}</span>" if note
+            else f"<span class='slotname'>{e(row['slot'] or '')}</span>")
+    return (f"<div class='player {kind}'>{headshot(row)}"
             f"<span class='who'><span class='pname'>{e(row['player_name'])}"
             f"{lock}</span><span class='under'>{under}</span></span>"
-            f"<span class='slotname'>{e(row['slot'] or '')}</span></div>")
+            f"{tail}</div>")
 
 
 def alternatives_for(row, bench):
-    """Bench players who could take this slot, best projection first."""
     allowed = SLOT_ELIGIBILITY.get(row["slot"]) or set()
     return [b for b in bench if (b["pos"] or "") in allowed]
 
 
-def decision_card(row, bench):
-    named = row["better_name"]
-    options = alternatives_for(row, bench)
-    # The player consensus actually prefers goes first; he is the reason
-    # this card exists, and burying him under a projection ordering would
-    # make the card disagree with its own headline.
-    options.sort(key=lambda b: (named or "") not in (b["player_name"] or ""))
+def settle_form(row, label, css="ghost"):
+    return ("<form method='post' action='/lineup/done'>"
+            f"<input type='hidden' name='league' value='{e(row['league_id'])}'>"
+            f"<input type='hidden' name='slot' value='{e(row['slot'] or '')}'>"
+            f"<input type='hidden' name='player' value='{e(row['player_id'] or '')}'>"
+            f"<button class='{css}'>{e(label)}</button></form>")
 
+
+def undo_form(row):
+    return ("<form method='post' action='/lineup/undo'>"
+            f"<input type='hidden' name='league' value='{e(row['league_id'])}'>"
+            f"<input type='hidden' name='slot' value='{e(row['slot'] or '')}'>"
+            f"<input type='hidden' name='player' value='{e(row['player_id'] or '')}'>"
+            "<button class='link'>Undo</button></form>")
+
+
+def call_card(row, bench, urgent):
+    """One lineup call, led by what to do about it.
+
+    The old card stated a colour and left you to work out the action from a
+    sentence underneath. The action is the headline now, the reason is one
+    line under it, and the player to start is the only row on the card that
+    looks different from the others.
+    """
     flex = len(SLOT_ELIGIBILITY.get(row["slot"], ())) > 1
-    out = [f"<div class='decide {e(row['verdict'])}'>",
-           f"<div class='decidehead'><span>{e(row['league_name'] or '')}</span>"
-           f"<span class='verdict {e(row['verdict'])}'>"
-           f"{e(VERDICT_NOTE.get(row['verdict'], ''))}</span></div>",
-           player_line(row, "starting", flex_scale=flex)]
-    if row["detail"]:
-        out.append(f"<p class='advice'>{e(row['detail'])}</p>")
-    if options:
-        out.append("<div class='alts'><span class='altlabel'>On your bench"
-                   "</span>")
-        # The same scale as the starter above, or the card compares a
-        # positional rank against a cross-positional one and means nothing.
-        out.extend(player_line(b, flex_scale=flex) for b in options[:4])
-        out.append("</div>")
-    out.append("</div>")
+    options = alternatives_for(row, bench)
+    named = short_name(row["better_name"])
+    options.sort(key=lambda b: named not in (b["player_name"] or ""))
+    pick = options[0] if (named and options
+                          and named in (options[0]["player_name"] or "")) else None
+
+    headline = (f"Start {named} over {short_name(row['player_name'])}"
+                if pick else f"Reconsider {short_name(row['player_name'])}")
+
+    out = [f"<article class='call {'urgent' if urgent else 'close'}'>",
+           "<div class='calltop'>",
+           f"<div><h3>{e(headline)}</h3>",
+           (f"<p class='why'>{e(row['detail'])}</p>" if row["detail"] else ""),
+           "</div>",
+           f"<span class='where'>{e(row['league_name'] or '')} &middot; "
+           f"{e(row['slot'] or '')}</span></div>"]
+
+    if pick:
+        out.append(player_line(pick, "pick", flex_scale=flex, note="Start"))
+        out.append("<p class='rowlabel'>Instead of</p>")
+        out.append(player_line(row, "bench-out", flex_scale=flex))
+        rest = options[1:]
+    else:
+        out.append(player_line(row, "pick", flex_scale=flex))
+        rest = options
+
+    if rest:
+        out.append(f"<details class='others'><summary>{len(rest)} other "
+                   f"option{'s' if len(rest) > 1 else ''} for this slot"
+                   "</summary>")
+        out.extend(player_line(b, flex_scale=flex) for b in rest[:4])
+        out.append("</details>")
+
+    out.append("<div class='callfoot'><span class='done'>Decided in your "
+               "league app?</span>" + settle_form(row, "Mark as done") +
+               "</div></article>")
     return "".join(out)
 
 
-def league_fold(name, started, bench, flagged):
-    """A league's full lineup, folded shut when there is nothing to decide."""
-    summary = (f"{len(started)} starters, {len(bench)} on the bench"
-               if not flagged else
-               f"{flagged} to decide &middot; {len(started)} starters")
-    return ("<details class='fold'" + (" open" if flagged else "") + ">"
+def league_fold(name, started, bench, outstanding):
+    summary = (f"{outstanding} still open" if outstanding
+               else f"{len(started)} starters, {len(bench)} benched")
+    return ("<details class='fold'" + (" open" if outstanding else "") + ">"
             f"<summary><span>{e(name)}</span>"
             f"<span class='meta'>{summary}</span></summary>"
             + "".join(player_line(
                 r, flex_scale=len(SLOT_ELIGIBILITY.get(r["slot"], ())) > 1)
                 for r in started)
-            + ("<div class='altlabel'>Bench</div>" if bench else "")
+            + ("<p class='rowlabel'>Bench</p>" if bench else "")
             + "".join(player_line(r, both=True) for r in bench)
             + "</details>")
 
@@ -591,56 +652,57 @@ def render_lineup(conn, force=False):
     if not check:
         return page(nav("/lineup") + "<h1>Start / sit</h1>"
                     f"<p class='empty'>{e(problem or 'Nothing to show yet.')}"
-                    "</p>", "Spike — start / sit")
+                    "</p>", "Spike \u2014 start / sit")
 
     rows = st.lineup_flags(conn, check["id"])
+    handled = st.settled(conn, check["season"], check["week"])
     started = [r for r in rows if (r["role"] or "starter") == "starter"]
     benched = [r for r in rows if (r["role"] or "starter") == "bench"]
-    # Red before yellow, then by league: the order you would work through
-    # them, not the order the database happened to return.
-    # A slot stops being a decision the moment the game kicks off. Sunday
-    # afternoon is when a starter picks up an injury, which reads as a
-    # disagreement with consensus and is really just news you cannot act on.
-    decisions = sorted((r for r in started
-                        if r["verdict"] in ATTENTION and not r["locked"]),
-                       key=lambda r: (ATTENTION.index(r["verdict"]),
-                                      r["league_name"] or "", r["position"]))
-    unknown = sum(1 for r in started if r["verdict"] == "UNKNOWN")
 
     bench_by_league = {}
     for r in benched:
         bench_by_league.setdefault(r["league_id"], []).append(r)
 
-    playing = sum(1 for r in started if r["locked"])
-    headline = (f"<b>{len(decisions)}</b> to decide" if decisions
-                else "<b>Nothing to change</b>")
-    if playing:
-        headline += f" &middot; <b>{playing}</b> already playing"
-    if unknown:
-        headline += f" &middot; <b>{unknown}</b> unranked"
+    def key(r):
+        return (r["league_id"], r["slot"], r["player_id"])
+
+    # A call is live until its game starts or you say you have dealt with it.
+    live = [r for r in started if r["verdict"] in ATTENTION
+            and not r["locked"] and key(r) not in handled]
+    done = [r for r in started if r["verdict"] in ATTENTION
+            and key(r) in handled]
+    urgent = [r for r in live if r["verdict"] == "RED"]
+    close = [r for r in live if r["verdict"] == "YELLOW"]
 
     out = [nav("/lineup"), "<h1>Start / sit</h1>",
-           f"<div class='sub'>Week {e(check['week'])} &middot; checked "
-           f"{e(said_ago(age))} &middot; against analyst rankings, not "
-           f"projections</div>",
-           f"<div class='counts'><span>{headline}</span></div>",
-           "<form method='post' action='/lineup/refresh'>"
-           "<button class='decline' style='width:100%;margin-bottom:12px'>"
-           "Check again now</button></form>"]
+           f"<p class='sub'>Week {e(check['week'])} &middot; checked "
+           f"{e(said_ago(age))}</p>"]
     if problem:
-        out.insert(3, f"<div class='bar'><span class='warn'>Could not "
-                      f"refresh:</span> {e(problem)} Showing the last check."
-                      "</div>")
+        out.append(f"<div class='bar'><span class='warn'>Could not "
+                   f"refresh:</span> {e(problem)} Showing the last check."
+                   "</div>")
 
-    # The whole point of this page is the handful of slots worth thinking
-    # about, and they were previously buried under whichever league happened
-    # to sort first - which was the one with nothing wrong with it.
-    if decisions:
-        out.append("<h2><span>Worth a look</span></h2>")
-        for row in decisions:
-            out.append(decision_card(row, bench_by_league.get(row["league_id"], [])))
+    if urgent:
+        out.append(f"<h2><span>Fix these</span><span class='meta'>"
+                   f"{len(urgent)} left</span></h2>")
+        for row in urgent:
+            out.append(call_card(row, bench_by_league.get(row["league_id"], []),
+                                 urgent=True))
+    if close:
+        out.append(f"<h2><span>Close calls</span><span class='meta'>"
+                   f"{len(close)} left</span></h2>")
+        for row in close:
+            out.append(call_card(row, bench_by_league.get(row["league_id"], []),
+                                 urgent=False))
+    if not live:
+        out.append("<h2><span>Nothing to change</span></h2>"
+                   "<p class='empty'>Every starter matches where analysts "
+                   "have them.</p>")
 
-    out.append("<h2><span>Everything else</span></h2>")
+    playing = sum(1 for r in started if r["locked"])
+    out.append("<h2><span>Full lineups</span>"
+               + (f"<span class='meta'>{playing} already playing</span>"
+                  if playing else "") + "</h2>")
     seen = []
     for r in started:
         if (r["league_id"], r["league_name"]) not in seen:
@@ -648,23 +710,39 @@ def render_lineup(conn, force=False):
     for lid, lname in seen:
         mine = [r for r in started if r["league_id"] == lid]
         out.append(league_fold(lname or "", mine, bench_by_league.get(lid, []),
-                               sum(1 for r in mine
-                                   if r["verdict"] in ATTENTION
-                                   and not r["locked"])))
-    return page("".join(out), "Spike — start / sit")
+                               sum(1 for r in mine if r in live)))
+
+    if done:
+        out.append(f"<h2><span>Settled</span><span class='meta'>{len(done)}"
+                   "</span></h2>")
+        for row in done:
+            out.append(
+                "<div class='call'><div class='calltop'>"
+                f"<div><h3>{e(short_name(row['player_name']))}</h3></div>"
+                f"<span class='where'>{e(row['league_name'] or '')} &middot; "
+                f"{e(row['slot'] or '')}</span></div>"
+                f"<div class='callfoot'><span class='done'>Marked done</span>"
+                f"{undo_form(row)}</div></div>")
+
+    out.append("<form method='post' action='/lineup/refresh'>"
+               "<button class='ghost' style='width:100%;margin-top:18px'>"
+               "Check again</button></form>")
+    out.append("<p class='foot'>Calls compare your starters against analyst "
+               "consensus rankings. Projected points are shown for context "
+               "and are never part of a verdict. A slot stops being a call "
+               "once its game kicks off.</p>")
+    return page("".join(out), "Spike \u2014 start / sit")
 
 
 # The page works without this. It only says that a slow request is under
-# way, which is the one thing a form post cannot express on its own: the
-# start/sit check fetches six ranking pages and a player database, and an
-# unmarked wait reads as a dead link.
+# way, which a plain form post cannot express on its own: the start/sit
+# check fetches six ranking pages and a player database, and an unmarked
+# wait reads as a dead link.
 BUSY_JS = """
 document.addEventListener('submit', function (e) {
-  var form = e.target;
   document.body.classList.add('busy');
-  var button = form.querySelector('button');
-  if (button) { button.disabled = true; button.dataset.was = button.textContent;
-                button.textContent = 'Working on it...'; }
+  var button = e.target.querySelector('button');
+  if (button) { button.disabled = true; button.textContent = 'Working...'; }
 });
 document.addEventListener('click', function (e) {
   var link = e.target.closest('nav a');
@@ -977,6 +1055,29 @@ class Handler(BaseHTTPRequestHandler):
                 conn.close()
             self.send_response(303)
             self.send_header("Location", "/")
+            self.end_headers()
+            return
+
+        if path in ("/lineup/done", "/lineup/undo"):
+            if not self._authed():
+                self.send_response(303)
+                self.send_header("Location", "/login")
+                self.end_headers()
+                return
+            form = parse_qs(self.rfile.read(length).decode("utf-8"))
+            conn = self._conn()
+            try:
+                check = st.latest_lineup_check(conn)
+                if check:
+                    act = st.settle if path.endswith("done") else st.unsettle
+                    act(conn, check["season"], check["week"],
+                        (form.get("league") or [""])[0],
+                        (form.get("slot") or [""])[0],
+                        (form.get("player") or [""])[0])
+            finally:
+                conn.close()
+            self.send_response(303)
+            self.send_header("Location", "/lineup")
             self.end_headers()
             return
 

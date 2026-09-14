@@ -53,7 +53,8 @@ class Verdicts(unittest.TestCase):
         rows = self.rows(qb1=40, qb2=2, rb1=60, rb2=59)
         self.assertEqual(rows[0]["verdict"], "RED")
         self.assertEqual(rows[0]["better_name"], "Jayden Daniels (WAS QB)")
-        self.assertIn("consensus prefers Jayden Daniels", rows[0]["detail"])
+        self.assertEqual(rows[0]["detail"],
+                         "Analysts rank Daniels 38 spots higher.")
 
     def test_a_starter_nobody_ranks_is_not_called_fine(self):
         # Counting an unjudgeable starter as agreement claims a check that
@@ -67,6 +68,41 @@ class Verdicts(unittest.TestCase):
         rows = self.rows(qb1=10, qb2=9, rb1=66, rb2=20)
         self.assertEqual(rows[1]["verdict"], "RED")
         self.assertEqual(rows[1]["slot"], "FLEX")
+
+
+class Wording(unittest.TestCase):
+    """One reason, in a sentence, in the active voice."""
+
+    def rows(self, **kw):
+        return lineup.flag_rows(LEAGUE, ROSTER, PLAYERS, consensus(**kw),
+                                lineup.EMPTY_WEEK)
+
+    def test_an_injury_is_the_whole_reason(self):
+        # Telling someone their out player also ranks a spot low is a second,
+        # weaker argument for something already settled.
+        hurt = dict(PLAYERS)
+        hurt["qb1"] = dict(PLAYERS["qb1"], injury_status="Out")
+        rows = lineup.flag_rows(LEAGUE, ROSTER, hurt,
+                                consensus(qb1=10, qb2=11, rb1=60, rb2=59),
+                                lineup.EMPTY_WEEK)
+        self.assertEqual(rows[0]["detail"],
+                         "Prescott is out this week. Daniels is your best "
+                         "replacement.")
+        self.assertNotIn("rank", rows[0]["detail"])
+
+    def test_small_counts_read_as_words(self):
+        # "1 places better" was the wording that prompted this.
+        self.assertEqual(lineup.spots(1), "a spot")
+        self.assertEqual(lineup.spots(3), "three spots")
+        self.assertEqual(lineup.spots(11), "11 spots")
+
+    def test_a_wide_gap_counts_the_spots(self):
+        rows = self.rows(qb1=40, qb2=2, rb1=60, rb2=59)
+        self.assertIn("38 spots higher", rows[0]["detail"])
+
+    def test_a_green_slot_says_nothing(self):
+        rows = self.rows(qb1=10, qb2=9, rb1=60, rb2=59)
+        self.assertEqual(rows[0]["detail"], "")
 
 
 class RowShape(unittest.TestCase):

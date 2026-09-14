@@ -142,12 +142,13 @@ class LineupPage(unittest.TestCase):
 
     def test_a_quiet_league_is_folded_shut(self):
         html = self.render()
-        fold = html[html.index("Everything else"):]
+        fold = html[html.index("Full lineups"):]
         self.assertIn("<details class='fold'>", fold)
 
     def test_a_decision_shows_the_bench_players_that_could_take_the_slot(self):
         html = self.render()
-        card = html[html.index("Wrong Call"):html.index("Close Call")]
+        start = html.index("Wrong Call")
+        card = html[start:html.index("</article>", start)]
         self.assertIn("Better RB", card)      # a running back can play flex
         self.assertNotIn("Better QB", card)   # a quarterback cannot
 
@@ -216,7 +217,7 @@ class Locking(unittest.TestCase):
         # An injury picked up during the game reads as a disagreement with
         # consensus, and it is news you cannot act on.
         html = self.render()
-        cards = html[html.index("Worth a look"):html.index("Everything else")]
+        cards = html[html.index("Fix these"):html.index("Full lineups")]
         self.assertIn("Still Choosable", cards)
         self.assertNotIn("Playing Now", cards)
 
@@ -226,7 +227,103 @@ class Locking(unittest.TestCase):
     def test_a_started_player_is_still_listed_with_a_badge(self):
         html = self.render()
         self.assertIn("Playing Now", html)
-        self.assertIn("game started", html)
+        self.assertIn("playing now", html)
+
+
+class Redesign(unittest.TestCase):
+    """The page has to answer "what do I do" before it explains itself."""
+
+    def build(self):
+        import store as st
+        conn = st.connect(":memory:")
+        check_id = st.start_lineup_check(conn, "2026", 1, ["page"])
+
+        def row(**kw):
+            base = dict(league_id="2", league_name="LEHG", slot="WR",
+                        position=0, verdict="GREEN", player_id="1",
+                        player_name="Quiet Guy (BUF WR)", rank_text="WR11",
+                        overall_text="overall 30", better_name=None, detail="",
+                        role="starter", pos="WR", matchup="at IND",
+                        projection=12.8, locked=0)
+            base.update(kw)
+            return base
+
+        for r in [
+            row(verdict="YELLOW", slot="FLEX", position=1, player_id="11",
+                player_name="Close Guy (TB RB)", pos="RB",
+                better_name="Spears (TEN RB)",
+                detail="Analysts rank Spears three spots higher."),
+            row(verdict="RED", player_id="10", player_name="Hurt Guy (BAL WR)",
+                better_name="Robinson (TEN WR)",
+                detail="Hurt Guy is out this week."),
+            row(slot="BN", verdict="BENCH", role="bench", player_id="20",
+                player_name="Robinson (TEN WR)"),
+            row(slot="BN", verdict="BENCH", role="bench", player_id="22",
+                player_name="Spears (TEN RB)", pos="RB"),
+        ]:
+            st.add_lineup_flag(conn, check_id, **r)
+        return conn
+
+    def html(self, conn=None):
+        return webapp.render_lineup(conn or self.build()).decode()
+
+    def test_the_headline_is_the_action(self):
+        self.assertIn("<h3>Start Robinson over Hurt Guy</h3>", self.html())
+
+    def test_urgent_calls_come_before_marginal_ones(self):
+        html = self.html()
+        self.assertLess(html.index("Fix these"), html.index("Close calls"))
+        self.assertLess(html.index("Hurt Guy"), html.index("Close Guy"))
+
+    def test_the_two_tiers_look_different(self):
+        html = self.html()
+        self.assertIn("class='call urgent'", html)
+        self.assertIn("class='call close'", html)
+
+    def test_the_player_to_start_is_the_row_that_stands_out(self):
+        html = self.html()
+        card = html[html.index("Start Robinson"):html.index("Close calls")]
+        self.assertIn("class='player pick'", card)
+        self.assertIn(">Start<", card)
+        self.assertIn("Instead of", card)
+
+    def test_nothing_shouts_in_capitals(self):
+        # Tracked-out capitals read as template chrome, not information.
+        self.assertNotIn("text-transform:uppercase", self.html())
+
+    def test_the_tabs_are_not_prefixed_with_the_site_name(self):
+        html = self.html()
+        self.assertIn(">Waivers<", html)
+        self.assertNotIn(">Spike — waivers<", html)
+
+    def test_how_it_ranks_is_a_footnote_not_a_headline(self):
+        html = self.html()
+        note = html[html.index("class='foot'"):]
+        self.assertIn("consensus rankings", note)
+        self.assertNotIn("not projections", html[:html.index("Fix these")])
+
+    def test_marking_one_done_moves_it_out_of_the_way(self):
+        import store as st
+        conn = self.build()
+        st.settle(conn, "2026", 1, "2", "WR", "10")
+        html = self.html(conn)
+        self.assertIn("Settled", html)
+        self.assertNotIn("Start Robinson over", html)
+        self.assertIn("Undo", html)
+
+    def test_a_settled_call_stays_settled_across_a_new_check(self):
+        # Every refresh writes new rows; keying dismissals to a check would
+        # resurrect all of them, which is the thing this is meant to stop.
+        import store as st
+        conn = self.build()
+        st.settle(conn, "2026", 1, "2", "WR", "10")
+        later = st.start_lineup_check(conn, "2026", 1, ["page"])
+        st.add_lineup_flag(conn, later, league_id="2", league_name="LEHG",
+                           slot="WR", position=0, verdict="RED",
+                           player_id="10", player_name="Hurt Guy (BAL WR)",
+                           better_name="Robinson (TEN WR)", role="starter",
+                           pos="WR", detail="Hurt Guy is out this week.")
+        self.assertNotIn("Start Robinson over", self.html(conn))
 
 
 if __name__ == "__main__":

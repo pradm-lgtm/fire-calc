@@ -291,6 +291,19 @@ def bench_rows(league, roster, players, consensus, week):
     return rows
 
 
+def surname(label):
+    """'Wan'Dale Robinson (TEN WR)' -> 'Robinson'. Enough to know who."""
+    name = (label or "").split(" (")[0].strip()
+    parts = [p for p in name.split() if p]
+    return parts[-1] if parts else name
+
+
+def spots(gap):
+    words = {1: "a spot", 2: "two spots", 3: "three spots", 4: "four spots",
+             5: "five spots"}
+    return words.get(int(round(gap)), f"{int(round(gap))} spots")
+
+
 def flag_rows(league, roster, players, consensus, week):
     """One serialisable row per started player.
 
@@ -301,21 +314,27 @@ def flag_rows(league, roster, players, consensus, week):
     for i, v in enumerate(assess(league, roster, players, consensus)):
         rank_text = (rk.describe(consensus, v["pid"], v["scale"])
                      if v["scale"] else "unranked")
-        reasons = []
-        if must_sit(v["player"]):
-            reasons.append(f"he is {injury_note(v['player'])} — he will not play")
+        mine = sc.player_label(players, v["pid"]).split(" [")[0]
         better_name = None
         if v["colour"] != "GREEN" and v["better"]:
             better_name = sc.player_label(players, v["better"]).split(" [")[0]
-            flexible = len(SLOT_ELIGIBILITY.get(v["slot"], ())) > 1
-            b_scale = (rk.OVERALL if flexible
-                       else (players.get(v["better"]) or {}).get("position"))
-            b_rank = rk.rank_of(consensus, v["better"], b_scale)
-            where = f"{int(round(b_rank))}" if b_rank is not None else "?"
-            scale_txt = "overall" if b_scale == rk.OVERALL else b_scale
-            gap = f", {v['gap']:.0f} places better" if v["gap"] < 90 else ""
-            reasons.append(f"consensus prefers {better_name} — "
-                           f"{scale_txt} {where}{gap}")
+
+        # One reason, in a sentence. A starter who is out does not also need
+        # to be told he ranks a spot below his replacement: the injury is the
+        # whole story, and the ranking beside it reads as a second, weaker
+        # argument for something already settled.
+        if must_sit(v["player"]):
+            status = injury_note(v["player"]).lower()
+            reason = f"{surname(mine)} is {status} this week."
+            if better_name:
+                reason += f" {surname(better_name)} is your best replacement."
+        elif better_name and v["gap"] < 90:
+            reason = (f"Analysts rank {surname(better_name)} "
+                      f"{spots(v['gap'])} higher.")
+        elif better_name:
+            reason = f"Analysts rank {surname(better_name)} clearly higher."
+        else:
+            reason = ""
         rows.append({
             "league_id": str(league["league_id"]),
             "league_name": league.get("name"),
@@ -324,7 +343,7 @@ def flag_rows(league, roster, players, consensus, week):
             "player_name": sc.player_label(players, v["pid"]).split(" [")[0],
             "rank_text": rank_text, "better_name": better_name,
             "overall_text": rk.describe(consensus, v["pid"], rk.OVERALL),
-            "detail": "; ".join(reasons),
+            "detail": reason,
             "role": "starter",
             **context_for(v["player"], v["pid"], week),
         })
@@ -360,8 +379,8 @@ def report(league, rows):
     for r in started:
         print(f"  {DOT[r['verdict']]} {r['slot']:<11} "
               f"{r['player_name']:<36} {r['rank_text']}")
-        for reason in filter(None, r["detail"].split("; ")):
-            print(f"              {reason}")
+        if r["detail"]:
+            print(f"              {r['detail']}")
     if not flagged:
         if unknown:
             print(f"\n  Nothing to change among the players the rankings "
