@@ -63,8 +63,11 @@ python3 submitter.py YOUR_USERNAME --audit    # what is really queued
 python3 scores.py YOUR_SLEEPER_USERNAME
 ```
 
-Every league's current matchup side by side, closest game first, read live
-from Sleeper on each load rather than stored. Checking four leagues meant
+Every league's current matchup side by side, read live from Sleeper on each
+load rather than stored. Games still being played come first, then the
+closest of them by projected margin: a decided three-point game is finished
+whatever it looks like, and twenty ahead with three players still to come is
+nearer to level than two ahead with nobody left. Checking four leagues meant
 four apps.
 
 Each shows both scores, where the game is heading, and how many starters on

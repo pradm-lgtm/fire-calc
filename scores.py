@@ -117,9 +117,28 @@ def board(username, week_no=None):
         got = league_board(league, user["user_id"], players, week_no, week)
         if got:
             out.append(got)
-    # Closest game first: that is the one worth watching.
-    out.sort(key=lambda b: abs(b["margin"]) if b["margin"] is not None else 999)
+    out.sort(key=sort_key)
     return {"season": season, "week": week_no, "leagues": out}
+
+
+def left_to_play(board):
+    return sum(len(board[who]["to_play"]) for who in ("us", "them")
+               if board.get(who))
+
+
+def sort_key(board):
+    """Still being played first, then closest.
+
+    Closeness alone put a finished three-point game above a live twenty-point
+    one, and only one of those is still worth looking at. Among live games the
+    margin that matters is the projected one: two points ahead with nobody
+    left is further from level than twenty ahead with three still to come.
+    """
+    margin = board["projected_margin"]
+    if margin is None:
+        margin = board["margin"]
+    return (left_to_play(board) == 0,
+            abs(margin) if margin is not None else 999)
 
 
 def explain(username):

@@ -231,5 +231,46 @@ class GameState(unittest.TestCase):
         self.assertEqual(got["projected"], 0.0)
 
 
+class Ordering(unittest.TestCase):
+    """Which matchup you see first."""
+
+    def board(self, name, margin, projected, mine_left=0, theirs_left=0):
+        return {"league_name": name, "margin": margin,
+                "projected_margin": projected,
+                "us": {"to_play": ["RB"] * mine_left},
+                "them": {"to_play": ["WR"] * theirs_left}}
+
+    def order(self, *boards):
+        return [b["league_name"] for b in sorted(boards, key=scores.sort_key)]
+
+    def test_a_live_game_outranks_a_finished_one_however_close(self):
+        # A decided three-point game was sorting above a live blowout, and
+        # only one of those is still worth looking at.
+        self.assertEqual(
+            self.order(self.board("done", 3.0, 3.0),
+                       self.board("live", 40.0, 38.0, mine_left=2)),
+            ["live", "done"])
+
+    def test_among_live_games_the_projected_margin_decides(self):
+        # Twenty ahead with three still to come is closer to level than two
+        # ahead with nobody left.
+        self.assertEqual(
+            self.order(self.board("comfortable", 2.0, 25.0, mine_left=1),
+                       self.board("nervy", 20.0, 1.5, mine_left=3)),
+            ["nervy", "comfortable"])
+
+    def test_finished_games_are_still_sorted_by_closeness(self):
+        self.assertEqual(
+            self.order(self.board("rout", 45.0, 45.0),
+                       self.board("squeaker", 3.0, 3.0)),
+            ["squeaker", "rout"])
+
+    def test_a_bye_week_sorts_last_rather_than_failing(self):
+        bye = {"league_name": "bye", "margin": None, "projected_margin": None,
+               "us": {"to_play": []}, "them": None}
+        self.assertEqual(self.order(bye, self.board("played", 9.0, 9.0)),
+                         ["played", "bye"])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
