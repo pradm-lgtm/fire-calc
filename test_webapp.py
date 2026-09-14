@@ -213,13 +213,15 @@ class Locking(unittest.TestCase):
             st.add_lineup_flag(conn, check_id, **r)
         return webapp.render_lineup(conn).decode()
 
-    def test_a_started_game_is_not_a_decision(self):
-        # An injury picked up during the game reads as a disagreement with
-        # consensus, and it is news you cannot act on.
+    def test_a_started_game_is_shown_but_not_counted_as_open(self):
+        # It stays on the page - the call was real - but the chance to act
+        # on it has passed, so it is not something still to do.
         html = self.render()
         cards = html[html.index("Fix these"):html.index("Full lineups")]
         self.assertIn("Still Choosable", cards)
-        self.assertNotIn("Playing Now", cards)
+        self.assertIn("Playing Now", cards)
+        self.assertIn("1 still open", html)
+        self.assertIn("Kickoff has passed", html)
 
     def test_the_count_says_how_many_are_already_playing(self):
         self.assertIn("already playing", self.render())
@@ -324,6 +326,71 @@ class Redesign(unittest.TestCase):
                            better_name="Robinson (TEN WR)", role="starter",
                            pos="WR", detail="Hurt Guy is out this week.")
         self.assertNotIn("Start Robinson over", self.html(conn))
+
+
+class AfterKickoff(unittest.TestCase):
+    """What a call said before the game is what it goes on saying."""
+
+    def starter(self, **kw):
+        base = dict(league_id="2", league_name="LEHG", slot="WR", position=0,
+                    verdict="RED", player_id="10",
+                    player_name="Zay Flowers (BAL WR)", rank_text="WR11",
+                    overall_text="overall 30",
+                    better_name="Robinson (TEN WR)", role="starter", pos="WR",
+                    matchup="at IND", projection=12.8, locked=0,
+                    detail="Analysts rank Robinson four spots higher.")
+        base.update(kw)
+        return base
+
+    BENCH = dict(league_id="2", league_name="LEHG", slot="BN", position=0,
+                 verdict="BENCH", player_id="20",
+                 player_name="Robinson (TEN WR)", rank_text="WR39",
+                 overall_text="overall 88", role="bench", pos="WR",
+                 matchup="at NYJ", projection=9.1, locked=0)
+
+    def played(self):
+        """A check taken before kickoff, then one taken during the game."""
+        import store as st
+        conn = st.connect(":memory:")
+        st.write_lineup_check(conn, "2026", 3, ["p"],
+                              [self.starter(), dict(self.BENCH)])
+        st.write_lineup_check(conn, "2026", 3, ["p"], [
+            self.starter(locked=1, better_name="Someone Else (NYJ WR)",
+                         detail="Flowers is out this week."),
+            dict(self.BENCH, locked=1)])
+        return webapp.render_lineup(conn).decode()
+
+    def test_the_call_is_still_there(self):
+        # Hiding it claimed the lineup matched consensus, when what really
+        # happened is that the chance to change it passed.
+        html = self.played()
+        self.assertIn("Start Robinson over Zay Flowers", html)
+        self.assertNotIn("Every starter matches", html)
+
+    def test_an_injury_during_the_game_does_not_rewrite_it(self):
+        html = self.played()
+        self.assertIn("four spots higher", html)
+        self.assertNotIn("Someone Else", html)
+
+    def test_it_reads_as_closed_rather_than_outstanding(self):
+        html = self.played()
+        self.assertIn("call urgent shut", html)
+        self.assertIn("Kickoff has passed", html)
+        self.assertNotIn("still open", html)
+
+    def test_a_closed_call_offers_no_action(self):
+        html = self.played()
+        card = html[html.index("Start Robinson"):]
+        self.assertNotIn("Mark as done", card[:card.index("</article>")])
+
+    def test_an_open_call_is_unaffected(self):
+        import store as st
+        conn = st.connect(":memory:")
+        st.write_lineup_check(conn, "2026", 3, ["p"],
+                              [self.starter(), dict(self.BENCH)])
+        html = webapp.render_lineup(conn).decode()
+        self.assertIn("1 still open", html)
+        self.assertIn("Mark as done", html)
 
 
 if __name__ == "__main__":

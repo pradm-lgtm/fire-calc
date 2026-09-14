@@ -292,6 +292,42 @@ def lineup_flags(conn, check_id):
     ).fetchall()
 
 
+# What a slot said the last time its game had not yet started. Carried over
+# rather than recomputed, because a call closes at kickoff: a starter who
+# picks up an injury in the first quarter reads as a fresh disagreement with
+# consensus, and it is a decision nobody can act on any more.
+FROZEN_FIELDS = ("verdict", "detail", "better_name", "rank_text",
+                 "overall_text")
+
+
+def verdicts_before_kickoff(conn, season, week):
+    """{(league, slot, player): row} as of the last check taken before the
+    game began."""
+    rows = conn.execute(
+        "SELECT f.* FROM lineup_flags f JOIN lineup_checks c"
+        " ON f.check_id = c.id"
+        " WHERE c.season = ? AND c.week = ? AND f.locked = 0"
+        " ORDER BY f.check_id", (str(season), week)).fetchall()
+    return {(r["league_id"], r["slot"], r["player_id"]): r for r in rows}
+
+
+def write_lineup_check(conn, season, week, sources, rows):
+    """Store one check, keeping what a locked slot said before kickoff."""
+    previous = verdicts_before_kickoff(conn, season, week)
+    for row in rows:
+        if not row.get("locked"):
+            continue
+        was = previous.get((str(row["league_id"]), row.get("slot"),
+                            str(row["player_id"]) if row.get("player_id")
+                            else None))
+        if was:
+            row.update({field: was[field] for field in FROZEN_FIELDS})
+    check_id = start_lineup_check(conn, season, week, sources)
+    for row in rows:
+        add_lineup_flag(conn, check_id, **row)
+    return check_id
+
+
 def settle(conn, season, week, league_id, slot, player_id):
     """Record that a lineup call has been dealt with."""
     conn.execute(

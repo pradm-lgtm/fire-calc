@@ -97,10 +97,13 @@ opponent and projected points. Leagues where everything agrees are folded
 shut. Projections are shown, never used: they play no part in any verdict,
 which is what you asked for when you said you would do that part yourself.
 
-A slot stops being a decision once its game kicks off. An injury picked up
-on Sunday afternoon reads as a disagreement with consensus, and it is news
-you cannot act on; those slots keep their place in the lineup with a badge
-instead.
+A call closes at kickoff rather than disappearing. It stays on the page as a
+record of what it said, marked closed and offering no action, and its verdict
+is carried over from the last check taken before the game rather than
+recomputed: a starter who picks up an injury in the first quarter would
+otherwise read as a fresh disagreement with consensus. Hiding these entirely
+was worse, because the page then claimed every starter matched consensus when
+what had really happened is that the chance to change them passed.
 
 Flex slots and bench players are shown on the cross-positional scale, since
 WR12 against RB20 for one spot is not a comparison. Fixed slots stay within

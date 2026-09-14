@@ -435,11 +435,8 @@ def check(username, week=None, urls=(), verbose=True):
 
 def store_check(conn, got):
     """Write one check's verdicts. The newest check is the only one shown."""
-    check_id = st.start_lineup_check(conn, got["season"], got["week"],
-                                     got["sources"])
-    for row in got["rows"]:
-        st.add_lineup_flag(conn, check_id, **row)
-    return check_id
+    return st.write_lineup_check(conn, got["season"], got["week"],
+                                 got["sources"], got["rows"])
 
 
 def main():

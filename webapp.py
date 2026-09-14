@@ -90,6 +90,9 @@ nav a.on { background:var(--action); color:var(--action-ink); }
 .call.urgent { background:var(--raise); border-left-color:var(--urgent);
                padding:20px; }
 .call.close { border-left-color:var(--warn); }
+.call.shut { border-left-color:var(--line-2); background:var(--card);
+             padding:14px; opacity:.72; }
+.call.shut h3 { font-size:16px; font-weight:600; }
 .call h3 { margin:0; font-size:17px; line-height:1.25; letter-spacing:-.01em; }
 .call.urgent h3 { font-size:21px; }
 .call .why { color:var(--muted); font-size:14px; margin:6px 0 0; }
@@ -596,7 +599,10 @@ def call_card(row, bench, urgent):
     headline = (f"Start {named} over {short_name(row['player_name'])}"
                 if pick else f"Reconsider {short_name(row['player_name'])}")
 
-    out = [f"<article class='call {'urgent' if urgent else 'close'}'>",
+    shut = bool(row["locked"])
+    classes = ("call " + ("urgent" if urgent else "close")
+               + (" shut" if shut else ""))
+    out = [f"<article class='{classes}'>",
            "<div class='calltop'>",
            f"<div><h3>{e(headline)}</h3>",
            (f"<p class='why'>{e(row['detail'])}</p>" if row["detail"] else ""),
@@ -620,9 +626,14 @@ def call_card(row, bench, urgent):
         out.extend(player_line(b, flex_scale=flex) for b in rest[:4])
         out.append("</details>")
 
-    out.append("<div class='callfoot'><span class='done'>Decided in your "
-               "league app?</span>" + settle_form(row, "Mark as done") +
-               "</div></article>")
+    if shut:
+        # Kept as a record of what the call was, not as something to do.
+        out.append("<div class='callfoot'><span class='done'>Kickoff has "
+                   "passed. This is what the call was.</span></div></article>")
+    else:
+        out.append("<div class='callfoot'><span class='done'>Decided in your "
+                   "league app?</span>" + settle_form(row, "Mark as done") +
+                   "</div></article>")
     return "".join(out)
 
 
@@ -666,13 +677,21 @@ def render_lineup(conn, force=False):
     def key(r):
         return (r["league_id"], r["slot"], r["player_id"])
 
-    # A call is live until its game starts or you say you have dealt with it.
-    live = [r for r in started if r["verdict"] in ATTENTION
-            and not r["locked"] and key(r) not in handled]
+    # A call stays on the page once its game starts. It is closed, not
+    # resolved: hiding it would claim the lineup agrees with consensus when
+    # what actually happened is that the chance to change it passed.
+    open_calls = [r for r in started if r["verdict"] in ATTENTION
+                  and key(r) not in handled]
     done = [r for r in started if r["verdict"] in ATTENTION
             and key(r) in handled]
-    urgent = [r for r in live if r["verdict"] == "RED"]
-    close = [r for r in live if r["verdict"] == "YELLOW"]
+
+    def tier(colour):
+        rows = [r for r in open_calls if r["verdict"] == colour]
+        # Still actionable first; a closed call is a record, not a task.
+        return sorted(rows, key=lambda r: bool(r["locked"]))
+
+    urgent, close = tier("RED"), tier("YELLOW")
+    actionable = sum(1 for r in open_calls if not r["locked"])
 
     out = [nav("/lineup"), "<h1>Start / sit</h1>",
            f"<p class='sub'>Week {e(check['week'])} &middot; checked "
@@ -682,22 +701,27 @@ def render_lineup(conn, force=False):
                    f"refresh:</span> {e(problem)} Showing the last check."
                    "</div>")
 
-    if urgent:
-        out.append(f"<h2><span>Fix these</span><span class='meta'>"
-                   f"{len(urgent)} left</span></h2>")
-        for row in urgent:
+    def section(title, rows, urgent):
+        if not rows:
+            return
+        shut = sum(1 for r in rows if r["locked"])
+        note = (f"{len(rows) - shut} still open" if len(rows) - shut
+                else "closed")
+        out.append(f"<h2><span>{title}</span>"
+                   f"<span class='meta'>{note}</span></h2>")
+        for row in rows:
             out.append(call_card(row, bench_by_league.get(row["league_id"], []),
-                                 urgent=True))
-    if close:
-        out.append(f"<h2><span>Close calls</span><span class='meta'>"
-                   f"{len(close)} left</span></h2>")
-        for row in close:
-            out.append(call_card(row, bench_by_league.get(row["league_id"], []),
-                                 urgent=False))
-    if not live:
+                                 urgent=urgent))
+
+    section("Fix these", urgent, True)
+    section("Close calls", close, False)
+    if not open_calls:
         out.append("<h2><span>Nothing to change</span></h2>"
                    "<p class='empty'>Every starter matches where analysts "
                    "have them.</p>")
+    elif not actionable:
+        out.append("<p class='empty'>Every call above is closed; their games "
+                   "have started.</p>")
 
     playing = sum(1 for r in started if r["locked"])
     out.append("<h2><span>Full lineups</span>"
@@ -710,7 +734,8 @@ def render_lineup(conn, force=False):
     for lid, lname in seen:
         mine = [r for r in started if r["league_id"] == lid]
         out.append(league_fold(lname or "", mine, bench_by_league.get(lid, []),
-                               sum(1 for r in mine if r in live)))
+                               sum(1 for r in mine
+                                   if r in open_calls and not r["locked"])))
 
     if done:
         out.append(f"<h2><span>Settled</span><span class='meta'>{len(done)}"
@@ -974,11 +999,9 @@ class Handler(BaseHTTPRequestHandler):
                 # A lineup check replaces the last one rather than adding to
                 # it: yesterday's advice about a lineup you have since changed
                 # is worse than no advice, so only the newest check is shown.
-                check_id = st.start_lineup_check(
+                check_id = st.write_lineup_check(
                     conn, payload.get("season"), payload.get("week"),
-                    payload.get("sources") or [])
-                for row in rows:
-                    st.add_lineup_flag(conn, check_id, **row)
+                    payload.get("sources") or [], rows)
                 self._json(200, {"ok": True, "check": check_id,
                                  "written": len(rows)})
             except Exception as exc:
