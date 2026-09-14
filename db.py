@@ -21,6 +21,7 @@ import re
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 SQLITE, POSTGRES = "sqlite", "postgres"
+MEMORY = ":memory:"
 
 
 def backend():
@@ -122,7 +123,11 @@ class Connection:
     """Just enough of sqlite3.Connection for this project's needs."""
 
     def __init__(self, dsn=None):
-        self.kind = backend()
+        # Asking for an in-memory database is asking for SQLite. Without
+        # this, running the tests on a machine that has DATABASE_URL set -
+        # which any machine that talks to the deployment does - sends every
+        # test write to the real database.
+        self.kind = SQLITE if str(dsn) == MEMORY else backend()
         if self.kind == POSTGRES:
             import psycopg2
             import psycopg2.extras

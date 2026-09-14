@@ -19,15 +19,12 @@ SRC="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DEST="${1:-$HOME/waiver-agent}"
 REMOTE="${2:-https://github.com/pradm-lgtm/waiver-agent.git}"
 
-FILES=(
-  check_sources.py claim_safety.py cloud_auth.py cloud_client.py
-  expert_extract.py expert_waivers.py install_schedule.py run_weekly.py
-  sleeper_client.py source_discovery.py store.py submitter.py
-  waiver_analyzer.py webapp.py yahoo_auth_check.py
-  db.py lineup.py localenv.py nfl_week.py rankings.py
-  render.py scores.py
-  test_rankings.py test_lineup.py test_localenv.py
-  test_webapp.py test_db.py test_cloud_auth.py test_waivers.py test_scores.py
+# Everything the agent is written in. Listing the Python files by hand has
+# now dropped one three times - the list is only consulted when something is
+# added, which is exactly when nobody thinks to check it - so they are taken
+# wholesale. The calculator this repo also holds is JavaScript, so there is
+# nothing here to exclude.
+NON_PYTHON=(
   never_drops.json selectors.json sources.json ranking_sources.json
   vercel.json requirements.txt
   Dockerfile fly.toml .env.example README.md
@@ -36,15 +33,17 @@ FILES=(
 # Copied with their directory structure rather than flattened into the root.
 TREES=(api .github)
 
-# Every module the agent imports, checked after copying. A hand-kept file
-# list silently drops whatever was added since it was written, and the first
-# symptom is the page failing to start.
+# Checked after copying, because "it copied" is not "it runs": a module that
+# was left behind only shows up when something tries to import it.
 ENTRYPOINTS=(webapp submitter run_weekly lineup scores expert_waivers check_sources
              source_discovery install_schedule)
 
 echo "==> creating $DEST"
 mkdir -p "$DEST"
-for f in "${FILES[@]}"; do
+for f in "$SRC"/*.py; do
+  [ -f "$f" ] && cp "$f" "$DEST/" && echo "    $(basename "$f")"
+done
+for f in "${NON_PYTHON[@]}"; do
   [ -f "$SRC/$f" ] && cp "$SRC/$f" "$DEST/" && echo "    $f"
 done
 for t in "${TREES[@]}"; do
@@ -76,7 +75,7 @@ done
 if [ "$missing" = "1" ]; then
   echo
   echo "Refusing to commit an installation that cannot start."
-  echo "Add the missing file(s) to FILES in $0 and re-run."
+  echo "Something it imports is not a .py file in $SRC."
   exit 1
 fi
 echo "    all good"

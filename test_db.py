@@ -9,6 +9,7 @@ broke every hosted run while every local run stayed green, which is exactly
 the kind of difference a test has to cover instead of a deploy.
 """
 
+import os
 import unittest
 
 import db
@@ -117,6 +118,35 @@ class DroppingOptions(unittest.TestCase):
 
         with self.assertRaises(FakeError):
             db._connect(FakeDriver(), self.URL)
+
+
+class WhichDatabase(unittest.TestCase):
+    """Which backend a connection uses, and when that choice is not open."""
+
+    def setUp(self):
+        self.had = os.environ.get("DATABASE_URL")
+        self.addCleanup(self.restore)
+
+    def restore(self):
+        if self.had is None:
+            os.environ.pop("DATABASE_URL", None)
+        else:
+            os.environ["DATABASE_URL"] = self.had
+
+    def test_in_memory_is_sqlite_even_with_a_postgres_url_set(self):
+        # Any machine that talks to the deployment has DATABASE_URL set, so
+        # without this every test write on that machine went to the real
+        # database.
+        os.environ["DATABASE_URL"] = "postgres://pretend/nowhere"
+        self.assertEqual(db.Connection(":memory:").kind, db.SQLITE)
+
+    def test_a_file_path_still_follows_the_environment(self):
+        os.environ["DATABASE_URL"] = "postgres://pretend/nowhere"
+        self.assertEqual(db.backend(), db.POSTGRES)
+
+    def test_no_url_means_a_local_file(self):
+        os.environ.pop("DATABASE_URL", None)
+        self.assertEqual(db.backend(), db.SQLITE)
 
 
 if __name__ == "__main__":

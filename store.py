@@ -173,7 +173,7 @@ def connect(path=None):
     latency against a database that is a network hop away.
     """
     conn = db.Connection(path or DB_PATH)
-    key = db.backend(), str(path or DB_PATH)
+    key = conn.kind, str(path or DB_PATH)
     # Every connection to ":memory:" is a different, empty database, so
     # remembering that one of them has the schema says nothing about the
     # next.
