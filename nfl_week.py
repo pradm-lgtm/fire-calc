@@ -99,6 +99,46 @@ def statuses(season, week):
     return {}
 
 
+def byes(season, from_week=1, to_week=18):
+    """{team: week} for the week each team has no game.
+
+    Read from the same published schedule: a team absent from a week that
+    everyone else plays is on bye. Nothing else says so.
+    """
+    for template in SCHEDULE_SOURCES:
+        data = _get(template.format(season=season))
+        rows = data if isinstance(data, list) else (
+            data.get("games") if isinstance(data, dict) else None)
+        if not isinstance(rows, list):
+            continue
+        playing, seen = {}, set()
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            try:
+                week = int(row.get("week"))
+            except (TypeError, ValueError):
+                continue
+            if not from_week <= week <= to_week:
+                continue
+            for key in ("home", "away"):
+                team = team_name(row.get(key))
+                if team:
+                    playing.setdefault(week, set()).add(team)
+                    seen.add(team)
+        if not seen:
+            continue
+        out = {}
+        for week, teams in playing.items():
+            # Only a week the rest of the league plays tells you anything.
+            if len(teams) < len(seen) - 8:
+                continue
+            for team in seen - teams:
+                out.setdefault(team, week)
+        return out
+    return {}
+
+
 def yet_to_play(week, team, points=0.0):
     """Has this team's game not started?
 

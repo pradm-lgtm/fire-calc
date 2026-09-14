@@ -978,7 +978,9 @@ def trade_card(offer, players):
             + rows
             + (f"<p class='rowlabel'>Your lineup</p><ul class='changes'>"
                f"{changes}</ul>" if changes else "")
-            + f"<p class='why'>{e(trades.describe(offer, players, {}))}</p>"
+            + f"<p class='why'>Your lineup +{offer['my_pct']}%, theirs "
+              f"+{offer['their_pct']}%. "
+              f"{e(trades.describe(offer, players, {}))}</p>"
             "</article>")
 
 
@@ -1013,8 +1015,19 @@ def render_trades(username):
     for league in got["leagues"]:
         wins, losses, ties = league["my_record"]
         record = f"{wins}-{losses}" + (f"-{ties}" if ties else "")
+        settings = league.get("settings") or {}
+        priced = (f"Priced as {settings.get('teams', '?')} teams, "
+                  f"{settings.get('ppr', '?')} PPR, "
+                  f"{settings.get('quarterbacks', 1)} QB.")
+        if settings.get("pass_td") not in (None, 4):
+            priced += (f" This league gives {settings['pass_td']} for a "
+                       "passing touchdown, which lifts quarterbacks; the "
+                       "value list has no setting for it, so read quarterback "
+                       "prices here as low.")
         out.append(f"<h2><span>{e(league['league_name'] or '')}</span>"
-                   f"<span class='meta'>you are {e(record)}</span></h2>")
+                   f"<span class='meta'>you are {e(record)}</span></h2>"
+                   f"<div class='bar'>{e(league.get('summary', ''))}</div>"
+                   f"<p class='guide'>{e(priced)}</p>")
         for offer in league["offers"]:
             out.append(trade_card(offer, players))
 

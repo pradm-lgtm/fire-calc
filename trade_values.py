@@ -21,15 +21,38 @@ TIMEOUT = 20
 
 # Half PPR, one quarterback, redraft: the shape of both leagues here. The
 # wrong settings give confidently wrong numbers rather than no numbers.
-SOURCES = [
-    ("FantasyCalc",
-     "https://api.fantasycalc.com/values/current"
-     "?isDynasty=false&numQbs=1&ppr=0.5&numTeams=12&limit=600"),
-]
+BASE = "https://api.fantasycalc.com/values/current"
 
-# Every row carries the player's Sleeper id, so values join to rosters by id
-# rather than by name. Name matching is where the article extraction spent
-# most of its bugs; none of that applies here.
+# What the value list has to be asked for. Both leagues here are redraft,
+# but one is ten teams and one is twelve, and a player is worth more in a
+# shallower league where the wire is thinner. Asking once and using the
+# answer twice prices one of them wrong.
+def url_for(teams=12, ppr=0.5, quarterbacks=1):
+    return (f"{BASE}?isDynasty=false&numQbs={quarterbacks}"
+            f"&numTeams={teams}&ppr={ppr}&limit=800")
+
+
+def settings_from(league):
+    """The value-list settings this league implies.
+
+    Passing touchdowns are the one thing that cannot be asked for: six-point
+    passing lifts every quarterback, and the value list has no parameter for
+    it. It is reported rather than modelled, because inventing a multiplier
+    would be a number nobody could check.
+    """
+    settings = league.get("settings") or {}
+    scoring = league.get("scoring_settings") or {}
+    slots = league.get("roster_positions") or []
+    reception = scoring.get("rec")
+    return {
+        "teams": settings.get("num_teams") or len(slots) and 12 or 12,
+        "ppr": float(reception) if isinstance(reception, (int, float)) else 0.5,
+        "quarterbacks": 2 if any(s in ("SUPER_FLEX", "QB") and s == "SUPER_FLEX"
+                                 for s in slots) else 1,
+        "pass_td": scoring.get("pass_td"),
+    }
+
+
 def _get(url):
     req = urllib.request.Request(url, headers={
         "User-Agent": "Mozilla/5.0 (personal fantasy tool; single user)",
@@ -73,13 +96,10 @@ def _rows(data):
     return data.get("players") if isinstance(data, dict) else None
 
 
-def fetch():
+def fetch(teams=12, ppr=0.5, quarterbacks=1):
     """({sleeper_id: entry}, source name). Empty if nothing answered."""
-    for name, url in SOURCES:
-        values = values_from(_rows(_get(url)))
-        if len(values) > 50:
-            return values, name
-    return {}, None
+    values = values_from(_rows(_get(url_for(teams, ppr, quarterbacks))))
+    return (values, "FantasyCalc") if len(values) > 50 else ({}, None)
 
 
 def replacement_value(values, position, rostered):
@@ -95,8 +115,9 @@ def replacement_value(values, position, rostered):
 
 
 def main():
-    for name, url in SOURCES:
-        print(f"{name}: {url}")
+    for teams in (10, 12):
+        url = url_for(teams=teams)
+        print(f"FantasyCalc, {teams} teams: {url}")
         data = _get(url)
         if isinstance(data, dict) and data.get("__error__"):
             print(f"  did not answer: {data['__error__']}")

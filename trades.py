@@ -24,6 +24,7 @@ import itertools
 import sys
 
 import localenv
+import nfl_week
 import sleeper_client as sc
 import trade_values as tv
 
@@ -40,9 +41,6 @@ BENCH = {"BN", "IR", "TAXI"}
 # calculator's own tolerance is roughly this wide.
 FAIRNESS = 0.25
 
-# Bounds on the search. Every extra player considered multiplies the pairs.
-MAX_SEND = 8
-MAX_RECEIVE = 8
 TOP_OFFERS = 4
 
 
@@ -76,6 +74,39 @@ def best_lineup(player_ids, players, values, slots):
             used.add(best)
         filled[i] = best
     return filled
+
+
+# What an injury does to a player's trade value. A value list is formed
+# from trades made over weeks and lags a fresh injury badly: a receiver who
+# will miss a month is still priced as though he plays this Sunday.
+INJURY_DISCOUNT = {
+    "ir": 0.45, "pup": 0.45, "sus": 0.5, "susp": 0.5, "out": 0.7,
+    "doubtful": 0.8, "questionable": 0.95,
+}
+
+
+def discount_for(player):
+    status = (player.get("injury_status") or "").strip().lower()
+    for key, factor in INJURY_DISCOUNT.items():
+        if status.startswith(key):
+            return factor
+    return 1.0
+
+
+def apply_injuries(values, players):
+    """The same values, marked down for anyone who is hurt.
+
+    Applied to both sides equally, so it does not tilt a deal by itself. It
+    changes which players look like a need and which look expendable, which
+    is the part that was wrong: a receiver about to miss a month read as
+    depth at receiver.
+    """
+    out = {}
+    for pid, entry in values.items():
+        factor = discount_for(players.get(pid) or {})
+        out[pid] = dict(entry, value=entry["value"] * factor,
+                        hurt=factor < 1.0)
+    return out
 
 
 def free_agents(values, taken):
@@ -147,16 +178,18 @@ def record(roster):
     return (s.get("wins", 0), s.get("losses", 0), s.get("ties", 0))
 
 
-def tradeable(roster, players, values, limit):
-    """Players worth naming in a package, most valuable first.
+def tradeable(roster, players, values):
+    """Every player on the roster anyone can price, most valuable first.
 
-    Anyone with no value at all is left out: a package nobody can price is
-    not an offer.
+    The whole roster, because that is how trades actually get made: the
+    piece that fits is often the ninth-most valuable man on the team, not
+    one of the headliners. Only players with no value at all are left out,
+    since a package nobody can price is not an offer.
     """
     ids = [str(p) for p in (roster.get("players") or []) if p and p != "0"]
     ids = [pid for pid in ids if values.get(pid, {}).get("value")]
     ids.sort(key=lambda pid: values[pid]["value"], reverse=True)
-    return ids[:limit]
+    return ids
 
 
 def _protected(players, pid, protect):
@@ -167,6 +200,52 @@ def _protected(players, pid, protect):
     full = (player.get("full_name") or " ".join(filter(None, [
         player.get("first_name"), player.get("last_name")]))).strip().lower()
     return bool(full) and full in protect
+
+
+def shape(league, roster, players, values, byes=None, week=1):
+    """What this roster is long and short of, and what is coming.
+
+    Everything the offers are built from, said out loud. Reading a paragraph
+    and disagreeing with it is a faster way to find a broken assumption than
+    reading twenty packages and disagreeing with four of them.
+    """
+    byes = byes or {}
+    slots = starting_slots(league)
+    ids = [str(p) for p in (roster.get("players") or []) if p and p != "0"]
+
+    need = {}
+    for slot in slots:
+        for pos in SLOT_ELIGIBILITY.get(slot, ()):
+            need[pos] = need.get(pos, 0) + 1 / len(SLOT_ELIGIBILITY[slot])
+
+    have, hurt, upcoming = {}, [], {}
+    for pid in ids:
+        player = players.get(pid) or {}
+        pos = player.get("position")
+        if not pos:
+            continue
+        have.setdefault(pos, []).append(pid)
+        if discount_for(player) < 1.0:
+            hurt.append((pid, pos, player.get("injury_status")))
+        bye = byes.get((player.get("team") or "").upper())
+        if bye and bye >= week:
+            upcoming.setdefault(bye, []).append(pos)
+
+    depth = {}
+    for pos, wanted in need.items():
+        depth[pos] = round(len(have.get(pos, [])) - wanted, 1)
+
+    wins, losses, ties = record(roster)
+    settings = roster.get("settings") or {}
+    return {
+        "record": (wins, losses, ties),
+        "points_for": settings.get("fpts", 0),
+        "points_against": settings.get("fpts_against", 0),
+        "depth": depth,
+        "hurt": hurt,
+        "byes": upcoming,
+        "starters_value": lineup_value(ids, players, values, slots),
+    }
 
 
 def offers(league, mine, theirs, players, values, protect=(), free=None):
@@ -180,9 +259,9 @@ def offers(league, mine, theirs, players, values, protect=(), free=None):
     my_before = lineup_value(my_ids, players, values, slots, free)
     their_before = lineup_value(their_ids, players, values, slots, free)
 
-    can_send = [pid for pid in tradeable(mine, players, values, MAX_SEND)
+    can_send = [pid for pid in tradeable(mine, players, values)
                 if pid not in protect and not _protected(players, pid, protect)]
-    can_get = tradeable(theirs, players, values, MAX_RECEIVE)
+    can_get = tradeable(theirs, players, values)
 
     found = []
     packages = ([([a], [b]) for a in can_send for b in can_get]
@@ -190,6 +269,19 @@ def offers(league, mine, theirs, players, values, protect=(), free=None):
                    for b in can_get])
     my_lineup_before = best_lineup(my_ids, players, values, slots)
     for give, get in packages:
+        # Whole rosters make this loop twenty times longer, so the cheap
+        # test comes first: most pairs are nowhere near a fair package, and
+        # rebuilding two lineups to discover that is the expensive part.
+        spots = max(0, len(give) - len(get))
+        position = (values.get(get[0], {}).get("position") or "RB")
+        sent, received = fairness(give, get, values, spots,
+                                  free.get(position, 0.0))
+        if max(sent, received) <= 0:
+            continue
+        tilt = (received - sent) / max(sent, received)
+        if abs(tilt) > FAIRNESS:
+            continue
+
         my_roster = [p for p in my_ids if p not in give] + get
         their_roster = [p for p in their_ids if p not in get] + give
         my_filled = best_lineup(my_roster, players, values, slots)
@@ -199,16 +291,6 @@ def offers(league, mine, theirs, players, values, protect=(), free=None):
         my_gain = my_after - my_before
         their_gain = their_after - their_before
         if my_gain <= 0 or their_gain <= 0:
-            continue
-
-        spots = max(0, len(give) - len(get))
-        position = (values.get(get[0], {}).get("position") or "RB")
-        sent, received = fairness(give, get, values, spots,
-                                  free.get(position, 0.0))
-        if max(sent, received) <= 0:
-            continue
-        tilt = (received - sent) / max(sent, received)
-        if abs(tilt) > FAIRNESS:
             continue
 
         # What actually changes in your starting eleven, so the cost of
@@ -221,6 +303,12 @@ def offers(league, mine, theirs, players, values, protect=(), free=None):
 
         found.append({
             "give": give, "get": get, "changes": changes,
+            # The raw units are FantasyCalc's own scale, where the best
+            # player in the game is about ten thousand. A share of your
+            # starting lineup is a number that means something.
+            "my_pct": round(100 * my_gain / my_before) if my_before else 0,
+            "their_pct": (round(100 * their_gain / their_before)
+                          if their_before else 0),
             "my_gain": round(my_gain), "their_gain": round(their_gain),
             "sent_value": round(sent), "received_value": round(received),
             "tilt": round(tilt * 100),
@@ -270,23 +358,44 @@ def league_offers(league, user_id, players, values, protect=()):
 def board(username, league_filter=None, protect=()):
     state = sc.current_state()
     season = state.get("season")
-    values, source = tv.fetch()
-    if not values:
-        raise RuntimeError("no trade values could be read")
+    week = state.get("week") or 1
     user = sc.resolve_user(username)
     players = sc.all_players()
+    bye_weeks = nfl_week.byes(season)
 
     leagues = sc.user_leagues(user["user_id"], season)
     if league_filter:
         leagues = [l for l in leagues
                    if league_filter.lower() in (l.get("name") or "").lower()]
-    out = []
+
+    out, source, cache = [], None, {}
     for league in leagues:
+        # Each league is priced with its own size and scoring. A player is
+        # worth more in a ten-team league than a twelve, and using one list
+        # for both prices one of them wrong.
+        wanted = tv.settings_from(league)
+        key = (wanted["teams"], wanted["ppr"], wanted["quarterbacks"])
+        if key not in cache:
+            cache[key] = tv.fetch(*key)
+        values, source = cache[key]
+        if not values:
+            continue
+        values = apply_injuries(values, players)
+
         got = league_offers(league, user["user_id"], players, values, protect)
-        if got and got["offers"]:
-            out.append(got)
-    return {"season": season, "source": source, "values": values,
-            "leagues": out}
+        if not got:
+            continue
+        rosters = sc.league_rosters(league["league_id"])
+        mine = sc.my_roster(rosters, user["user_id"])
+        got["shape"] = shape(league, mine, players, values, bye_weeks, week)
+        got["summary"] = summary(got["shape"], players, league.get("name"))
+        got["settings"] = wanted
+        got["values"] = values
+        out.append(got)
+
+    if not out and not source:
+        raise RuntimeError("no trade values could be read")
+    return {"season": season, "week": week, "source": source, "leagues": out}
 
 
 def short(players, pid):
@@ -302,6 +411,78 @@ def lineup_changes(offer, players):
     return [f"{c['slot']}: {short(players, c['in'])} in"
             + (f", {short(players, c['out'])} out" if c["out"] else "")
             for c in offer["changes"]]
+
+
+def posture(shape_of_team):
+    """Buying, selling, or neither, from the record alone."""
+    wins, losses, _ties = shape_of_team["record"]
+    played = wins + losses
+    if played < 3:
+        return "early"
+    if wins >= losses * 2:
+        return "buying"
+    if losses >= wins * 2:
+        return "selling"
+    return "even"
+
+
+OPENING = {
+    "early": "Too early to read the season",
+    "buying": "Off to a strong start",
+    "selling": "The season is getting away",
+    "even": "Middle of the pack so far",
+}
+
+
+def summary(shape_of_team, players, league_name=""):
+    """A paragraph about the team, in the terms the offers are built from."""
+    wins, losses, ties = shape_of_team["record"]
+    record = f"{wins}-{losses}" + (f"-{ties}" if ties else "")
+    stance = posture(shape_of_team)
+
+    # Exactly enough is not thin: one quarterback in a one-quarterback
+    # league is a normal roster, not a hole.
+    thin = sorted(p for p, spare in shape_of_team["depth"].items()
+                  if spare <= -0.5)
+    deep = sorted(p for p, spare in shape_of_team["depth"].items()
+                  if spare >= 1.5)
+
+    said = [f"{OPENING[stance]} at {record}."]
+    if thin:
+        said.append(f"You are thin at {listed(thin)}, which is where an offer "
+                    "will try to bring somebody in.")
+    if deep:
+        said.append(f"You have more {listed(deep)} than you can start, so that "
+                    "is what goes out.")
+    if not thin and not deep:
+        said.append("Your roster is evenly stocked, so there is little to "
+                    "trade from and little to trade for.")
+
+    if shape_of_team["hurt"]:
+        names = listed([f"{short(players, pid)} ({status})"
+                        for pid, _pos, status in shape_of_team["hurt"][:3]])
+        said.append(f"{names} marked down for injury, which counts as need at "
+                    "that position rather than depth.")
+
+    weeks = sorted(shape_of_team["byes"])[:2]
+    if weeks:
+        clusters = "; ".join(
+            f"week {w}: {listed(sorted(set(shape_of_team['byes'][w])))}"
+            for w in weeks)
+        said.append(f"Byes ahead — {clusters}.")
+
+    if stance == "buying":
+        said.append("Worth paying slightly over the odds for a starter.")
+    elif stance == "selling":
+        said.append("Worth taking the safer half of a close deal.")
+    return " ".join(said)
+
+
+def listed(items):
+    items = [str(i) for i in items]
+    if len(items) <= 1:
+        return items[0] if items else ""
+    return ", ".join(items[:-1]) + " and " + items[-1]
 
 
 def describe(offer, players, values):
@@ -333,20 +514,29 @@ def main():
             print("--league needs a name")
             return 1
 
+    import textwrap
     import waiver_analyzer as wa
     # The list of players you will not part with applies here too, and more
     # so: a waiver drop costs a roster spot, a trade hands him to a rival.
     protect = wa.never_drop_names()
     got = board(args[0], league_filter, protect=protect)
     players = sc.all_players()
-    print(f"Values from {got['source']}.")
+    print(f"Values from {got['source']}, week {got['week']}.")
     for league in got["leagues"]:
+        settings = league["settings"]
         print()
         print("=" * 72)
-        w, l, t = league["my_record"]
-        print(f"{league['league_name']}   (you are {w}-{l}"
-              f"{f'-{t}' if t else ''})")
+        print(league["league_name"])
         print("=" * 72)
+        print(textwrap.fill(league["summary"], 72))
+        print()
+        note = (f"Priced as {settings['teams']} teams, {settings['ppr']} PPR, "
+                f"{settings['quarterbacks']} QB.")
+        if settings.get("pass_td") not in (None, 4):
+            note += (f" This league gives {settings['pass_td']} for a passing "
+                     "touchdown, which lifts quarterbacks; the value list has "
+                     "no setting for it, so read QB prices as low here.")
+        print(textwrap.fill(note, 72))
         for offer in league["offers"]:
             give = ", ".join(sc.player_label(players, p).split(" [")[0]
                              for p in offer["give"])
@@ -359,8 +549,8 @@ def main():
             print(f"    Get     {get}")
             for change in lineup_changes(offer, players):
                 print(f"    Lineup  {change}")
-            print(f"    Value   you +{offer['my_gain']:,}, "
-                  f"them +{offer['their_gain']:,}")
+            print(f"    Lineup  you +{offer['my_pct']}%, "
+                  f"them +{offer['their_pct']}%")
             print(f"    {describe(offer, players, got['values'])}")
     if not got["leagues"]:
         print("\nNo package makes both sides better right now.")

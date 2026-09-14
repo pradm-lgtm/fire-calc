@@ -174,11 +174,32 @@ does too. Two teams with opposite surpluses can both gain, and every roster
 in the league is readable, so finding those pairs is arithmetic rather than
 guesswork.
 
+Each league is priced with its own size, scoring and lineup: a player is
+worth more in a ten-team league than a twelve, and using one list for both
+prices one of them wrong. Six-point passing touchdowns are the exception —
+they lift every quarterback and the value list has no setting for them — so
+the page says so rather than pretending otherwise.
+
+Injured players are marked down before anything is compared, on both sides
+equally. A value list is formed from trades made over weeks and lags a fresh
+injury badly, so a receiver about to miss a month was reading as depth at
+receiver.
+
+Every priced player on both rosters is considered, not a shortlist: the piece
+that fits is often the ninth-most valuable man on the team.
+
+Each league opens with a paragraph describing the roster in the terms the
+offers are built from — record, what is thin, what is spare, who is hurt,
+which byes are coming, and whether that argues for paying up or playing safe.
+Disagreeing with the paragraph finds a broken assumption faster than
+disagreeing with four packages out of twenty.
+
 Values come from FantasyCalc, joined to rosters by Sleeper id rather than by
 name. They know the scoring but nothing about your roster — that a receiver
 is your third is a fact they cannot see — so they weigh a deal, they do not
-judge it. The lineup gain is the number that knows your roster, and it is the
-one to read first.
+judge it. The lineup gain is the number that knows your roster, and it is the one to
+read first. It is shown as a share of your starting lineup rather than in raw
+units, which are FantasyCalc's own scale and mean nothing on their own.
 
 A slot you empty is not a slot you leave empty. Trading your only
 quarterback costs the difference between him and the best one nobody has
