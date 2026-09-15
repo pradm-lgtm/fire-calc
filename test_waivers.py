@@ -101,5 +101,74 @@ class Card(unittest.TestCase):
         self.assertNotIn("Work them out again", html)
 
 
+OPTIONS = [{"id": "d1", "name": "J.K. Dobbins (DEN RB)", "position": "RB",
+            "why": "RB &middot; 5 rostered, more than you start"},
+           {"id": "d2", "name": "Alec Pierce (IND WR)", "position": "WR",
+            "why": "WR &middot; 7 rostered, more than you start"}]
+
+
+class Drops(unittest.TestCase):
+    """Choosing who goes, rather than being told."""
+
+    def build(self, *proposals):
+        conn = st.connect(":memory:")
+        run = st.start_run(conn, "2026", 2, ["ESPN"])
+        for i, over in enumerate(proposals or [{}]):
+            row = dict(league_id="1", league_name="LEHG",
+                       add_player_id=f"a{i}", add_player_name=f"Add {i} (LV RB)",
+                       add_position="RB", drop_player_id="d1",
+                       drop_player_name="J.K. Dobbins (DEN RB)",
+                       drop_position="RB", bid=5, max_bid=100, consensus=2,
+                       sources=["https://espn.com/x"], rationale="RB is deep",
+                       drop_options=OPTIONS)
+            row.update(over)
+            st.add_proposal(conn, run, **row)
+        return conn
+
+    def test_the_drop_is_a_choice_with_reasons_beside_it(self):
+        html = webapp.render(self.build()).decode()
+        self.assertIn("<select name='drop'>", html)
+        self.assertIn("Alec Pierce", html)
+        self.assertIn("more than you start", html)
+
+    def test_the_suggested_drop_is_preselected(self):
+        html = webapp.render(self.build()).decode()
+        self.assertIn("<option value='d1' selected>", html)
+
+    def test_choosing_a_different_drop_is_recorded(self):
+        conn = self.build()
+        row = st.proposals_for_run(conn, st.latest_run(conn)["id"])[0]
+        st.decide(conn, row["id"], st.APPROVED, bid=5,
+                  drop_player_id="d2",
+                  drop_player_name=webapp.drop_name(conn, row["id"], "d2"))
+        after = st.proposals_for_run(conn, st.latest_run(conn)["id"])[0]
+        self.assertEqual(after["drop_player_id"], "d2")
+        self.assertEqual(after["drop_player_name"], "Alec Pierce (IND WR)")
+
+    def test_the_name_comes_from_the_options_not_the_form(self):
+        # So a posted form cannot name one player and identify another.
+        conn = self.build()
+        row = st.proposals_for_run(conn, st.latest_run(conn)["id"])[0]
+        self.assertIsNone(webapp.drop_name(conn, row["id"], "not-an-option"))
+
+    def test_proposals_are_ordered_by_what_they_cost(self):
+        conn = self.build({"bid": 4}, {"bid": 12}, {"bid": 7})
+        bids = [r["bid"] for r in
+                st.proposals_for_run(conn, st.latest_run(conn)["id"])]
+        self.assertEqual(bids, [12, 7, 4])
+
+    def test_claims_sharing_a_drop_are_called_alternatives(self):
+        # Whichever wins first takes him, so the others cannot go through
+        # and the budget total above is the worst case.
+        html = webapp.render(self.build({}, {})).decode()
+        self.assertIn("at most one can land", html)
+
+    def test_distinct_drops_are_not_flagged(self):
+        html = webapp.render(self.build(
+            {}, {"drop_player_id": "d2",
+                 "drop_player_name": "Alec Pierce (IND WR)"})).decode()
+        self.assertNotIn("at most one can land", html)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

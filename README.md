@@ -153,9 +153,21 @@ anything, it says so: ranking pages wrap their tables in furniture that names
 a dozen players and analyses none of them, and quoting one of those as the
 reason to spend FAAB is worse than quoting nothing.
 
+Proposals are ordered by what the analysts would spend, which is the closest
+thing to a ranking of how much each one matters and decides which to approve
+when the budget will not cover them all.
+
 Bids are editable, the approve button always reads the number in the box
 beside it, and each league's budget line says what approving every pending
 bid would leave.
+
+So is the drop. Whether anyone is worth dropping decides whether the add is
+worth bidding on at all, so every plausible drop is offered on the card with
+a reason beside it — how many you roster at that position, whether that is
+more than you start, whether he is hurt — rather than one being chosen for
+you out of sight. Two claims that drop the same player are alternatives:
+whichever lands first takes him, so at most one can go through, and the
+budget line says so instead of counting both.
 
 ## Trades
 

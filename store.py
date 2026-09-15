@@ -52,6 +52,7 @@ CREATE TABLE IF NOT EXISTS proposals (
     max_bid         INTEGER,
     bid_low         INTEGER,
     bid_high        INTEGER,
+    drop_options    TEXT,
     consensus       INTEGER DEFAULT 0,
     sources         TEXT,
     rationale       TEXT,
@@ -174,6 +175,7 @@ MIGRATIONS = [
     "ALTER TABLE lineup_flags ADD COLUMN locked INTEGER DEFAULT 0",
     "ALTER TABLE proposals ADD COLUMN bid_low INTEGER",
     "ALTER TABLE proposals ADD COLUMN bid_high INTEGER",
+    "ALTER TABLE proposals ADD COLUMN drop_options TEXT",
 ]
 
 
@@ -267,6 +269,7 @@ def add_proposal(conn, run_id, **f):
         drop_position=f.get("drop_position"),
         bid=f.get("bid"), max_bid=f.get("max_bid"),
         bid_low=f.get("bid_low"), bid_high=f.get("bid_high"),
+        drop_options=json.dumps(f.get("drop_options") or []),
         consensus=f.get("consensus", 0),
         sources=json.dumps(f.get("sources", [])),
         rationale=f.get("rationale", ""), quote=f.get("quote", ""),
@@ -471,10 +474,17 @@ def latest_run(conn):
 
 
 def proposals_for_run(conn, run_id):
-    return conn.execute(
-        "SELECT * FROM proposals WHERE run_id = ?"
-        " ORDER BY league_name, rank, id", (run_id,)
-    ).fetchall()
+    """A run's proposals, dearest first.
+
+    What the analysts would spend is the closest thing to a ranking of how
+    much each one matters, and it decides which to approve when the budget
+    will not cover them all.
+    """
+    rows = conn.execute(
+        "SELECT * FROM proposals WHERE run_id = ?", (run_id,)).fetchall()
+    return sorted(rows, key=lambda r: (r["league_name"] or "",
+                                       -(r["bid"] or 0), r["rank"] or 0,
+                                       r["id"]))
 
 
 def approved_unsubmitted(conn):

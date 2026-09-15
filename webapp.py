@@ -207,6 +207,11 @@ label { font-size:13px; color:var(--muted); }
 .swap + .swap { border-top:1px solid var(--line); }
 .swaplabel { color:var(--muted); font-size:12.5px; width:74px;
              flex:none; }
+.droppick { display:flex; align-items:center; gap:8px; margin-top:12px; }
+.droppick select { flex:1; min-width:0; min-height:44px; padding:9px;
+                   font-size:15px; font-family:inherit;
+                   border:1px solid var(--line-2); border-radius:9px;
+                   background:var(--bg); color:var(--ink); }
 .changes { margin:4px 0 0; padding-left:18px; color:var(--muted);
            font-size:13px; }
 .changes li { margin:2px 0; }
@@ -352,12 +357,32 @@ def render(conn):
         bar = " &middot; ".join(parts)
         if budget and committed + asked > budget:
             bar += " <span class='warn'>— that is more than you have</span>"
+        # Two claims dropping the same player are alternatives: whichever
+        # wins first takes him, and the other cannot go through. So the
+        # total above is the worst case, not the likely one.
+        shared = shared_drops(waiting)
+        if shared:
+            bar += (" &middot; " + "; ".join(
+                f"{n} claims both drop {e(strip_paren(name))}, so at most one "
+                "can land" if n == 2 else
+                f"{n} claims all drop {e(strip_paren(name))}, so at most one "
+                "can land" for name, n in shared))
         out.append(f"<h2><span>{e(lname)}</span><span class='meta'>"
                    f"{len(waiting)} of {len(items)} to review</span></h2>"
                    f"<div class='bar'>{bar}</div>")
         for r in items:
             out.append(card(r))
     return page("".join(out), "Spike — waivers")
+
+
+def shared_drops(items):
+    """[(name, how many claims drop him)] where more than one does."""
+    counts = {}
+    for row in items:
+        name = row["drop_player_name"]
+        if name:
+            counts[name] = counts.get(name, 0) + 1
+    return sorted((n, c) for n, c in counts.items() if c > 1)
 
 
 def submit_panel(conn, ready):
@@ -404,7 +429,8 @@ def card(r):
             pos_chip(r["add_position"]),
             f"<span class='add'>{e(strip_paren(r['add_player_name']))}</span>",
             "</div>"]
-    if r["drop_player_name"]:
+    options = json.loads(r["drop_options"] or "[]")
+    if r["drop_player_name"] and not (options and r["status"] == st.PENDING):
         bits += ["<div class='move'>",
                  "<span class='tag'>DROP</span>",
                  pos_chip(r["drop_position"]),
@@ -434,8 +460,10 @@ def card(r):
             guide = "No analyst put a number on him"
         bits.append(
             f"<p class='guide'>{e(guide)}</p>"
-            "<form class='row' method='post' action='/decide'>"
+            "<form method='post' action='/decide'>"
             f"<input type='hidden' name='id' value='{e(r['id'])}'>"
+            + drop_chooser(r, options)
+            + "<div class='row'>"
             "<span class='bidwrap'><label>Bid</label>"
             f"<input type='number' name='bid' inputmode='numeric' min='0'"
             f" max='{e(r['max_bid'] or 100)}' data-bid"
@@ -443,7 +471,7 @@ def card(r):
             f"<button class='approve' name='action' value='approve'"
             f" data-approve>Approve at {e(bid)}</button>"
             "<button class='decline' name='action' value='decline'>Decline</button>"
-            "</form>")
+            "</div></form>")
     else:
         label = {st.APPROVED: "Approved", st.DECLINED: "Declined",
                  st.SUBMITTED: "Submitted", st.FAILED: "Submission failed"}.get(
@@ -460,6 +488,43 @@ def card(r):
         bits.append(line)
     bits.append("</div>")
     return "".join(bits)
+
+
+def drop_name(conn, proposal_id, drop_id):
+    """The name that goes with a chosen drop, from the options offered.
+
+    Looked up rather than posted, so the form cannot name one player and
+    identify another.
+    """
+    if not drop_id:
+        return None
+    row = conn.execute("SELECT drop_options FROM proposals WHERE id = ?",
+                       (int(proposal_id),)).fetchone()
+    for option in json.loads((row and row["drop_options"]) or "[]"):
+        if str(option.get("id")) == str(drop_id):
+            return option.get("name")
+    return None
+
+
+def drop_chooser(r, options):
+    """Pick who goes, rather than being told.
+
+    Whether anyone is worth dropping decides whether the add is worth
+    bidding on at all, so the choice belongs on the card next to the bid,
+    not in the league app afterwards.
+    """
+    if not options:
+        return ""
+    chosen = str(r["drop_player_id"] or "")
+    rows = []
+    for option in options:
+        pid = str(option.get("id") or "")
+        rows.append(
+            f"<option value='{e(pid)}'{' selected' if pid == chosen else ''}>"
+            f"{e(strip_paren(option.get('name') or ''))}"
+            f" — {option.get('why', '')}</option>")
+    return ("<label class='droppick'><span class='swaplabel'>Drop</span>"
+            "<select name='drop'>" + "".join(rows) + "</select></label>")
 
 
 def pos_chip(pos):
@@ -1619,6 +1684,7 @@ class Handler(BaseHTTPRequestHandler):
         pid = (form.get("id") or [None])[0]
         action = (form.get("action") or [""])[0]
         bid = (form.get("bid") or [None])[0]
+        drop = (form.get("drop") or [None])[0]
 
         conn = self._conn()
         try:
@@ -1630,7 +1696,9 @@ class Handler(BaseHTTPRequestHandler):
                         bid_val = int(bid) if bid not in (None, "") else None
                     except ValueError:
                         bid_val = None
-                    st.decide(conn, int(pid), status, bid=bid_val)
+                    st.decide(conn, int(pid), status, bid=bid_val,
+                              drop_player_id=drop or None,
+                              drop_player_name=drop_name(conn, pid, drop))
         finally:
             conn.close()
         self.send_response(303)

@@ -108,6 +108,15 @@ def proposals_for_league(league, user_id, players, trending, texts, max_moves):
         if not drops:
             break
         _, drop_score, drop_pid, drop_player, drop_label = drops[0]
+        # Every plausible drop, not only the one it picked. Whether there is
+        # anyone worth dropping is half the decision, and it was being made
+        # for you out of sight.
+        options = [{
+            "id": pid,
+            "name": sc.player_label(players, pid),
+            "position": p.get("position"),
+            "why": drop_reason(p, label, depth),
+        } for _rank, _score, pid, p, label in drops[:6]]
         add_score = wa.score_player(players.get(pid, {}), trending.get(pid, 0))
         if drop_score > add_score * 1.5:
             break
@@ -146,12 +155,27 @@ def proposals_for_league(league, user_id, players, trending, texts, max_moves):
             drop_player_name=sc.player_label(players, drop_pid),
             drop_position=drop_player.get("position"),
             bid=bid, max_bid=remaining, bid_low=low, bid_high=high,
+            drop_options=options,
             consensus=info["count"], sources=info["sources"],
             rationale=why,
             quote=quote, rank=len(out) + 1,
         ))
         protect.add(drop_pid)
     return out
+
+
+def drop_reason(player, label, depth):
+    """Why this player is or is not a sensible thing to cut."""
+    pos = player.get("position") or "?"
+    hurt = (player.get("injury_status") or "").strip()
+    have = depth.get(pos, (0, 0, label))[0]
+    if hurt:
+        return f"{pos} &middot; {hurt}"
+    if label == "thin":
+        return f"{pos} &middot; only {have} on your roster"
+    if label in ("deep", "extra"):
+        return f"{pos} &middot; {have} rostered, more than you start"
+    return f"{pos} &middot; {have} rostered"
 
 
 def main_for(username, db_path, moves=3, force=False):
