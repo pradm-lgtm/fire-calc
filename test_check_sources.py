@@ -8,6 +8,8 @@ one by its own page called both working sources unusable, which is how a
 real candidate nearly got rejected.
 """
 
+import contextlib
+import io
 import unittest
 
 import check_sources as cs
@@ -38,6 +40,11 @@ class Following(unittest.TestCase):
         self.addCleanup(lambda: setattr(ew, "fetch_url", self.real[1]))
         self.gazetteer = ex.build_gazetteer(PLAYERS, list(PLAYERS))
 
+    def quietly(self, *args, **kwargs):
+        """check() reports as it goes; a test only wants the verdict."""
+        with contextlib.redirect_stdout(io.StringIO()):
+            return cs.check(*args, **kwargs)
+
     def serve(self, pages):
         def raw(url, quiet=False):
             for fragment, body in pages.items():
@@ -50,29 +57,29 @@ class Following(unittest.TestCase):
     def test_a_hub_is_judged_by_what_it_links_to(self):
         self.serve({"waiver-wire-week-2": f"<html><body>{ARTICLE}</body></html>",
                     "*": HUB})
-        self.assertTrue(cs.check("https://example.com/fantasy/football/",
+        self.assertTrue(self.quietly("https://example.com/fantasy/football/",
                                  PLAYERS, self.gazetteer))
 
     def test_a_hub_whose_articles_are_empty_is_unusable(self):
         self.serve({"waiver-wire-week-2": TEASER, "*": HUB})
-        self.assertFalse(cs.check("https://example.com/fantasy/football/",
+        self.assertFalse(self.quietly("https://example.com/fantasy/football/",
                                   PLAYERS, self.gazetteer))
 
     def test_a_hub_with_no_waiver_links_is_unusable(self):
         self.serve({"*": "<html><body><a href='/nfl/rankings'>Rankings</a>"
                          "</body></html>"})
-        self.assertFalse(cs.check("https://example.com/fantasy/football/",
+        self.assertFalse(self.quietly("https://example.com/fantasy/football/",
                                   PLAYERS, self.gazetteer))
 
     def test_a_followed_article_does_not_follow_its_own_links(self):
         # Otherwise a thin article walks the whole site.
         self.serve({"*": HUB})
-        self.assertFalse(cs.check("https://example.com/anything", PLAYERS,
+        self.assertFalse(self.quietly("https://example.com/anything", PLAYERS,
                                   self.gazetteer, followed=True))
 
     def test_a_page_that_stands_alone_needs_no_following(self):
         self.serve({"*": f"<html><body>{ARTICLE * 6}</body></html>"})
-        self.assertTrue(cs.check("https://example.com/article", PLAYERS,
+        self.assertTrue(self.quietly("https://example.com/article", PLAYERS,
                                  self.gazetteer))
 
 

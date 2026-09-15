@@ -1,9 +1,15 @@
 [
   {
+    "name": "ESPN",
+    "hub": "https://www.espn.com/fantasy/football/",
+    "limit": 2,
+    "note": "Verified: the hub links to the week's waiver column, which yields 33 recommendations with 30 stated FAAB percentages - deeper than either other source, and the only one whose bids come from the article rather than being inferred. Not paywalled as of week 2."
+  },
+  {
     "name": "FantasyPros",
     "hub": "https://www.fantasypros.com/nfl/advice/waiver-wire.php",
     "limit": 2,
-    "note": "Hub itself carries names but no bids; it links out to full articles (often RotoBaller's), which is what discovery follows."
+    "note": "Hub itself carries names but no bids; it links out to full articles (often RotoBaller's), which is what discovery follows. Useful for consensus counting even where it cannot say what to spend."
   },
   {
     "name": "DraftSharks",
