@@ -17,6 +17,7 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
+import claim_order
 import db
 
 DB_PATH = Path(__file__).resolve().parent / "fantasy.db"
@@ -58,6 +59,7 @@ CREATE TABLE IF NOT EXISTS proposals (
     rationale       TEXT,
     quote           TEXT,
     rank            INTEGER DEFAULT 0,
+    priority        INTEGER DEFAULT 0,
     status          TEXT NOT NULL DEFAULT 'pending',
     decided_at      TEXT,
     submitted_at    TEXT,
@@ -176,6 +178,7 @@ MIGRATIONS = [
     "ALTER TABLE proposals ADD COLUMN bid_low INTEGER",
     "ALTER TABLE proposals ADD COLUMN bid_high INTEGER",
     "ALTER TABLE proposals ADD COLUMN drop_options TEXT",
+    "ALTER TABLE proposals ADD COLUMN priority INTEGER DEFAULT 0",
 ]
 
 
@@ -273,7 +276,8 @@ def add_proposal(conn, run_id, **f):
         consensus=f.get("consensus", 0),
         sources=json.dumps(f.get("sources", [])),
         rationale=f.get("rationale", ""), quote=f.get("quote", ""),
-        rank=f.get("rank", 0), status=PENDING,
+        rank=f.get("rank", 0), priority=f.get("priority", 0),
+        status=PENDING,
     )
     names = ", ".join(cols)
     marks = ", ".join("?" for _ in cols)
@@ -474,25 +478,135 @@ def latest_run(conn):
 
 
 def proposals_for_run(conn, run_id):
-    """A run's proposals, dearest first.
+    """A run's proposals, league by league, each in the order it will be filed.
 
-    What the analysts would spend is the closest thing to a ranking of how
+    Which is the dearest bid first until somebody says otherwise, because
+    what the analysts would spend is the closest thing to a ranking of how
     much each one matters, and it decides which to approve when the budget
-    will not cover them all.
+    will not cover them all. Once claims are reordered by hand that ordering
+    wins: it is the only thing that says which of two claims for the same
+    player is the fallback.
     """
     rows = conn.execute(
         "SELECT * FROM proposals WHERE run_id = ?", (run_id,)).fetchall()
-    return sorted(rows, key=lambda r: (r["league_name"] or "",
-                                       -(r["bid"] or 0), r["rank"] or 0,
-                                       r["id"]))
+    leagues = sorted({(r["league_name"] or "", str(r["league_id"]))
+                      for r in rows})
+    groups = claim_order.by_league(rows)
+    out = []
+    for _, league_id in leagues:
+        out.extend(claim_order.ordered(groups.get(league_id, [])))
+    return out
 
 
 def approved_unsubmitted(conn):
-    """The submitter's only input. Nothing else is ever actionable."""
-    return conn.execute(
+    """The submitter's only input. Nothing else is ever actionable.
+
+    Order is part of the instruction, not presentation: a fallback filed
+    before the claim it falls back to is the wrong claim.
+    """
+    rows = conn.execute(
         "SELECT * FROM proposals WHERE status = ? AND submitted_at IS NULL"
-        " ORDER BY league_id, rank", (APPROVED,)
+        " ORDER BY league_id, id", (APPROVED,)
     ).fetchall()
+    return claim_order.submission_order(rows)
+
+
+def league_claims(conn, run_id, league_id):
+    """One league's claims from a run, in filing order.
+
+    Declined and failed rows are left out: they will never be placed, so
+    they cannot be what another claim falls back to, and leaving them in
+    the order would make a chain read as one step longer than it is.
+    """
+    rows = conn.execute(
+        "SELECT * FROM proposals WHERE run_id = ? AND league_id = ?",
+        (run_id, str(league_id))).fetchall()
+    live = [r for r in rows if r["status"] in (PENDING, APPROVED, SUBMITTED)]
+    return claim_order.ordered(live)
+
+
+def renumber(conn, order):
+    """Write 1..n priorities down a list of ids, so the order stops being
+    an accident of the bids that produced it."""
+    for place, pid in enumerate(order, start=1):
+        conn.execute("UPDATE proposals SET priority = ? WHERE id = ?",
+                     (place, pid))
+
+
+def add_fallback(conn, proposal_id):
+    """Copy a claim so the same player can be chased with a second drop.
+
+    This is the other half of ordering. "Add Mayer dropping Dobbins, and if
+    Dobbins is already gone, add Mayer dropping somebody else" is two claims,
+    not one, and a run only ever proposes a player once. The copy is filed
+    directly below its original, which is the only place a fallback belongs:
+    it reaches its turn only when the claim above it has failed.
+
+    Returns the new id, or None when there is nobody else left to cut - a
+    second claim with the same drop would be a duplicate, not a fallback.
+    """
+    row = conn.execute("SELECT * FROM proposals WHERE id = ?",
+                       (int(proposal_id),)).fetchone()
+    if row is None:
+        return None
+    options = json.loads(row["drop_options"] or "[]")
+    spare = [o for o in options
+             if str(o.get("id")) != str(row["drop_player_id"] or "")]
+    if not spare:
+        return None
+    pick = spare[0]
+    new_id = add_proposal(
+        conn, row["run_id"],
+        idempotency_key=f"{row['idempotency_key']}:also:{pick.get('id')}",
+        platform=row["platform"], league_id=row["league_id"],
+        league_name=row["league_name"],
+        add_player_id=row["add_player_id"],
+        add_player_name=row["add_player_name"],
+        add_position=row["add_position"],
+        drop_player_id=pick.get("id"), drop_player_name=pick.get("name"),
+        drop_position=pick.get("position"),
+        bid=row["bid"], max_bid=row["max_bid"],
+        bid_low=row["bid_low"], bid_high=row["bid_high"],
+        drop_options=options, consensus=row["consensus"],
+        sources=json.loads(row["sources"] or "[]"),
+        rationale=row["rationale"], quote=row["quote"], rank=row["rank"],
+    )
+    if new_id is None:
+        return None
+    order = []
+    for other in league_claims(conn, row["run_id"], row["league_id"]):
+        if other["id"] == new_id:
+            continue
+        order.append(other["id"])
+        if other["id"] == row["id"]:
+            order.append(new_id)
+    renumber(conn, order)
+    log(conn, "fallback", f"second claim for {row['add_player_name']}", new_id)
+    conn.commit()
+    return new_id
+
+
+def reorder(conn, proposal_id, direction):
+    """Move one claim up or down its league's queue. Returns True if it moved.
+
+    Every claim in the league is renumbered, not just the two that swap, so
+    the stored order stops depending on the bids that produced it. Change a
+    bid afterwards and the order you set by hand still stands.
+    """
+    if direction not in ("up", "down"):
+        return False
+    row = conn.execute("SELECT * FROM proposals WHERE id = ?",
+                       (int(proposal_id),)).fetchone()
+    if row is None or row["submitted_at"]:
+        return False  # already in the league; its place is history now
+    rows = league_claims(conn, row["run_id"], row["league_id"])
+    order = claim_order.moved(rows, row["id"], direction)
+    if order == [r["id"] for r in rows]:
+        return False
+    renumber(conn, order)
+    log(conn, "reordered", f"moved {direction}", row["id"])
+    conn.commit()
+    return True
 
 
 def decide(conn, proposal_id, status, bid=None, drop_player_id=None,

@@ -30,14 +30,15 @@ from datetime import datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
+import claim_order
 import cloud_auth as auth
 import db
 import localenv
 import scores
 import sleeper_client as sc
+import store as st
 import trades
 from lineup import SLOT_ELIGIBILITY
-import store as st
 
 CSS = """
 /* Colour carries one meaning each. Blue is the only thing you can press,
@@ -215,6 +216,22 @@ label { font-size:13px; color:var(--muted); }
 .changes { margin:4px 0 0; padding-left:18px; color:var(--muted);
            font-size:13px; }
 .changes li { margin:2px 0; }
+.order { display:flex; align-items:center; gap:6px; margin:0 0 10px;
+         color:var(--muted); font-size:12px; }
+.place { font-weight:700; letter-spacing:.02em; }
+.movebtn { min-width:34px; min-height:30px; padding:0; font-size:14px;
+           line-height:1; border:1px solid var(--line-2); border-radius:8px;
+           background:var(--bg); color:var(--ink); font-family:inherit;
+           cursor:pointer; }
+.movebtn.off { opacity:.3; display:inline-flex; align-items:center;
+               justify-content:center; cursor:default; }
+.fallback { font-size:12.5px; color:var(--muted); margin:10px 0 0;
+            border-left:2px solid var(--action); padding-left:10px; }
+.fallback b { color:var(--ink); }
+.queue { list-style:none; margin:10px 0 0; padding:0; color:var(--muted);
+         font-size:13px; }
+.queue li { margin:3px 0; }
+.queueleague { color:var(--ink); font-weight:600; margin-top:8px; }
 .state { font-size:14px; font-weight:600; margin:12px 0 0; }
 .state.approved { color:var(--ok); } .state.declined { color:var(--no); }
 .state.submitted { color:var(--action); }
@@ -294,6 +311,7 @@ def claims_json(conn, include_submitted=False):
         "drop_player_name": r["drop_player_name"],
         "drop_position": r["drop_position"],
         "bid": r["bid"], "max_bid": r["max_bid"],
+        "rank": r["rank"], "priority": r["priority"],
         "status": r["status"],
     } for r in rows]
 
@@ -357,32 +375,77 @@ def render(conn):
         bar = " &middot; ".join(parts)
         if budget and committed + asked > budget:
             bar += " <span class='warn'>— that is more than you have</span>"
-        # Two claims dropping the same player are alternatives: whichever
-        # wins first takes him, and the other cannot go through. So the
-        # total above is the worst case, not the likely one.
-        shared = shared_drops(waiting)
-        if shared:
-            bar += (" &middot; " + "; ".join(
-                f"{n} claims both drop {e(strip_paren(name))}, so at most one "
-                "can land" if n == 2 else
-                f"{n} claims all drop {e(strip_paren(name))}, so at most one "
-                "can land" for name, n in shared))
+        # Two claims dropping the same player, or adding the same one, are a
+        # first choice and a fallback: whichever is higher in the queue wins
+        # and the other cannot go through. So the total above is the worst
+        # case, not the likely one.
+        live = [i for i in items
+                if i["status"] in (st.PENDING, st.APPROVED, st.SUBMITTED)]
+        fallbacks = claim_order.blockers(live)
+        if fallbacks:
+            one = len(fallbacks) == 1
+            bar += (f" &middot; {len(fallbacks)} of these claims "
+                    + ("is a fallback that only runs if the claim above it "
+                       "fails" if one else
+                       "are fallbacks, each one running only if the claim "
+                       "above it fails")
+                    + ", so the real cost is lower")
+        places = {r["id"]: n for n, r in enumerate(live, start=1)}
         out.append(f"<h2><span>{e(lname)}</span><span class='meta'>"
                    f"{len(waiting)} of {len(items)} to review</span></h2>"
                    f"<div class='bar'>{bar}</div>")
         for r in items:
-            out.append(card(r))
+            out.append(card(r, places.get(r["id"]), len(live),
+                            fallbacks.get(r["id"])))
     return page("".join(out), "Spike — waivers")
 
 
-def shared_drops(items):
-    """[(name, how many claims drop him)] where more than one does."""
-    counts = {}
-    for row in items:
-        name = row["drop_player_name"]
-        if name:
-            counts[name] = counts.get(name, 0) + 1
-    return sorted((n, c) for n, c in counts.items() if c > 1)
+def order_row(r, place, count):
+    """Where this claim sits in its league's queue, and how to move it.
+
+    The queue is the whole point of a fallback: the league works down your
+    claims in this order, so moving one up or down is the only way to say
+    which of two claims for the same player you would rather have.
+    """
+    if not place or count < 2 or r["submitted_at"]:
+        return ""
+    def step(direction, glyph, live):
+        if not live:
+            return f"<span class='movebtn off'>{glyph}</span>"
+        return (f"<button class='movebtn' name='dir' value='{direction}'"
+                f" title='Move {direction}'>{glyph}</button>")
+    return ("<form class='order' method='post' action='/order'>"
+            f"<input type='hidden' name='id' value='{e(r['id'])}'>"
+            f"<span class='place'>{place} of {count}</span>"
+            + step("up", "&uarr;", place > 1)
+            + step("down", "&darr;", place < count)
+            + "</form>")
+
+
+def fallback_form(r, options):
+    """Offer a second claim for the same player, cutting somebody else.
+
+    Only where there is somebody else to cut: a copy with the same drop is a
+    duplicate, and the league would process it as one.
+    """
+    spare = [o for o in options
+             if str(o.get("id")) != str(r["drop_player_id"] or "")]
+    if not spare:
+        return ""
+    return ("<form method='post' action='/fallback'>"
+            f"<input type='hidden' name='id' value='{e(r['id'])}'>"
+            "<button class='ghost' style='width:100%;margin-top:10px'>"
+            f"Also claim {e(strip_paren(r['add_player_name']))} for a "
+            "different drop</button></form>")
+
+
+def fallback_note(blocker):
+    """Say plainly that this claim is the second choice, and to what."""
+    above, why = blocker
+    who = strip_paren(above["add_player_name"])
+    cost = f" at {above['bid']}" if above["bid"] is not None else ""
+    return (f"<p class='fallback'>Fallback &mdash; this only lands if "
+            f"<b>{e(who)}{e(cost)}</b> fails, because {e(why)}.</p>")
 
 
 def submit_panel(conn, ready):
@@ -408,6 +471,7 @@ def submit_panel(conn, ready):
             f"<div class='move'><span class='add'>{len(ready)} claim"
             f"{'s' if len(ready) != 1 else ''} approved and not yet placed"
             "</span></div>"
+            + running_order(ready)
             + (f"<p class='why'>{note}</p>" if note else "")
             + ("" if waiting else
                "<form method='post' action='/submit'>"
@@ -416,14 +480,41 @@ def submit_panel(conn, ready):
             + "</div>")
 
 
+def running_order(ready):
+    """The queue as it will be filed, so the order is visible before it is sent.
+
+    Pressing the button is the last chance to notice that a fallback sits
+    above the claim it was meant to back up, and the only place that is
+    obvious is a list of all of them together.
+    """
+    lines = []
+    for rows in claim_order.by_league(ready).values():
+        seq = claim_order.ordered(rows)
+        fallbacks = claim_order.blockers(seq)
+        lines.append(f"<li class='queueleague'>{e(seq[0]['league_name'])}</li>")
+        for n, r in enumerate(seq, start=1):
+            bid = f" for {r['bid']}" if r["bid"] is not None else ""
+            # Two claims for the same player differ only in who they cut, so
+            # the drop is the half that tells them apart here.
+            cut = (f", dropping {e(strip_paren(r['drop_player_name']))}"
+                   if r["drop_player_name"] else "")
+            tail = " &mdash; only if the one above fails" \
+                if r["id"] in fallbacks else ""
+            lines.append(
+                f"<li>{n}. {e(strip_paren(r['add_player_name']))}{e(bid)}"
+                f"{cut}{tail}</li>")
+    return f"<ul class='queue'>{''.join(lines)}</ul>" if lines else ""
+
+
 def age_of_field(row, field):
     return age_of({"created_at": row[field]})
 
 
-def card(r):
+def card(r, place=None, count=0, blocker=None):
     srcs = json.loads(r["sources"] or "[]")
     src_txt = ", ".join(short_source(s) for s in srcs) or "—"
     bits = [f"<div class='card'>",
+            order_row(r, place, count),
             "<div class='move'>",
             "<span class='tag'>ADD</span>",
             pos_chip(r["add_position"]),
@@ -436,6 +527,8 @@ def card(r):
                  pos_chip(r["drop_position"]),
                  f"<span class='drop'>{e(strip_paren(r['drop_player_name']))}</span>",
                  "</div>"]
+    if blocker:
+        bits.append(fallback_note(blocker))
     named = (f"Named by {r['consensus']} analyst"
              f"{'s' if (r['consensus'] or 0) != 1 else ''} ({src_txt})")
     bits.append(f"<p class='why'>{e(named)}"
@@ -471,7 +564,8 @@ def card(r):
             f"<button class='approve' name='action' value='approve'"
             f" data-approve>Approve at {e(bid)}</button>"
             "<button class='decline' name='action' value='decline'>Decline</button>"
-            "</div></form>")
+            "</div></form>"
+            + fallback_form(r, options))
     else:
         label = {st.APPROVED: "Approved", st.DECLINED: "Declined",
                  st.SUBMITTED: "Submitted", st.FAILED: "Submission failed"}.get(
@@ -485,6 +579,8 @@ def card(r):
                      f"<input type='hidden' name='id' value='{e(r['id'])}'>"
                      "<button class='decline' name='action' value='reopen'>"
                      "Undo</button></form>")
+        if r["status"] == st.APPROVED:
+            line += fallback_form(r, json.loads(r["drop_options"] or "[]"))
         bits.append(line)
     bits.append("</div>")
     return "".join(bits)
@@ -535,16 +631,12 @@ def pos_chip(pos):
 
 
 def strip_paren(name):
-    """'Dylan Sampson (CLE RB)' -> 'Dylan Sampson' - the chip carries position."""
-    text = str(name or "")
-    if "(" in text:
-        head, _, tail = text.partition("(")
-        keep = head.strip()
-        # Preserve an injury flag, which matters to the decision.
-        if "[" in tail:
-            keep += " " + tail[tail.index("["):].strip()
-        return keep
-    return text
+    """'Dylan Sampson (CLE RB)' -> 'Dylan Sampson' - the chip carries position.
+
+    Shared with the claim ordering, which puts the same name in the sentence
+    explaining why one claim is a fallback to another.
+    """
+    return claim_order.plain(name)
 
 
 def short_source(url):
@@ -948,8 +1040,13 @@ def render_lineup(conn, force=False):
 BUSY_JS = """
 document.addEventListener('submit', function (e) {
   document.body.classList.add('busy');
-  var button = e.target.querySelector('button');
-  if (button) { button.disabled = true; button.textContent = 'Working...'; }
+  var button = e.submitter || e.target.querySelector('button');
+  // The arrows that reorder claims sit two to a form and are too small to
+  // hold a word, so they keep their glyph and only the page goes busy.
+  if (button && !button.classList.contains('movebtn')) {
+    button.disabled = true;
+    button.textContent = 'Working...';
+  }
 });
 document.addEventListener('click', function (e) {
   var link = e.target.closest('nav a');
@@ -1612,6 +1709,49 @@ class Handler(BaseHTTPRequestHandler):
                 conn.close()
             self.send_response(303)
             self.send_header("Location", "/trades")
+            self.end_headers()
+            return
+
+        if path == "/fallback":
+            if not self._authed():
+                self.send_response(303)
+                self.send_header("Location", "/login")
+                self.end_headers()
+                return
+            form = parse_qs(self.rfile.read(length).decode("utf-8"))
+            pid = (form.get("id") or [None])[0]
+            conn = self._conn()
+            try:
+                try:
+                    st.add_fallback(conn, int(pid))
+                except (TypeError, ValueError):
+                    pass
+            finally:
+                conn.close()
+            self.send_response(303)
+            self.send_header("Location", "/")
+            self.end_headers()
+            return
+
+        if path == "/order":
+            if not self._authed():
+                self.send_response(303)
+                self.send_header("Location", "/login")
+                self.end_headers()
+                return
+            form = parse_qs(self.rfile.read(length).decode("utf-8"))
+            pid = (form.get("id") or [None])[0]
+            direction = (form.get("dir") or [""])[0]
+            conn = self._conn()
+            try:
+                try:
+                    st.reorder(conn, int(pid), direction)
+                except (TypeError, ValueError):
+                    pass  # a mangled form moves nothing
+            finally:
+                conn.close()
+            self.send_response(303)
+            self.send_header("Location", "/")
             self.end_headers()
             return
 

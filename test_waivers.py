@@ -157,17 +157,24 @@ class Drops(unittest.TestCase):
                 st.proposals_for_run(conn, st.latest_run(conn)["id"])]
         self.assertEqual(bids, [12, 7, 4])
 
-    def test_claims_sharing_a_drop_are_called_alternatives(self):
-        # Whichever wins first takes him, so the others cannot go through
-        # and the budget total above is the worst case.
-        html = webapp.render(self.build({}, {})).decode()
-        self.assertIn("at most one can land", html)
+    def body(self, *overrides):
+        """The page without its stylesheet, which names every class."""
+        return webapp.render(self.build(*overrides)).decode().split(
+            "</style></head>")[1]
+
+    def test_claims_sharing_a_drop_are_called_fallbacks(self):
+        # Whichever is higher in the queue takes him, so the one below only
+        # lands if it fails and the budget total above is the worst case.
+        body = self.body({}, {})
+        self.assertIn("is a fallback that only runs if the claim above it "
+                      "fails", body)
+        self.assertIn("Fallback", body)
 
     def test_distinct_drops_are_not_flagged(self):
-        html = webapp.render(self.build(
-            {}, {"drop_player_id": "d2",
-                 "drop_player_name": "Alec Pierce (IND WR)"})).decode()
-        self.assertNotIn("at most one can land", html)
+        body = self.body({}, {"drop_player_id": "d2",
+                              "drop_player_name": "Alec Pierce (IND WR)"})
+        self.assertNotIn("fallback that only runs", body)
+        self.assertNotIn("Fallback", body)
 
 
 class Candidates(unittest.TestCase):
@@ -216,6 +223,43 @@ class Candidates(unittest.TestCase):
                  in self.candidates(protect={"untouchable"})]
         self.assertNotIn("Untouchable", names)
         self.assertEqual(len(names), 3)
+
+
+class Starters(unittest.TestCase):
+    """Dropping a starter is offered, so it must also be allowed through."""
+
+    ROSTERS = [{"owner_id": "me", "roster_id": 1, "starters": ["s1"],
+                "players": ["s1", "b1"],
+                "settings": {"waiver_budget_used": 0}}]
+
+    def setUp(self):
+        import sleeper_client as sc
+        self.real = sc.league_rosters
+        sc.league_rosters = lambda _lid: self.ROSTERS
+
+    def tearDown(self):
+        import sleeper_client as sc
+        sc.league_rosters = self.real
+
+    def preflight(self, drop):
+        import claim_safety as cs
+        return cs.preflight({"league_id": "1", "add_player_id": "new",
+                             "add_player_name": "Kaelon Black (IND RB)",
+                             "drop_player_id": drop, "drop_player_name": drop,
+                             "bid": 3, "max_bid": 100}, "me")
+
+    def test_a_starter_you_chose_is_not_refused(self):
+        ok, why = self.preflight("s1")
+        self.assertTrue(ok)
+        self.assertIn("as approved", why)
+
+    def test_a_bench_drop_says_nothing_extra(self):
+        self.assertEqual(self.preflight("b1"), (True, "ok"))
+
+    def test_somebody_who_left_your_roster_is_still_refused(self):
+        ok, why = self.preflight("gone")
+        self.assertFalse(ok)
+        self.assertIn("no longer on your roster", why)
 
 
 if __name__ == "__main__":

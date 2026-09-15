@@ -37,6 +37,7 @@ import json
 import sys
 from pathlib import Path
 
+import claim_order
 import claim_safety as cs
 import cloud_client as cloud
 import localenv
@@ -525,17 +526,28 @@ def run(conn, user_id, week, dry_run, limit, mode='auto'):
         return 0
     print(f"{len(rows)} approved claim(s) waiting.")
 
+    rows = claim_order.submission_order(rows)
+    fallbacks = {}
+    for group in claim_order.by_league(rows).values():
+        fallbacks.update(claim_order.blockers(group))
+
     checked = []
     for r in rows[:limit] if limit else rows:
         ok, why = cs.preflight(r, user_id)
         mark = "ok   " if ok else "BLOCK"
         print(f"  {mark} {r['league_name']}: ADD {clean_name(r['add_player_name'])}"
               f" / DROP {clean_name(r['drop_player_name'])} bid {r['bid']}")
+        if r["id"] in fallbacks:
+            above, reason = fallbacks[r["id"]]
+            print(f"        fallback to {clean_name(above['add_player_name'])}"
+                  f" ({reason})")
         if not ok:
             print(f"        {why}")
             st.log(conn, "preflight_blocked", why, r["id"])
             conn.commit()
         else:
+            if why != "ok":
+                print(f"        note: {why}")
             checked.append(r)
     if not checked:
         print("\nNothing passed pre-flight; nothing to place.")
@@ -549,6 +561,10 @@ def run(conn, user_id, week, dry_run, limit, mode='auto'):
         attached = ctx.browser is not None and not str(
             getattr(ctx, "_user_data_dir", "") or "")
         page = ctx.pages[0] if ctx.pages else ctx.new_page()
+        # In order, and one at a time. A new claim joins the bottom of your
+        # queue in the league, so the sequence they are placed in here is
+        # the sequence the league works down - which is what makes the one
+        # below a fallback rather than a duplicate.
         for r in checked:
             print(f"\n{clean_name(r['add_player_name'])} in {r['league_name']}:")
             # In prepare mode the form is filled but you press Confirm, so the

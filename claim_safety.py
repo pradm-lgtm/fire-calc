@@ -99,9 +99,15 @@ def preflight(proposal, user_id, players=None):
             return False, (f"{proposal['drop_player_name']} is on your "
                            "never-drop list")
 
+    note = "ok"
     if drop_id and drop_id in {str(p) for p in (mine.get("starters") or []) if p}:
-        return False, (f"{proposal['drop_player_name']} is in your starting "
-                       "lineup — refusing to drop a starter")
+        # Not a refusal any more. The drop is chosen by name on the approval
+        # page, starters included, because dropping one is normal when the
+        # man you are adding is better than him. Refusing it here would
+        # overrule the decision the whole system exists to record - but it
+        # is worth saying out loud before the claim goes in.
+        note = (f"{proposal['drop_player_name']} is in your starting lineup "
+                "— dropping a starter, as approved")
 
     bid = proposal["bid"]
     if bid is not None:
@@ -114,7 +120,7 @@ def preflight(proposal, user_id, players=None):
                 return False, f"bid {bid} exceeds the {left} FAAB you have left"
         if bid < 0:
             return False, "negative bid"
-    return True, "ok"
+    return True, note
 
 
 def verify_submitted(conn, proposal, user_id, week):
@@ -128,19 +134,28 @@ def verify_submitted(conn, proposal, user_id, week):
     roster_id = my_roster_id(league_id, user_id)
     add_id = str(proposal["add_player_id"])
 
+    want_drop = (str(proposal["drop_player_id"])
+                 if proposal["drop_player_id"] else None)
+    mine = []
     for claim in pending_claims(league_id, week):
         if roster_id is not None and roster_id not in claim["roster_ids"]:
             continue
         if add_id not in {str(k) for k in claim["adds"]}:
             continue
+        mine.append(claim)
+
+    # A fallback shares its add with the claim above it, so the player alone
+    # no longer identifies a claim. Match the drop too where we can, and only
+    # fall back to add-only when nothing matches both.
+    exact = [c for c in mine
+             if want_drop and want_drop in {str(k) for k in c["drops"]}]
+    for claim in (exact or mine):
         detail = f"pending claim {claim['transaction_id']}"
         if claim["bid"] is not None:
             detail += f", bid {claim['bid']}"
             if proposal["bid"] is not None and claim["bid"] != proposal["bid"]:
                 detail += f" (approved {proposal['bid']} — MISMATCH)"
         drops = {str(k) for k in claim["drops"]}
-        want_drop = (str(proposal["drop_player_id"])
-                     if proposal["drop_player_id"] else None)
         if want_drop and want_drop not in drops:
             detail += "; drop does not match what was approved"
         return True, detail + " (week %s)" % claim["week"]
