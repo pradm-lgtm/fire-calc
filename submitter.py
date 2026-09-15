@@ -654,7 +654,7 @@ def do_watch(args):
     user = sc.resolve_user(args.username)
     conn = st.connect(args.db)
     try:
-        code = run(conn, user["user_id"], state.get("week") or 1,
+        code = run(conn, user["user_id"], sc.current_week(state),
                    False, args.limit, "auto")
         detail = "placed what was approved" if code == 0 else \
                  "finished with problems; see logs/submit.log"
@@ -726,7 +726,7 @@ def main():
 
     try:
         state = sc.current_state()
-        week = state.get("week") or 1
+        week = sc.current_week(state)
         user = sc.resolve_user(args.username)
     except sc.SleeperError as e:
         print(f"ERROR: {e}")

@@ -89,6 +89,26 @@ def current_state():
     return get("/state/nfl") or {}
 
 
+def current_week(state=None):
+    """The week to plan for, not the one just played.
+
+    Sleeper carries both. `week` is the scoring week and only advances on
+    Tuesday, so all Monday it still names the week whose games just
+    finished; `display_week` is what the app itself shows you and is the one
+    you are setting a lineup and bidding for. Reading the wrong one made the
+    waiver job hunt for last week's articles while the analysts had already
+    published this week's.
+    """
+    state = current_state() if state is None else state
+    for key in ("display_week", "week"):
+        value = state.get(key)
+        if isinstance(value, int) and value > 0:
+            return value
+        if isinstance(value, str) and value.isdigit() and int(value) > 0:
+            return int(value)
+    return 1
+
+
 def resolve_user(username):
     user = get(f"/user/{urllib.parse.quote(username, safe='')}")
     if not user or not user.get("user_id"):
@@ -288,7 +308,7 @@ def main():
     try:
         state = current_state()
         season = state.get("season") or str(time.gmtime().tm_year)
-        week = state.get("week") or 1
+        week = current_week(state)
         print(f"NFL {season}, week {week} ({state.get('season_type', '?')})")
 
         user = resolve_user(username)

@@ -107,7 +107,7 @@ def board(username, week_no=None):
     """Every league's current matchup, best effort per league."""
     state = sc.current_state()
     season = state.get("season")
-    week_no = week_no or state.get("week") or 1
+    week_no = week_no or sc.current_week(state)
     user = sc.resolve_user(username)
     players = sc.all_players()
     week = nfl_week.week_context(season, week_no)
@@ -150,7 +150,7 @@ def explain(username):
     from datetime import datetime, timezone
 
     state = sc.current_state()
-    season, week_no = state.get("season"), state.get("week") or 1
+    season, week_no = state.get("season"), sc.current_week(state)
     week = nfl_week.week_context(season, week_no)
     print(f"week {week_no}: {len(week['kickoffs'])} kickoff times, "
           f"{len(week['games'])} opponents, {len(week['points'])} projections")

@@ -405,7 +405,7 @@ def check(username, week=None, urls=(), verbose=True):
     """
     state = sc.current_state()
     season = state.get("season")
-    week = week or state.get("week") or 1
+    week = week or sc.current_week(state)
     players = sc.all_players()
 
     # Context for the page, never for the verdict: a missing opponent or

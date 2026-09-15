@@ -187,7 +187,7 @@ def _run(username, urls, moves, dry_run, db_path, force=False,
          update=False):
     try:
         state = sc.current_state()
-        season, week = state.get("season"), state.get("week") or 1
+        season, week = state.get("season"), sc.current_week(state)
         print(f"NFL {season}, week {week}")
 
         print("Finding this week's articles...")

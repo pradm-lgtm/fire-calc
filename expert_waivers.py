@@ -421,7 +421,7 @@ def main():
 
     try:
         state = sc.current_state()
-        season, week = state.get("season"), state.get("week") or 1
+        season, week = state.get("season"), sc.current_week(state)
         print(f"NFL {season}, week {week}")
         user = sc.resolve_user(username)
         leagues = sc.user_leagues(user["user_id"], season)

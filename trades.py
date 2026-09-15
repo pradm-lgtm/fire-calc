@@ -405,7 +405,7 @@ def league_offers(league, user_id, players, values, protect=()):
 def board(username, league_filter=None, protect=()):
     state = sc.current_state()
     season = state.get("season")
-    week = state.get("week") or 1
+    week = sc.current_week(state)
     user = sc.resolve_user(username)
     players = sc.all_players()
     bye_weeks = nfl_week.byes(season)
