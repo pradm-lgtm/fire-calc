@@ -1215,9 +1215,25 @@ class Handler(BaseHTTPRequestHandler):
             # after login, where the failure looks like a broken site.
             try:
                 conn = self._conn()
-                conn.execute("SELECT 1")
+                # What is actually in the database the page reads. "The job
+                # said it wrote six" and "the page shows none" have to be
+                # answerable without guessing which end is wrong.
+                counts = []
+                for label, table in (("runs", "runs"),
+                                     ("proposals", "proposals"),
+                                     ("lineup checks", "lineup_checks"),
+                                     ("trade runs", "trade_runs")):
+                    try:
+                        row = conn.execute(
+                            f"SELECT COUNT(*) AS n FROM {table}").fetchone()
+                        counts.append(f"{row['n']} {label}")
+                    except Exception:
+                        counts.append(f"no {label} table")
                 conn.close()
                 state = "ok"
+                if self._authed() or auth.check_api_token(
+                        self.headers.get("Authorization")):
+                    state += " — " + ", ".join(counts)
             except Exception as exc:
                 traceback.print_exc()
                 # The type alone named three different faults across three
