@@ -287,6 +287,7 @@ label { font-size:13px; color:var(--muted); }
 .trouble { border-color:var(--urgent); }
 .trouble code { font-size:12.5px; background:var(--bg); padding:2px 5px;
                 border-radius:5px; }
+.outcome { font-size:13.5px; color:var(--ink); margin:10px 0 0; }
 .empty { color:var(--muted); padding:20px 0; }
 .bar { display:flex; flex-wrap:wrap; gap:4px 14px;
        background:var(--card); border:1px solid var(--line); border-radius:10px;
@@ -580,22 +581,29 @@ def submit_panel(conn, ready):
     that does have a browser picks it up within the minute.
     """
     last = st.last_submit_request(conn)
-    note = ""
+    note, trouble = "", False
     if last:
         if last["finished_at"]:
-            note = (f"Last run {e(said_ago(age_of_field(last, 'finished_at')))}"
-                    f": {e(last['detail'] or 'done')}")
+            # These claims are still approved and unplaced, and the attempt
+            # to place them is over: whatever it says, it did not work. Said
+            # plainly, because the alternative is pressing the button again
+            # and watching nothing happen.
+            when = e(said_ago(age_of_field(last, "finished_at")))
+            note = (f"The attempt {when} did not place them: "
+                    f"{e(last['detail'] or 'no reason given')}")
+            trouble = True
         elif last["claimed_at"]:
             note = "Your Mac is placing them now."
         else:
-            note = ("Waiting for your Mac to pick this up. It has to be awake "
-                    "and signed in to Sleeper.")
+            note = ("Waiting for your Mac to pick this up. It has to be awake, "
+                    "with Chrome open and signed in to Sleeper.")
     waiting = last and not last["finished_at"]
-    return ("<div class='card panel'>"
+    return (f"<div class='card panel{' trouble' if trouble else ''}'>"
             f"<p class='paneltop'>{len(ready)} claim"
             f"{'s' if len(ready) != 1 else ''} approved and not yet placed</p>"
             + running_order(ready)
-            + (f"<p class='why'>{note}</p>" if note else "")
+            + (f"<p class='{'outcome' if trouble else 'why'}'>{note}</p>"
+               if note else "")
             + ("" if waiting else
                "<form method='post' action='/submit'>"
                "<button class='primary wide'>"

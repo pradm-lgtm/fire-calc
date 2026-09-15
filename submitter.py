@@ -166,6 +166,72 @@ def browser_context(pw, headed=True):
     return pw.chromium.launch_persistent_context(**kwargs)
 
 
+NEEDS_LOGIN = 2          # nothing was attempted; a person has to sign in
+
+# What the last run of the submitter would tell the page, if it could. A
+# return code says whether to try again; this says what to put in front of
+# the person, and "finished with problems; see the log" is not that.
+_last_detail = ""
+
+
+def last_detail(default=""):
+    return _last_detail or default
+
+
+def _note(detail):
+    global _last_detail
+    _last_detail = detail
+    return detail
+
+
+def signed_in(page, sel):
+    """(True, "") when a Sleeper session is live, (False, why) when plainly not.
+
+    Only a positive signal counts as signed out. A false alarm here stops a
+    submission that would have worked, which is worse than letting a claim
+    fail further in and say so.
+    """
+    try:
+        page.goto(sel.get("home_url") or "https://sleeper.com/leagues",
+                  wait_until="domcontentloaded", timeout=30000)
+        page.wait_for_timeout(1500)
+    except Exception as exc:
+        return False, f"could not open sleeper.com ({type(exc).__name__})"
+    if "/login" in (page.url or ""):
+        return False, "Sleeper sent us to its log-in page"
+    marker = sel.get("signed_out_marker")
+    if marker:
+        try:
+            if page.locator(marker).count():
+                return False, "Sleeper is showing its log-in screen"
+        except Exception:
+            pass  # a selector that no longer matches is not evidence
+    return True, ""
+
+
+def ask_for_login(why):
+    """Open a Chrome that will still be there when you get to it, and say so.
+
+    What used to happen: with nothing listening on the debugging port, a
+    throwaway browser profile was launched with nobody signed into it, the
+    claim failed against a logged-out Sleeper, and the window closed on the
+    way out. From the outside that is a window that opens and vanishes.
+
+    This Chrome is a detached process with a profile of its own, so it
+    outlives this run and remembers the login for the next one.
+    """
+    print(f"Not signed in to Sleeper: {why}.")
+    print()
+    started = start_chrome()
+    if started:
+        print()
+        print("Sign in as yourself in that window and leave it open.")
+        print("Then press the button on the page again.")
+    return (f"you are not signed in to Sleeper ({why}). A Chrome window is "
+            "open on sleeper.com - sign in there, leave it open, and press "
+            "the button again.")
+
+
 def do_login(pw):
     """Start Chrome for the user and confirm the attach works."""
     print("This tool never logs in for you: Sleeper challenges automated")
@@ -511,6 +577,7 @@ def clean_name(label):
 
 
 def run(conn, user_id, week, dry_run, limit, mode='auto'):
+    _note("")
     remote = cloud.configured()
     if remote:
         print(f"Reading approved claims from {cloud.base_url()}")
@@ -523,6 +590,7 @@ def run(conn, user_id, week, dry_run, limit, mode='auto'):
         rows = st.approved_unsubmitted(conn)
     if not rows:
         print("Nothing approved and waiting. Approve proposals on the page first.")
+        _note("nothing was approved, so there was nothing to place")
         return 0
     print(f"{len(rows)} approved claim(s) waiting.")
 
@@ -551,16 +619,32 @@ def run(conn, user_id, week, dry_run, limit, mode='auto'):
             checked.append(r)
     if not checked:
         print("\nNothing passed pre-flight; nothing to place.")
+        _note("nothing passed pre-flight - the adds or drops have moved since "
+              "they were approved")
         return 1
 
     from playwright.sync_api import sync_playwright
     sel = load_selectors()
     placed = 0
     with sync_playwright() as pw:
-        ctx = browser_context(pw, headed=True)
-        attached = ctx.browser is not None and not str(
-            getattr(ctx, "_user_data_dir", "") or "")
+        # Only ever your own Chrome. A browser this launches has no Sleeper
+        # session in it and dies with the process, so falling back to one
+        # gets a window that opens, fails and disappears.
+        try:
+            ctx = attach(pw)
+        except Exception:
+            print(f"Nothing is listening on {CDP_URL}, so there is no signed-in"
+                  " browser to work in.")
+            print()
+            _note(ask_for_login("no browser was attached"))
+            return NEEDS_LOGIN
+        attached = True
         page = ctx.pages[0] if ctx.pages else ctx.new_page()
+
+        ok, why = signed_in(page, sel)
+        if not ok:
+            _note(ask_for_login(why))
+            return NEEDS_LOGIN
         # In order, and one at a time. A new claim joins the bottom of your
         # queue in the league, so the sequence they are placed in here is
         # the sequence the league works down - which is what makes the one
@@ -617,6 +701,7 @@ def run(conn, user_id, week, dry_run, limit, mode='auto'):
         print("\nDry run only. Nothing was submitted. Re-run with --submit "
               "once the screenshots look right.")
     else:
+        _note(f"placed {placed} of {len(checked)} approved claim(s)")
         print(f"\n{placed} claim(s) confirmed present in their leagues.")
         print("They stay pending until Sleeper processes waivers, so you can "
               "review or cancel them in the app until then.")
@@ -672,8 +757,9 @@ def do_watch(args):
     try:
         code = run(conn, user["user_id"], sc.current_week(state),
                    False, args.limit, "auto")
-        detail = "placed what was approved" if code == 0 else \
-                 "finished with problems; see logs/submit.log"
+        detail = last_detail(
+            "placed what was approved" if code == 0 else
+            "finished with problems; see logs/submit.log")
     except Exception as exc:
         code, detail = 1, f"{type(exc).__name__}: {exc}"
         print(detail)

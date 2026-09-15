@@ -457,7 +457,7 @@ class SubmitButton(unittest.TestCase):
         st.ask_to_submit(conn)
         html = webapp.render(conn).decode()
         self.assertNotIn("Place them in Sleeper now", html)
-        self.assertIn("awake and signed in", html)
+        self.assertIn("awake, with Chrome open and signed in", html)
 
     def test_a_finished_run_reports_back_on_the_page(self):
         import store as st

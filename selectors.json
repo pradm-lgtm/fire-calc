@@ -9,6 +9,8 @@
   "sleeper": {
     "league_url": "https://sleeper.com/leagues/{league_id}/team",
     "players_url": "https://sleeper.com/leagues/{league_id}/players",
+    "home_url": "https://sleeper.com/leagues",
+    "signed_out_marker": "text=/^\\s*(log ?in|sign ?in|get started|continue with)\\s*$/i",
     "search_box": "input[placeholder*='Find player' i]",
     "player_row": "div.scrolled-name:text-is('{abbrev}')",
     "claim_button": "a.player-action-button.waiver",
@@ -26,7 +28,11 @@
       "Name forms differ by context: the players table abbreviates",
       "(T. Ferguson), the claim dialog does not (Woody Marks).",
       "Re-check after a redesign with:",
-      "  python3 submitter.py USER --probe LEAGUE_ID --player 'Full Name'"
+      "  python3 submitter.py USER --probe LEAGUE_ID --player 'Full Name'",
+      "home_url and signed_out_marker are how we tell a live session from a",
+      "logged-out one before touching a claim. The marker must only match the",
+      "log-in screen: a false match here stops a submission that would have",
+      "worked, so it is deliberately anchored to whole, short labels."
     ]
   }
 }

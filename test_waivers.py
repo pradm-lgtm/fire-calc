@@ -366,6 +366,48 @@ class Staleness(unittest.TestCase):
         self.assertIsNone(webapp.run_summary(conn)["last_refresh_failure"])
 
 
+class Submitting(unittest.TestCase):
+    """What the panel says after the Mac has had a go."""
+
+    def build(self):
+        conn = st.connect(":memory:")
+        run = st.start_run(conn, "2026", 3, ["ESPN"])
+        pid = st.add_proposal(conn, run, league_id="1", league_name="LEHG",
+                              add_player_id="a",
+                              add_player_name="Add Him (SF RB)",
+                              add_position="RB", drop_player_id="d",
+                              drop_player_name="Cut Him (GB RB)",
+                              drop_position="RB", bid=4, max_bid=100,
+                              consensus=1, sources=[], rationale="", quote="",
+                              drop_options=[])
+        st.decide(conn, pid, st.APPROVED, bid=4)
+        return conn
+
+    def test_before_anything_happens_it_says_what_is_needed(self):
+        conn = self.build()
+        st.ask_to_submit(conn)
+        body = webapp.render(conn).decode()
+        self.assertIn("signed in to Sleeper", body)
+
+    def test_a_finished_attempt_with_the_claims_still_here_is_a_failure(self):
+        # The claims are approved and unplaced and the attempt is over, so
+        # whatever it reported, it did not work.
+        conn = self.build()
+        req = st.ask_to_submit(conn)
+        st.claim_submit_request(conn, req)
+        st.finish_submit_request(conn, req,
+                                 "you are not signed in to Sleeper")
+        body = webapp.render(conn).decode()
+        self.assertIn("did not place them", body)
+        self.assertIn("not signed in to Sleeper", body)
+
+    def test_a_run_in_progress_says_so(self):
+        conn = self.build()
+        req = st.ask_to_submit(conn)
+        st.claim_submit_request(conn, req)
+        self.assertIn("placing them now", webapp.render(conn).decode())
+
+
 class Candidates(unittest.TestCase):
     """Who is offered as a drop."""
 
