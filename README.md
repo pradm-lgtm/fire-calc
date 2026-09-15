@@ -162,8 +162,11 @@ beside it, and each league's budget line says what approving every pending
 bid would leave.
 
 So is the drop. Whether anyone is worth dropping decides whether the add is
-worth bidding on at all, so every plausible drop is offered on the card with
-a reason beside it — how many you roster at that position, whether that is
+worth bidding on at all, so your whole roster is offered on the card —
+starters included, since dropping one is normal when the man you are adding
+is better, with the bench listed first and a starter marked as one. The
+never-drop list is the single exclusion, because that is the one place you
+said no in advance. Each option carries a reason — how many you roster at that position, whether that is
 more than you start, whether he is hurt — rather than one being chosen for
 you out of sight. Two claims that drop the same player are alternatives:
 whichever lands first takes him, so at most one can go through, and the

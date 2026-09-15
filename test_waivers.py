@@ -170,5 +170,53 @@ class Drops(unittest.TestCase):
         self.assertNotIn("at most one can land", html)
 
 
+class Candidates(unittest.TestCase):
+    """Who is offered as a drop."""
+
+    PLAYERS = {
+        "s1": {"full_name": "My Starter", "position": "RB", "team": "GB"},
+        "s2": {"full_name": "Untouchable", "position": "QB", "team": "CHI"},
+        "b1": {"full_name": "Bench One", "position": "WR", "team": "NYJ"},
+        "b2": {"full_name": "Bench Two", "position": "WR", "team": "LV"},
+    }
+    ROSTER = {"starters": ["s1", "s2"], "players": ["s1", "s2", "b1", "b2"]}
+    DEPTH = {"RB": (1, 2.3, "thin"), "QB": (1, 1.0, "ok"),
+             "WR": (2, 2.3, "deep")}
+
+    def candidates(self, protect=None):
+        import expert_waivers as ew
+        import waiver_analyzer as wa
+        real = wa.never_drop_names
+        wa.never_drop_names = lambda: protect or set()
+        try:
+            return ew.drop_candidates(self.ROSTER, self.PLAYERS, {}, self.DEPTH)
+        finally:
+            wa.never_drop_names = real
+
+    def test_starters_are_offered_too(self):
+        # Dropping a starter is normal when the man you are adding is
+        # better than him.
+        names = [p["full_name"] for _r, _s, _p, p, _l, _st in self.candidates()]
+        self.assertIn("My Starter", names)
+        self.assertIn("Bench One", names)
+        self.assertEqual(len(names), 4)
+
+    def test_bench_players_come_before_starters(self):
+        rows = self.candidates()
+        starting = [row[5] for row in rows]
+        self.assertEqual(starting, sorted(starting))
+
+    def test_a_starter_is_marked_as_one(self):
+        rows = {row[2]: row[5] for row in self.candidates()}
+        self.assertTrue(rows["s1"])
+        self.assertFalse(rows["b1"])
+
+    def test_the_never_drop_list_is_the_one_exclusion(self):
+        names = [p["full_name"] for _r, _s, _p, p, _l, _st
+                 in self.candidates(protect={"untouchable"})]
+        self.assertNotIn("Untouchable", names)
+        self.assertEqual(len(names), 3)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

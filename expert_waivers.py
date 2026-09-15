@@ -157,6 +157,34 @@ def positional_depth(league, roster, players):
     return depth
 
 
+def drop_candidates(roster, players, trending, depth):
+    """Everyone you could cut, weakest first.
+
+    The whole roster, not just the bench: dropping a starter is a normal
+    thing to do when the man you are adding is better than him. Only the
+    never-drop list is held back, because that is the one place you have
+    said no in advance.
+    """
+    starters, bench = sc.split_roster(roster)
+    starting = {str(p) for p in starters}
+    protected = wa.never_drop_names()
+
+    ranked = []
+    for pid in list(bench) + list(starters):
+        pid = str(pid)
+        player = players.get(pid)
+        if not player or wa.is_protected(player, protected):
+            continue
+        score = wa.score_player(player, trending.get(pid, 0))
+        label = depth.get(player.get("position"), (0, 0, "ok"))[2]
+        penalty = {"thin": 1000, "ok": 100, "deep": 0, "extra": 0}.get(label, 100)
+        # A starter sorts below every bench player, and is still offered.
+        ranked.append((score + penalty + (5000 if pid in starting else 0),
+                       score, pid, player, label, pid in starting))
+    ranked.sort(key=lambda row: row[0])
+    return ranked
+
+
 def choose_drop(roster, players, trending, depth, protect_ids):
     """Weakest bench player, preferring positions with surplus depth.
 

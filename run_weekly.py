@@ -108,15 +108,17 @@ def proposals_for_league(league, user_id, players, trending, texts, max_moves):
         if not drops:
             break
         _, drop_score, drop_pid, drop_player, drop_label = drops[0]
-        # Every plausible drop, not only the one it picked. Whether there is
-        # anyone worth dropping is half the decision, and it was being made
-        # for you out of sight.
+        # Everyone you could cut, not only the bench and not only the one it
+        # picked. Whether there is anyone worth dropping is half the
+        # decision, and it was being made for you out of sight.
         options = [{
             "id": pid,
             "name": sc.player_label(players, pid),
             "position": p.get("position"),
-            "why": drop_reason(p, label, depth),
-        } for _rank, _score, pid, p, label in drops[:6]]
+            "starter": starts,
+            "why": drop_reason(p, label, depth, starts),
+        } for _rank, _score, pid, p, label, starts
+            in ew.drop_candidates(mine, players, trending, depth)]
         add_score = wa.score_player(players.get(pid, {}), trending.get(pid, 0))
         if drop_score > add_score * 1.5:
             break
@@ -164,18 +166,23 @@ def proposals_for_league(league, user_id, players, trending, texts, max_moves):
     return out
 
 
-def drop_reason(player, label, depth):
+def drop_reason(player, label, depth, starting=False):
     """Why this player is or is not a sensible thing to cut."""
     pos = player.get("position") or "?"
     hurt = (player.get("injury_status") or "").strip()
     have = depth.get(pos, (0, 0, label))[0]
+    bits = [pos]
+    if starting:
+        bits.append("you are starting him")
     if hurt:
-        return f"{pos} &middot; {hurt}"
-    if label == "thin":
-        return f"{pos} &middot; only {have} on your roster"
-    if label in ("deep", "extra"):
-        return f"{pos} &middot; {have} rostered, more than you start"
-    return f"{pos} &middot; {have} rostered"
+        bits.append(hurt)
+    elif label == "thin":
+        bits.append(f"only {have} on your roster")
+    elif label in ("deep", "extra"):
+        bits.append(f"{have} rostered, more than you start")
+    else:
+        bits.append(f"{have} rostered")
+    return " &middot; ".join(bits)
 
 
 def main_for(username, db_path, moves=3, force=False):
