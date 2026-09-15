@@ -52,7 +52,39 @@ def looks_like_transcript(text):
     return points >= 3, "; ".join(reasons)
 
 
-def check(url, players, gazetteer, debug=False):
+def follow(url, players, gazetteer, debug=False, limit=2):
+    """Test what a hub links to, the way the weekly job uses it.
+
+    A stable page carries listings; the advice is in the article it points
+    at. Judging the hub on its own text calls a working source unusable,
+    which is what it did to both sources already in sources.json.
+    """
+    import source_discovery as sd
+
+    try:
+        found = sd.discover(url, limit=limit)
+    except Exception as exc:
+        print(f"  could not follow its links: {type(exc).__name__}: {exc}")
+        found = []
+    if not found:
+        print("  VERDICT: unusable — nothing in the page and no waiver")
+        print("  article to follow. A paywall teaser or a page of listings")
+        print("  whose links this does not recognise.")
+        return False
+
+    print(f"  found {len(found)} article(s) to follow:")
+    usable = False
+    for _rank, link, title in found:
+        print(f"    -> {(title or link)[:64]}")
+        if check(link, players, gazetteer, debug, followed=True):
+            usable = True
+    if not usable:
+        print(f"\n  VERDICT for {url}: unusable — its articles carry no")
+        print("  recommendations either.")
+    return usable
+
+
+def check(url, players, gazetteer, debug=False, followed=False):
     print(f"\n{'=' * 70}\n{url}\n{'=' * 70}")
     text = ew.fetch_url(url)
     if not text:
@@ -77,9 +109,12 @@ def check(url, players, gazetteer, debug=False):
           f"{len(with_faab)} with a FAAB figure")
 
     if not recs:
-        print("  VERDICT: unusable — no recommendations parsed.")
-        print("  Likely a paywall teaser, a link hub, or a table-only page.")
-        return False
+        if followed:
+            print("  VERDICT: unusable — no recommendations parsed.")
+            print("  Likely a paywall teaser or a table-only page.")
+            return False
+        print("  no recommendations in the page itself.")
+        return follow(url, players, gazetteer, debug)
 
     for pid, info in list(recs.items())[:8]:
         faab = f"{info['faab']}%" if info["faab"] is not None else "n/a"
@@ -108,6 +143,14 @@ def check(url, players, gazetteer, debug=False):
         print("  WRITTEN waiver column instead.")
     elif words < 400:
         print("  VERDICT: marginal — very little text; likely a teaser.")
+    elif len(recs) < 4 and not followed:
+        # A hub is meant to be thin. Both working sources score like this on
+        # their own text and earn their place through what they link to, so
+        # judging a hub by its own page is judging the wrong page.
+        print("  few recommendations in the page itself — following its links,")
+        print("  which is what the weekly job does with a hub.")
+        follow(url, players, gazetteer, debug)
+        return True
     elif len(recs) < 4:
         print("  VERDICT: marginal — few recommendations found.")
     elif not with_faab:
