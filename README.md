@@ -343,6 +343,14 @@ which is why the same code needs no `.env` on Vercel or in Actions.
 `submitter.py` then reads approved claims from the host instead of a local
 file, and reports back what happened.
 
+It is not scheduled by default. Filing proposals is reading; placing claims
+reaches into a league, and starting that on a timer should be a decision made
+once rather than a default inherited. `install_schedule.py --submit` schedules
+it for Tuesday evening, before waivers process overnight. Either way it only
+ever reads claims already approved on the page, so an unattended run can do
+nothing you have not already agreed to — and it drives a real browser, so
+that Mac has to be awake and signed in to Sleeper.
+
 ### Storage
 
 `DATABASE_URL` decides the backend: set, it is Postgres; unset, a SQLite file

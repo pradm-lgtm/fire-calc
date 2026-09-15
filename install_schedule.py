@@ -7,13 +7,18 @@ Install the Tuesday job and the always-on approval page as launchd services.
     python3 install_schedule.py --status               # what is installed
     python3 install_schedule.py --uninstall            # remove both
 
-Two services, because "runs on its own" needs both halves:
+Three services, two of them on by default:
 
   weekly  fires Tuesday morning, gathers this week's articles, files
           proposals, then exits. Waivers process Wednesday overnight, so
           Tuesday morning leaves the whole day to review.
   web     keeps the approval page up, restarting it if it dies and starting
           it again at login, so the URL simply works when you open it.
+  submit  places the claims you approved, Tuesday evening by default. OFF
+          unless you ask for it with --submit, because filing proposals is
+          reading and placing claims reaches into a league. It only ever
+          reads claims already approved on the page, and needs Chrome
+          signed in to Sleeper and this Mac awake.
 
 launchd will not wake a sleeping Mac on its own. If the machine is asleep at
 the scheduled time the job runs when it next wakes, which for a Tuesday
@@ -32,6 +37,7 @@ HERE = Path(__file__).resolve().parent
 LAUNCH_DIR = Path.home() / "Library" / "LaunchAgents"
 WEEKLY_LABEL = "com.fantasyagent.weekly"
 WEB_LABEL = "com.fantasyagent.web"
+SUBMIT_LABEL = "com.fantasyagent.submit"
 DAYS = {"sun": 0, "mon": 1, "tue": 2, "wed": 3, "thu": 4, "fri": 5, "sat": 6}
 
 
@@ -48,6 +54,28 @@ def weekly_plist(username, weekday, hour, minute):
                                    "Minute": minute}],
         "StandardOutPath": str(HERE / "logs" / "weekly.log"),
         "StandardErrorPath": str(HERE / "logs" / "weekly.err"),
+        "RunAtLoad": False,
+    }
+
+
+def submit_plist(weekday, hour, minute):
+    """Place approved claims, on a schedule, shortly before waivers process.
+
+    Separate from the weekly job and off by default. Filing proposals is
+    reading; placing claims reaches into a league, and starting that on a
+    timer is a decision to make once rather than a default to inherit.
+
+    It only ever reads claims already approved on the page, so an unattended
+    run can do nothing you have not already agreed to.
+    """
+    return {
+        "Label": SUBMIT_LABEL,
+        "ProgramArguments": [python_bin(), str(HERE / "submitter.py")],
+        "WorkingDirectory": str(HERE),
+        "StartCalendarInterval": [{"Weekday": weekday, "Hour": hour,
+                                   "Minute": minute}],
+        "StandardOutPath": str(HERE / "logs" / "submit.log"),
+        "StandardErrorPath": str(HERE / "logs" / "submit.err"),
         "RunAtLoad": False,
     }
 
@@ -123,7 +151,7 @@ def reachable_urls(port):
 def status():
     out = subprocess.run(["launchctl", "list"], capture_output=True,
                          text=True).stdout
-    for label in (WEEKLY_LABEL, WEB_LABEL):
+    for label in (WEEKLY_LABEL, WEB_LABEL, SUBMIT_LABEL):
         installed = (LAUNCH_DIR / f"{label}.plist").exists()
         running = label in out
         print(f"  {label}: "
@@ -163,6 +191,12 @@ def main():
     ap.add_argument("--port", type=int, default=8777)
     ap.add_argument("--wake", action="store_true",
                     help="also schedule a system wake before the job")
+    ap.add_argument("--submit", action="store_true",
+                    help="also place approved claims on a schedule "
+                         "(off by default; it reaches into your leagues)")
+    ap.add_argument("--submit-day", default="tue", choices=sorted(DAYS))
+    ap.add_argument("--submit-hour", type=int, default=21)
+    ap.add_argument("--submit-minute", type=int, default=0)
     ap.add_argument("--status", action="store_true")
     ap.add_argument("--uninstall", action="store_true")
     args = ap.parse_args()
@@ -177,6 +211,7 @@ def main():
     if args.uninstall:
         unload(WEEKLY_LABEL)
         unload(WEB_LABEL)
+        unload(SUBMIT_LABEL)
         return 0
     if not args.user:
         print("Need --user YOUR_SLEEPER_USERNAME (or --status / --uninstall)")
@@ -186,6 +221,12 @@ def main():
     ok = write_and_load(WEEKLY_LABEL, weekly_plist(
         args.user, DAYS[args.day], args.hour, args.minute))
     ok &= write_and_load(WEB_LABEL, web_plist(args.host, args.port))
+    if args.submit:
+        ok &= write_and_load(SUBMIT_LABEL, submit_plist(
+            DAYS[args.submit_day], args.submit_hour, args.submit_minute))
+    else:
+        # Removed rather than left behind, so turning it off is one command.
+        unload(SUBMIT_LABEL)
 
     if args.wake:
         when = f"{args.day.upper()} {args.hour:02d}:{max(0, args.minute - 5):02d}:00"
@@ -204,6 +245,16 @@ def main():
               "from your phone.")
     print(f"Weekly job: {args.day.title()} {args.hour:02d}:{args.minute:02d}, "
           f"logging to logs/weekly.log")
+    if args.submit:
+        print(f"Submitter: {args.submit_day.title()} "
+              f"{args.submit_hour:02d}:{args.submit_minute:02d}, placing only "
+              "claims you have approved, logging to logs/submit.log")
+        print("  It drives Chrome, so that Mac has to be awake and signed in "
+              "to Sleeper.")
+    else:
+        print("Submitter: not scheduled. Approved claims wait for "
+              "`python3 submitter.py`.")
+        print("  Add --submit to have it place them Tuesday evening instead.")
     print("\nCheck anytime with:  python3 install_schedule.py --status")
     return 0 if ok else 1
 
