@@ -363,6 +363,63 @@ def usable_quote(sentence, other_names):
     return other_names <= MAX_OTHER_NAMES
 
 
+# A capitalised pair of words, which is what a player's name looks like in
+# running prose. Crude, and deliberately so: it is a counter, not a parser,
+# and it only has to tell a sentence about one man from a list of twelve.
+_NAME_LIKE = re.compile(r"\b[A-Z][a-z]+(?:\.[A-Z]\.)? [A-Z][a-z']+\b")
+
+# Words that start a sentence and read as a surname to the pattern above.
+_NOT_A_NAME = re.compile(
+    r"^(?:The|This|That|These|Those|His|Her|Their|It|He|She|They|And|But|"
+    r"After|Before|With|While|When|If|In|On|At|For|From|As|Week|Sunday|"
+    r"Monday|Tuesday|Wednesday|Thursday|Friday|Saturday)\b")
+
+
+# A bare surname in a run of them - "Ferguson, Holani, Johnson and Black".
+# On its own a capitalised word means little, but one sitting after a comma
+# or an "and" in a list is how these pages name a dozen players at once.
+_IN_A_LIST = re.compile(r"(?:,\s+|\band\s+)([A-Z][a-z']{2,})\b")
+
+
+def other_names_in(text, player_name):
+    """How many people other than this one the sentence names."""
+    own = {w.lower() for w in re.findall(r"[A-Za-z']+", player_name or "")}
+    found = set()
+    for match in _NAME_LIKE.finditer(text or ""):
+        phrase = match.group(0)
+        if _NOT_A_NAME.match(phrase):
+            continue
+        words = {w.lower() for w in re.findall(r"[A-Za-z']+", phrase)}
+        if words & own:
+            continue
+        found.add(words and sorted(words)[-1] or phrase)
+    for match in _IN_A_LIST.finditer(text or ""):
+        word = match.group(1)
+        if _NOT_A_NAME.match(word) or word.lower() in own:
+            continue
+        found.add(word.lower())
+    return len(found)
+
+
+def about(quote, player_name):
+    """Is this stored quote really about this player?
+
+    Checked again when the page is drawn, not only when the quote is taken.
+    A quote written to the database before this filter existed is still in
+    the database, and the first thing anyone reads on a card should not be
+    a ranking page's furniture naming eleven other men.
+    """
+    text = " ".join((quote or "").split())
+    if not text:
+        return False
+    surname = (player_name or "").split("(")[0].strip().split()
+    if not surname:
+        return False
+    if surname[-1].lower() not in text.lower():
+        return False
+    return usable_quote(text, other_names_in(text, player_name))
+
+
 def extract_recommendations(text, gazetteer, source=None, players=None,
                             trace=None):
     """{player_id: {faab, context, source}} for players this article recommends.

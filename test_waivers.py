@@ -12,6 +12,7 @@ import re
 import unittest
 
 import expert_extract as ex
+import run_weekly as rw
 import store as st
 import webapp
 
@@ -64,7 +65,19 @@ class Card(unittest.TestCase):
         return webapp.render(conn).decode()
 
     def test_no_write_up_says_so_instead_of_quoting_furniture(self):
-        self.assertIn("No write-up found for him", self.build())
+        self.assertIn("Limited recent coverage", self.build())
+
+    def test_a_stored_listing_is_refused_at_the_page_too(self):
+        # The quote was taken before the extractor learned to reject this,
+        # and it is still in the database.
+        html = self.build({"quote": LISTING})
+        self.assertNotIn("popular searches", html)
+        self.assertIn("Limited recent coverage", html)
+
+    def test_a_quote_about_somebody_else_is_refused(self):
+        html = self.build({"quote": "Alec Pierce cleared concussion protocol "
+                                    "and should be rostered everywhere."})
+        self.assertIn("Limited recent coverage", html)
 
     def test_a_real_write_up_is_shown(self):
         self.assertIn("eight targets", self.build({"quote": WRITEUP}))
@@ -73,7 +86,8 @@ class Card(unittest.TestCase):
         self.assertIn("WR is deep", self.build())
 
     def test_the_button_names_the_number_beside_it(self):
-        self.assertIn("Approve at 6", self.build())
+        self.assertIn("Approve at <span data-approve-bid>6</span>",
+                      self.build())
 
     def test_the_analyst_range_is_shown(self):
         self.assertIn("Analysts bid 3 to 11", self.build())
@@ -86,9 +100,10 @@ class Card(unittest.TestCase):
         # The number you need before approving three bids in one league is
         # what is left after all three, not what is left now.
         html = self.build({"bid": 6}, {"bid": 14}, {"bid": 4})
-        bar = re.search(r"class='bar'>(.*?)</div>", html).group(1)
-        self.assertIn("approving all 3 costs 24", bar)
-        self.assertIn("leaving <strong>76</strong>", bar)
+        bar = re.search(r"class='bar'[^>]*>(.*?)</div>", html).group(1)
+        self.assertIn("approving all 3 costs <strong data-cost>24</strong>",
+                      bar)
+        self.assertIn("leaving <strong data-after>76</strong>", bar)
 
     def test_bids_beyond_the_budget_are_called_out(self):
         html = self.build({"bid": 60, "max_bid": 100},
@@ -102,9 +117,9 @@ class Card(unittest.TestCase):
 
 
 OPTIONS = [{"id": "d1", "name": "J.K. Dobbins (DEN RB)", "position": "RB",
-            "why": "RB &middot; 5 rostered, more than you start"},
+            "why": "weakest of your 5 RBs"},
            {"id": "d2", "name": "Alec Pierce (IND WR)", "position": "WR",
-            "why": "WR &middot; 7 rostered, more than you start"}]
+            "why": "3rd weakest of your 7 WRs"}]
 
 
 class Drops(unittest.TestCase):
@@ -119,21 +134,37 @@ class Drops(unittest.TestCase):
                        add_position="RB", drop_player_id="d1",
                        drop_player_name="J.K. Dobbins (DEN RB)",
                        drop_position="RB", bid=5, max_bid=100, consensus=2,
-                       sources=["https://espn.com/x"], rationale="RB is deep",
+                       sources=["https://espn.com/x"],
+                       rationale="You roster 5 RBs, more than you can start "
+                                 "&mdash; J.K. Dobbins is the weakest of them.",
                        drop_options=OPTIONS)
             row.update(over)
             st.add_proposal(conn, run, **row)
         return conn
 
+    def test_the_drop_is_named_without_opening_anything(self):
+        # Who goes is half of what you are approving, so it is on the card.
+        html = webapp.render(self.build()).decode()
+        summary = re.search(r"<summary>(.*?)</summary>", html).group(1)
+        self.assertIn("J.K. Dobbins", summary)
+        self.assertIn("Change", summary)
+
     def test_the_drop_is_a_choice_with_reasons_beside_it(self):
         html = webapp.render(self.build()).decode()
-        self.assertIn("<select name='drop'>", html)
+        self.assertIn("type='radio'", html)
         self.assertIn("Alec Pierce", html)
-        self.assertIn("more than you start", html)
+        self.assertIn("weakest of your 5 RBs", html)
+
+    def test_the_recommended_drop_is_marked_as_such(self):
+        html = webapp.render(self.build()).decode()
+        self.assertIn("Recommended", html)
 
     def test_the_suggested_drop_is_preselected(self):
         html = webapp.render(self.build()).decode()
-        self.assertIn("<option value='d1' selected>", html)
+        self.assertIn("value='d1' checked", html)
+
+    def test_no_native_select_covers_the_bid_box(self):
+        self.assertNotIn("<select", webapp.render(self.build()).decode())
 
     def test_choosing_a_different_drop_is_recorded(self):
         conn = self.build()
@@ -166,15 +197,120 @@ class Drops(unittest.TestCase):
         # Whichever is higher in the queue takes him, so the one below only
         # lands if it fails and the budget total above is the worst case.
         body = self.body({}, {})
-        self.assertIn("is a fallback that only runs if the claim above it "
-                      "fails", body)
+        self.assertIn("one of these is a fallback and only runs if the "
+                      "claim above it fails", body)
         self.assertIn("Fallback", body)
 
     def test_distinct_drops_are_not_flagged(self):
         body = self.body({}, {"drop_player_id": "d2",
                               "drop_player_name": "Alec Pierce (IND WR)"})
-        self.assertNotIn("fallback that only runs", body)
+        self.assertNotIn("is a fallback", body)
         self.assertNotIn("Fallback", body)
+
+
+class Reasons(unittest.TestCase):
+    """The words on the card, and what tells two drop candidates apart."""
+
+    DEPTH = {"RB": (5, 2.3, "deep"), "TE": (1, 1.0, "thin"),
+             "WR": (6, 3.0, "ok")}
+
+    def reason(self, pos, place, total, label, **player):
+        return rw.drop_reason(dict(player, position=pos), label, self.DEPTH,
+                              player.get("starting", False), place, total)
+
+    def test_two_candidates_at_one_position_read_differently(self):
+        first = self.reason("RB", 1, 5, "deep")
+        second = self.reason("RB", 2, 5, "deep")
+        self.assertNotEqual(first, second)
+        self.assertIn("weakest of your 5 RBs", first)
+        self.assertIn("2nd weakest of your 5 RBs", second)
+
+    def test_the_shorthand_is_spelled_out(self):
+        self.assertIn("more than you can start", self.reason("RB", 1, 5, "deep"))
+        self.assertNotIn("is deep", self.reason("RB", 1, 5, "deep"))
+
+    def test_depth_is_not_repeated_for_a_position_of_one(self):
+        self.assertEqual(self.reason("TE", 1, 1, "thin"), "your only TE")
+
+    def test_being_hurt_leads(self):
+        why = self.reason("WR", 3, 6, "ok", injury_status="Questionable")
+        self.assertTrue(why.startswith("questionable"))
+
+    def test_standings_rank_within_a_position_not_across_the_roster(self):
+        cands = [
+            (0, 1.0, "rb1", {"position": "RB"}, "deep", False),
+            (0, 4.0, "rb2", {"position": "RB"}, "deep", False),
+            (0, 2.0, "wr1", {"position": "WR"}, "ok", False),
+        ]
+        place = rw.standings(cands)
+        self.assertEqual(place["rb1"], (1, 2))
+        self.assertEqual(place["rb2"], (2, 2))
+        self.assertEqual(place["wr1"], (1, 1))
+
+    def test_the_league_note_says_what_the_name_does_not(self):
+        note = rw.league_note(
+            {"settings": {"num_teams": 10}, "scoring_settings": {"rec": 0.5},
+             "roster_positions": ["QB", "RB"]}, [1] * 10)
+        self.assertEqual(note, "10-team, half-PPR")
+
+
+class Page(unittest.TestCase):
+    """How a card reads at a glance."""
+
+    OPTS = [{"id": "g", "name": "Kenny Gainwell (PHI RB)", "position": "RB",
+             "why": "weakest of your 5 RBs, more than you can start"},
+            {"id": "d", "name": "JK Dobbins (DEN RB)", "position": "RB",
+             "why": "2nd weakest of your 5 RBs, more than you can start"}]
+
+    def build(self, **over):
+        conn = st.connect(":memory:")
+        run = st.start_run(conn, "2026", 3, ["ESPN"])
+        row = dict(league_id="1", league_name="LEHG",
+                   league_note="10-team, half-PPR",
+                   add_player_id="v", add_player_name="Devaughn Vele (NO WR)",
+                   add_position="WR", drop_player_id="g",
+                   drop_player_name="Kenny Gainwell (PHI RB)",
+                   drop_position="RB", bid=9, max_bid=100, consensus=2,
+                   sources=["https://espn.com/x"], rationale="", quote="",
+                   drop_options=self.OPTS)
+        row.update(over)
+        st.add_proposal(conn, run, **row)
+        return webapp.render(conn).decode().split("</style></head>")[1]
+
+    def test_the_reason_names_the_drop_that_is_selected(self):
+        body = self.build()
+        self.assertIn("Dropping <b data-dropwho>Kenny Gainwell</b>", body)
+        self.assertIn("weakest of your 5 RBs", body)
+
+    def test_choosing_the_other_drop_changes_the_reason(self):
+        body = self.build(drop_player_id="d",
+                          drop_player_name="JK Dobbins (DEN RB)")
+        self.assertIn("Dropping <b data-dropwho>JK Dobbins</b>", body)
+        self.assertIn("2nd weakest", body)
+
+    def test_the_league_note_is_shown_under_its_name(self):
+        self.assertIn("10-team, half-PPR", self.build())
+
+    def test_the_labels_do_not_shout(self):
+        # Hierarchy from weight and colour, not from capitals. The league's
+        # own name is left alone - that is what it is called.
+        body = self.build()
+        self.assertNotIn(">ADD<", body)
+        self.assertNotIn(">DROP<", body)
+        self.assertIn(">Add</span>", body)
+        self.assertIn(">Drop</span>", body)
+
+    def test_the_budget_line_can_be_recomputed_in_the_browser(self):
+        body = self.build()
+        self.assertIn("data-budget='100'", body)
+        self.assertIn("data-cost", body)
+        self.assertIn("data-league='1'", body)
+
+    def test_an_old_reason_written_with_markup_is_not_shown_raw(self):
+        body = self.build(drop_options=[],
+                          rationale="RB &middot; 5 rostered")
+        self.assertNotIn("&amp;middot;", body)
+        self.assertIn("\u00b7", body)
 
 
 class Candidates(unittest.TestCase):

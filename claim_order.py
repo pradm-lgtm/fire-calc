@@ -112,9 +112,19 @@ def blockers(rows):
     return out
 
 
-def chains(rows):
-    """True where any claim in this league depends on another one failing."""
-    return bool(blockers(rows))
+def roles(rows):
+    """{claim id: 'first' | 'fallback'} for claims that are part of a chain.
+
+    A chain is the only reason order matters. Bids decide who wins a player
+    in a FAAB league, not the sequence claims were filed in - so a claim that
+    clashes with nothing is in no particular position and should not be asked
+    to pretend otherwise.
+    """
+    found = blockers(rows)
+    out = {cid: "fallback" for cid in found}
+    for _cid, (above, _why) in found.items():
+        out.setdefault(above["id"], "first")
+    return out
 
 
 def moved(rows, proposal_id, direction):

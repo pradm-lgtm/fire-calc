@@ -111,14 +111,15 @@ def proposals_for_league(league, user_id, players, trending, texts, max_moves):
         # Everyone you could cut, not only the bench and not only the one it
         # picked. Whether there is anyone worth dropping is half the
         # decision, and it was being made for you out of sight.
+        candidates = ew.drop_candidates(mine, players, trending, depth)
+        place = standings(candidates)
         options = [{
-            "id": pid,
-            "name": sc.player_label(players, pid),
+            "id": cid,
+            "name": sc.player_label(players, cid),
             "position": p.get("position"),
             "starter": starts,
-            "why": drop_reason(p, label, depth, starts),
-        } for _rank, _score, pid, p, label, starts
-            in ew.drop_candidates(mine, players, trending, depth)]
+            "why": drop_reason(p, label, depth, starts, *place.get(cid, (None, None))),
+        } for _rank, _score, cid, p, label, starts in candidates]
         add_score = wa.score_player(players.get(pid, {}), trending.get(pid, 0))
         if drop_score > add_score * 1.5:
             break
@@ -145,11 +146,13 @@ def proposals_for_league(league, user_id, players, trending, texts, max_moves):
             low = max(1, round(remaining * min(faabs) / 100))
             high = max(low, round(remaining * max(faabs) / 100))
 
-        why = f"{drop_player.get('position', '?')} is {drop_label}"
+        why = depth_sentence(drop_player, drop_label, depth,
+                             sc.player_label(players, drop_pid))
         out.append(dict(
             platform="sleeper",
             league_id=league["league_id"],
             league_name=league.get("name"),
+            league_note=league_note(league, rosters),
             add_player_id=pid,
             add_player_name=sc.player_label(players, pid),
             add_position=add.get("position"),
@@ -166,23 +169,118 @@ def proposals_for_league(league, user_id, players, trending, texts, max_moves):
     return out
 
 
-def drop_reason(player, label, depth, starting=False):
-    """Why this player is or is not a sensible thing to cut."""
+def league_note(league, rosters):
+    """'10-team, half-PPR' - what the league's own name does not say.
+
+    A league called LEHG tells you nothing about the rules the advice was
+    computed under, and those rules are why a bid or a drop makes sense.
+    """
+    try:
+        import trade_values as tv
+        settings = tv.settings_from(league)
+    except Exception:
+        return None
+    teams = len(rosters) or settings.get("teams")
+    ppr = settings.get("ppr")
+    scoring = {0: "standard", 0.5: "half-PPR", 1: "full PPR"}.get(
+        ppr, f"{ppr} per reception" if ppr is not None else None)
+    bits = [f"{teams}-team" if teams else None, scoring,
+            "superflex" if settings.get("quarterbacks", 1) > 1 else None]
+    return ", ".join(b for b in bits if b) or None
+
+
+def standings(candidates):
+    """{player id: (place, how many at his position)}, weakest first.
+
+    The list arrives weakest-first overall but with a depth penalty mixed in,
+    so position by position it has to be re-sorted on value alone before it
+    can say which of two men at one position is the weaker.
+    """
+    by_pos = {}
+    for _rank, score, pid, player, _label, _starts in candidates:
+        by_pos.setdefault(player.get("position") or "?", []).append((score, pid))
+    out = {}
+    for _pos, rows in by_pos.items():
+        rows.sort()
+        for i, (_score, pid) in enumerate(rows, start=1):
+            out[pid] = (i, len(rows))
+    return out
+
+
+def ordinal(n):
+    if 10 <= n % 100 <= 20:
+        return f"{n}th"
+    return f"{n}{ {1: 'st', 2: 'nd', 3: 'rd'}.get(n % 10, 'th') }"
+
+
+def standing(place, total, pos):
+    """'weakest of your 5 RBs' - the thing that tells two candidates apart.
+
+    Every candidate at one position used to carry the same sentence, which
+    said why the position was droppable and nothing at all about why this
+    man rather than the one below him.
+    """
+    if not place or not total:
+        return f"on your roster at {pos}"
+    if total == 1:
+        return f"your only {pos}"
+    if place == 1:
+        return f"weakest of your {total} {pos}s"
+    if place == total:
+        return f"your best {pos}"
+    return f"{ordinal(place)} weakest of your {total} {pos}s"
+
+
+def depth_clause(label):
+    """What the position's depth means for cutting one, in plain words.
+
+    "RB is deep" was true and unreadable. It means you roster more of them
+    than you can start, which is the whole argument for cutting one, so it
+    says that. The count is not repeated here: whatever this is added to has
+    already given it.
+    """
+    if label in ("deep", "extra"):
+        return "more than you can start"
+    if label == "thin":
+        return "and you are already thin there"
+    return ""
+
+
+def drop_reason(player, label, depth, starting=False, place=None, total=None):
+    """The whole case for cutting this particular man, in one clause.
+
+    Every candidate carries its own, so the card can restate the argument
+    when you pick somebody else and it stays true. Ordered worst news first:
+    being hurt or being in your lineup changes the decision, where the
+    position's depth is only background.
+    """
     pos = player.get("position") or "?"
     hurt = (player.get("injury_status") or "").strip()
-    have = depth.get(pos, (0, 0, label))[0]
-    bits = [pos]
+    bits = [standing(place, total, pos)]
+    # One of them is the whole position, so saying how deep it is adds
+    # nothing that "your only TE" has not already said.
+    if (total or 0) > 1:
+        bits.append(depth_clause(label))
     if starting:
-        bits.append("you are starting him")
+        bits.insert(0, "in your lineup")
     if hurt:
-        bits.append(hurt)
-    elif label == "thin":
-        bits.append(f"only {have} on your roster")
-    elif label in ("deep", "extra"):
-        bits.append(f"{have} rostered, more than you start")
-    else:
-        bits.append(f"{have} rostered")
-    return " &middot; ".join(bits)
+        bits.insert(0, hurt.lower())
+    return ", ".join(b for b in bits if b)
+
+
+def depth_sentence(player, label, depth, name):
+    """The card's one-line reason for rows with no options to choose from."""
+    pos = player.get("position") or "that position"
+    have = depth.get(pos, (0, 0, label))[0]
+    tail = depth_clause(label)
+    count = f"one of your {have} {pos}s" if have != 1 else f"your only {pos}"
+    return (f"Dropping {strip_label(name)} \u2014 {count}"
+            + (f", {tail}" if tail else "") + ".")
+
+
+def strip_label(name):
+    """'Kenny Gainwell (PHI RB)' -> 'Kenny Gainwell'."""
+    return str(name or "").split("(")[0].strip() or str(name or "")
 
 
 def main_for(username, db_path, moves=3, force=False):

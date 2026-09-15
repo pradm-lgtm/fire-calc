@@ -186,20 +186,29 @@ class Stored(unittest.TestCase):
         st.add_fallback(conn, ids[0])
         html = webapp.render(conn).decode()
         self.assertIn("Fallback", html)
-        self.assertIn("only lands if", html)
+        self.assertIn("Runs only if", html)
 
-    def test_the_page_numbers_the_queue(self):
-        conn, _run, ids = self.build()
+    def test_only_claims_in_a_chain_are_given_an_order(self):
+        # Bids decide who wins a player, so a claim competing with nothing
+        # is in no position and is not shown arrows implying it is.
+        conn, _run, ids = self.build(
+            {"bid": 12},
+            {"bid": 4, "drop_player_id": "d2",
+             "drop_player_name": "Alec Pierce (IND WR)"})
+        self.assertNotIn("action='/order'", webapp.render(conn).decode())
         st.add_fallback(conn, ids[0])
-        self.assertIn("1 of 2", webapp.render(conn).decode())
+        html = webapp.render(conn).decode()
+        self.assertIn("action='/order'", html)
+        self.assertIn("First choice", html)
 
     def test_one_claim_alone_gets_no_ordering_controls(self):
         conn, _run, _ids = self.build()
         self.assertNotIn("action='/order'", webapp.render(conn).decode())
 
-    def test_two_claims_do_get_ordering_controls(self):
-        conn, _run, _ids = self.build({"bid": 12}, {"bid": 4})
-        self.assertIn("action='/order'", webapp.render(conn).decode())
+    def test_the_move_buttons_say_what_they_do(self):
+        conn, _run, ids = self.build()
+        st.add_fallback(conn, ids[0])
+        self.assertIn("Move up", webapp.render(conn).decode())
 
     def test_the_submit_panel_shows_the_running_order(self):
         conn, _run, ids = self.build({"bid": 12}, {"bid": 4})

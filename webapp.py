@@ -33,6 +33,7 @@ from urllib.parse import parse_qs, urlparse
 import claim_order
 import cloud_auth as auth
 import db
+import expert_extract as ex
 import localenv
 import scores
 import sleeper_client as sc
@@ -69,7 +70,7 @@ body { margin:0; padding:18px 14px 40px; background:var(--bg); color:var(--ink);
 /* Typography does the structuring. No tracked-out capitals: they read as
    template chrome rather than as information. */
 h1 { font-size:26px; line-height:1.15; margin:0 0 2px; letter-spacing:-.02em; }
-h2 { font-size:13px; font-weight:650; color:var(--muted); margin:26px 0 10px;
+h2 { font-size:13px; font-weight:650; color:var(--muted); margin:28px 0 8px;
      display:flex; justify-content:space-between; align-items:baseline; gap:8px; }
 .sub { color:var(--muted); font-size:13px; margin:0 0 16px; }
 .meta { color:var(--muted); font-size:12px; font-weight:400; }
@@ -160,24 +161,85 @@ label { font-size:13px; color:var(--muted); }
 .fold > summary::after { content:'+'; color:var(--muted); font-weight:400; }
 .fold[open] > summary::after { content:'\2212'; }
 
+/* The waiver card. Hierarchy comes from size, weight and colour: nothing
+   here is set in tracked-out capitals, which read as template chrome rather
+   than as information. */
 .card { background:var(--card); border:1px solid var(--line);
         border-radius:14px; padding:16px; margin-bottom:12px; }
-.move { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
-.move + .move { margin-top:6px; }
-.tag { font-size:11px; font-weight:700; padding:3px 7px; border-radius:5px;
-       background:var(--line); color:var(--muted); }
-.pos { font-size:11px; font-weight:700; padding:3px 7px; border-radius:5px;
-       color:#fff; }
-.pos.QB{background:var(--qb)} .pos.RB{background:var(--rb)}
-.pos.WR{background:var(--wr)} .pos.TE{background:var(--te)}
-.pos.DEF,.pos.K{background:var(--def)}
-.add { font-weight:650; font-size:17px; }
-.drop { color:var(--muted); }
-.why { color:var(--muted); font-size:13px; margin:10px 0 0; }
-.quote { border-left:2px solid var(--line-2); padding-left:10px; margin:8px 0 0;
-         color:var(--muted); font-size:13px; font-style:italic; }
-.quote.muted { border-left-style:dashed; font-style:normal; }
-.guide { color:var(--muted); font-size:12.5px; margin:14px 0 0; }
+.headline { display:flex; align-items:baseline; gap:8px; flex-wrap:wrap; }
+.dropline { display:flex; align-items:baseline; gap:8px; flex-wrap:wrap;
+            margin-top:7px; }
+.label { color:var(--muted); font-size:12.5px; width:38px; flex:none; }
+.name { font-size:20px; font-weight:700; letter-spacing:-.01em; }
+.name.small { font-size:15px; font-weight:600; color:var(--ink); }
+.pos { font-size:11px; font-weight:700; padding:2px 6px; border-radius:5px;
+       background:var(--line); }
+.pos.QB{color:var(--qb)} .pos.RB{color:var(--rb)}
+.pos.WR{color:var(--wr)} .pos.TE{color:var(--te)}
+.pos.DEF,.pos.K{color:var(--def)}
+.reason { font-size:14px; margin:12px 0 0; }
+.why { color:var(--muted); font-size:12.5px; margin:8px 0 0; }
+.quote { border-left:2px solid var(--line-2); padding-left:10px;
+         margin:12px 0 0; color:var(--ink); font-size:13.5px;
+         font-style:italic; }
+.quote.muted { border-left-style:dashed; font-style:normal;
+               color:var(--muted); font-size:13px; }
+
+/* The bid and the button that spends it stay in one block, and the button
+   says the number that is in the box. */
+.bidrow { display:flex; align-items:center; gap:12px; flex-wrap:wrap;
+          margin-top:16px; }
+.bidwrap { display:flex; align-items:center; gap:7px; }
+.bidwrap > span:first-child { font-size:13px; color:var(--muted); }
+.of { font-size:13px; color:var(--muted); }
+.guide { color:var(--muted); font-size:12.5px; margin-left:auto; }
+.acts { display:flex; gap:8px; margin-top:10px; }
+
+/* Who goes, stated plainly and changed in place. A native select was
+   drawing over the bid box beneath it. */
+.picker { margin-top:7px; }
+.picker > summary { display:flex; align-items:baseline; gap:8px;
+                    flex-wrap:wrap; cursor:pointer; list-style:none;
+                    padding:2px 0; }
+.picker > summary::-webkit-details-marker { display:none; }
+.change { color:var(--action); font-size:13px; margin-left:auto; }
+.picker[open] .change::after { content:' \2212'; }
+.opts { border:1px solid var(--line); border-radius:10px; margin-top:8px;
+        overflow:hidden; }
+.opt { display:flex; gap:10px; padding:10px 12px; cursor:pointer;
+       align-items:flex-start; }
+.opt + .opt { border-top:1px solid var(--line); }
+.opt input { margin-top:3px; flex:none; accent-color:var(--action); }
+.optbody { display:flex; flex-direction:column; gap:2px; min-width:0; }
+.optname { display:flex; align-items:center; gap:7px; font-size:14.5px;
+           font-weight:600; flex-wrap:wrap; }
+.optwhy { color:var(--muted); font-size:12.5px; }
+.rec { font-size:11px; font-weight:700; color:var(--ok);
+       border:1px solid var(--ok); border-radius:5px; padding:1px 5px; }
+
+/* A chain of claims. Nothing else on a card carries an order, because
+   nothing else has one. */
+.chain { display:flex; align-items:center; gap:10px; flex-wrap:wrap;
+         margin:-4px 0 12px; padding:8px 11px; border-radius:9px;
+         background:var(--bg); border-left:3px solid var(--line-2); }
+.chain.fallback { border-left-color:var(--action); }
+.chain.first { border-left-color:var(--ok); }
+.chaintext { margin:0; font-size:12.5px; color:var(--muted); flex:1;
+             min-width:190px; }
+.chaintext b { color:var(--ink); font-weight:650; }
+.chain form { display:flex; gap:6px; }
+.movebtn { min-height:32px; padding:5px 10px; font-size:12.5px;
+           font-weight:600; border:1px solid var(--line-2); border-radius:8px;
+           background:var(--card); color:var(--ink); font-family:inherit;
+           cursor:pointer; }
+
+.panel { border-color:var(--action); }
+.paneltop { margin:0; font-size:16px; font-weight:650; }
+.wide { width:100%; margin-top:12px; }
+.queue { list-style:none; margin:10px 0 0; padding:0; color:var(--muted);
+         font-size:13px; }
+.queue li { margin:3px 0; }
+.queueleague { color:var(--ink); font-weight:600; margin-top:8px; }
 .match { background:var(--card); border:1px solid var(--line);
          border-radius:14px; padding:16px; margin-bottom:12px; }
 .score { display:flex; justify-content:space-between; align-items:baseline;
@@ -208,37 +270,21 @@ label { font-size:13px; color:var(--muted); }
 .swap + .swap { border-top:1px solid var(--line); }
 .swaplabel { color:var(--muted); font-size:12.5px; width:74px;
              flex:none; }
-.droppick { display:flex; align-items:center; gap:8px; margin-top:12px; }
-.droppick select { flex:1; min-width:0; min-height:44px; padding:9px;
-                   font-size:15px; font-family:inherit;
-                   border:1px solid var(--line-2); border-radius:9px;
-                   background:var(--bg); color:var(--ink); }
 .changes { margin:4px 0 0; padding-left:18px; color:var(--muted);
            font-size:13px; }
 .changes li { margin:2px 0; }
-.order { display:flex; align-items:center; gap:6px; margin:0 0 10px;
-         color:var(--muted); font-size:12px; }
-.place { font-weight:700; letter-spacing:.02em; }
-.movebtn { min-width:34px; min-height:30px; padding:0; font-size:14px;
-           line-height:1; border:1px solid var(--line-2); border-radius:8px;
-           background:var(--bg); color:var(--ink); font-family:inherit;
-           cursor:pointer; }
-.movebtn.off { opacity:.3; display:inline-flex; align-items:center;
-               justify-content:center; cursor:default; }
-.fallback { font-size:12.5px; color:var(--muted); margin:10px 0 0;
-            border-left:2px solid var(--action); padding-left:10px; }
-.fallback b { color:var(--ink); }
-.queue { list-style:none; margin:10px 0 0; padding:0; color:var(--muted);
-         font-size:13px; }
-.queue li { margin:3px 0; }
-.queueleague { color:var(--ink); font-weight:600; margin-top:8px; }
 .state { font-size:14px; font-weight:600; margin:12px 0 0; }
 .state.approved { color:var(--ok); } .state.declined { color:var(--no); }
 .state.submitted { color:var(--action); }
 .empty { color:var(--muted); padding:20px 0; }
-.bar { background:var(--card); border:1px solid var(--line); border-radius:10px;
+.bar { display:flex; flex-wrap:wrap; gap:4px 14px;
+       background:var(--card); border:1px solid var(--line); border-radius:10px;
        padding:10px 13px; font-size:13px; color:var(--muted); margin-bottom:10px; }
+.bar strong { color:var(--ink); }
 .warn { color:var(--urgent); font-weight:600; }
+.lname { color:var(--ink); font-size:16px; font-weight:700;
+         letter-spacing:-.01em; }
+.lnote { color:var(--muted); font-size:12.5px; margin:-6px 0 8px; }
 .counts { display:flex; gap:14px; font-size:13px; color:var(--muted);
           margin-bottom:16px; flex-wrap:wrap; }
 .counts b { color:var(--ink); }
@@ -259,6 +305,10 @@ button[disabled] { opacity:.6; cursor:progress; }
   .bidwrap { width:100%; }
   input[type=number] { flex:1; width:auto; }
   .approve, .decline { flex:1 1 45%; }
+  /* The analyst range drops under the bid box rather than being squeezed
+     beside it, where it wraps to two words a line. */
+  .guide { margin-left:0; width:100%; }
+  .chaintext { min-width:0; }
 }
 """
 
@@ -337,6 +387,8 @@ def render(conn):
     for r in rows:
         by_league.setdefault((r["league_id"], r["league_name"]), []).append(r)
 
+    # One counting system. The number in the header is the sum of the numbers
+    # in the league headings, and nothing else on the page counts anything.
     tally = {}
     for r in rows:
         tally[r["status"]] = tally.get(r["status"], 0) + 1
@@ -360,92 +412,73 @@ def render(conn):
         out.append(submit_panel(conn, ready))
 
     for (lid, lname), items in by_league.items():
-        budget = items[0]["max_bid"] or 0
-        committed = st.budget_committed(conn, lid)
-        waiting = [i for i in items if i["status"] == st.PENDING]
-        asked = sum(i["bid"] or 0 for i in waiting)
-
-        # The number you actually need before approving three bids in one
-        # league is what is left after all three, not what is left now.
-        parts = [f"<strong>{budget - committed}</strong> of {budget} left"]
-        if waiting:
-            parts.append(f"approving all {len(waiting)} costs {asked}, "
-                         f"leaving <strong>{budget - committed - asked}"
-                         "</strong>")
-        bar = " &middot; ".join(parts)
-        if budget and committed + asked > budget:
-            bar += " <span class='warn'>— that is more than you have</span>"
-        # Two claims dropping the same player, or adding the same one, are a
-        # first choice and a fallback: whichever is higher in the queue wins
-        # and the other cannot go through. So the total above is the worst
-        # case, not the likely one.
         live = [i for i in items
                 if i["status"] in (st.PENDING, st.APPROVED, st.SUBMITTED)]
-        fallbacks = claim_order.blockers(live)
-        if fallbacks:
-            one = len(fallbacks) == 1
-            bar += (f" &middot; {len(fallbacks)} of these claims "
-                    + ("is a fallback that only runs if the claim above it "
-                       "fails" if one else
-                       "are fallbacks, each one running only if the claim "
-                       "above it fails")
-                    + ", so the real cost is lower")
-        places = {r["id"]: n for n, r in enumerate(live, start=1)}
-        out.append(f"<h2><span>{e(lname)}</span><span class='meta'>"
-                   f"{len(waiting)} of {len(items)} to review</span></h2>"
-                   f"<div class='bar'>{bar}</div>")
+        waiting = [i for i in items if i["status"] == st.PENDING]
+        out.append(league_heading(conn, lid, lname, items, waiting, live))
+        marks = chain_marks(live)
         for r in items:
-            out.append(card(r, places.get(r["id"]), len(live),
-                            fallbacks.get(r["id"])))
+            out.append(card(r, marks.get(r["id"])))
     return page("".join(out), "Spike — waivers")
 
 
-def order_row(r, place, count):
-    """Where this claim sits in its league's queue, and how to move it.
+def league_heading(conn, lid, lname, items, waiting, live):
+    """The league, what it costs, and what its name does not tell you."""
+    budget = items[0]["max_bid"] or 0
+    committed = st.budget_committed(conn, lid)
+    asked = sum(i["bid"] or 0 for i in waiting)
+    note = claim_order.field(items[0], "league_note")
 
-    The queue is the whole point of a fallback: the league works down your
-    claims in this order, so moving one up or down is the only way to say
-    which of two claims for the same player you would rather have.
+    bar = (f"<span><strong data-left>{budget - committed}</strong> of "
+           f"{budget} left</span>")
+    if waiting:
+        # Live, because the number that matters is what is left after the
+        # bids in the boxes below - not after the ones the run suggested.
+        bar += (f"<span>approving all {len(waiting)} costs <strong data-cost>"
+                f"{asked}</strong>, leaving <strong data-after>"
+                f"{budget - committed - asked}</strong></span>")
+    bar += "<span class='warn' data-over hidden>that is more than you have"\
+           "</span>"
+
+    fallbacks = claim_order.blockers(live)
+    if fallbacks:
+        one = len(fallbacks) == 1
+        bar += ("<span>" + (
+            "one of these is a fallback and only runs if the claim above it "
+            "fails" if one else
+            f"{len(fallbacks)} of these are fallbacks, each running only if "
+            "the claim above it fails") + ", so the real cost is lower</span>")
+
+    return (f"<h2><span class='lname'>{e(lname)}</span>"
+            f"<span class='meta'>{len(waiting)} to review</span></h2>"
+            + (f"<div class='lnote'>{e(note)}</div>" if note else "")
+            + f"<div class='bar' data-league='{e(lid)}' "
+              f"data-budget='{budget}' data-committed='{committed}'>{bar}</div>")
+
+
+def chain_marks(live):
+    """What to say on each card about the claims it competes with.
+
+    Only claims that clash get anything at all. Bids decide who wins a player,
+    not the order claims were filed in, so a claim competing with nothing is
+    in no position and is not given arrows implying it is.
     """
-    if not place or count < 2 or r["submitted_at"]:
-        return ""
-    def step(direction, glyph, live):
-        if not live:
-            return f"<span class='movebtn off'>{glyph}</span>"
-        return (f"<button class='movebtn' name='dir' value='{direction}'"
-                f" title='Move {direction}'>{glyph}</button>")
-    return ("<form class='order' method='post' action='/order'>"
-            f"<input type='hidden' name='id' value='{e(r['id'])}'>"
-            f"<span class='place'>{place} of {count}</span>"
-            + step("up", "&uarr;", place > 1)
-            + step("down", "&darr;", place < count)
-            + "</form>")
-
-
-def fallback_form(r, options):
-    """Offer a second claim for the same player, cutting somebody else.
-
-    Only where there is somebody else to cut: a copy with the same drop is a
-    duplicate, and the league would process it as one.
-    """
-    spare = [o for o in options
-             if str(o.get("id")) != str(r["drop_player_id"] or "")]
-    if not spare:
-        return ""
-    return ("<form method='post' action='/fallback'>"
-            f"<input type='hidden' name='id' value='{e(r['id'])}'>"
-            "<button class='ghost' style='width:100%;margin-top:10px'>"
-            f"Also claim {e(strip_paren(r['add_player_name']))} for a "
-            "different drop</button></form>")
-
-
-def fallback_note(blocker):
-    """Say plainly that this claim is the second choice, and to what."""
-    above, why = blocker
-    who = strip_paren(above["add_player_name"])
-    cost = f" at {above['bid']}" if above["bid"] is not None else ""
-    return (f"<p class='fallback'>Fallback &mdash; this only lands if "
-            f"<b>{e(who)}{e(cost)}</b> fails, because {e(why)}.</p>")
+    seq = claim_order.ordered(live)
+    blocking = claim_order.blockers(seq)
+    role = claim_order.roles(seq)
+    places = {r["id"]: n for n, r in enumerate(seq)}
+    marks = {}
+    for r in seq:
+        if r["id"] not in role:
+            continue
+        n = places[r["id"]]
+        marks[r["id"]] = {
+            "role": role[r["id"]],
+            "blocker": blocking.get(r["id"]),
+            "up": n > 0 and not r["submitted_at"],
+            "down": n < len(seq) - 1 and not r["submitted_at"],
+        }
+    return marks
 
 
 def submit_panel(conn, ready):
@@ -467,15 +500,14 @@ def submit_panel(conn, ready):
             note = ("Waiting for your Mac to pick this up. It has to be awake "
                     "and signed in to Sleeper.")
     waiting = last and not last["finished_at"]
-    return ("<div class='card'>"
-            f"<div class='move'><span class='add'>{len(ready)} claim"
-            f"{'s' if len(ready) != 1 else ''} approved and not yet placed"
-            "</span></div>"
+    return ("<div class='card panel'>"
+            f"<p class='paneltop'>{len(ready)} claim"
+            f"{'s' if len(ready) != 1 else ''} approved and not yet placed</p>"
             + running_order(ready)
             + (f"<p class='why'>{note}</p>" if note else "")
             + ("" if waiting else
                "<form method='post' action='/submit'>"
-               "<button class='approve' style='width:100%;margin-top:12px'>"
+               "<button class='primary wide'>"
                "Place them in Sleeper now</button></form>")
             + "</div>")
 
@@ -510,80 +542,189 @@ def age_of_field(row, field):
     return age_of({"created_at": row[field]})
 
 
-def card(r, place=None, count=0, blocker=None):
-    srcs = json.loads(r["sources"] or "[]")
-    src_txt = ", ".join(short_source(s) for s in srcs) or "—"
-    bits = [f"<div class='card'>",
-            order_row(r, place, count),
-            "<div class='move'>",
-            "<span class='tag'>ADD</span>",
-            pos_chip(r["add_position"]),
-            f"<span class='add'>{e(strip_paren(r['add_player_name']))}</span>",
-            "</div>"]
-    options = json.loads(r["drop_options"] or "[]")
-    if r["drop_player_name"] and not (options and r["status"] == st.PENDING):
-        bits += ["<div class='move'>",
-                 "<span class='tag'>DROP</span>",
-                 pos_chip(r["drop_position"]),
-                 f"<span class='drop'>{e(strip_paren(r['drop_player_name']))}</span>",
-                 "</div>"]
-    if blocker:
-        bits.append(fallback_note(blocker))
-    named = (f"Named by {r['consensus']} analyst"
-             f"{'s' if (r['consensus'] or 0) != 1 else ''} ({src_txt})")
-    bits.append(f"<p class='why'>{e(named)}"
-                + (f" &middot; {e(r['rationale'])}" if r["rationale"] else "")
-                + "</p>")
-    if r["quote"]:
-        bits.append(f"<p class='quote'>{e(r['quote'])}</p>")
-    else:
-        # Saying nothing was found beats quoting the furniture a ranking
-        # page wraps its tables in, which names a dozen players and analyses
-        # none of them.
-        bits.append("<p class='quote muted'>No write-up found for him, only "
-                    "a listing.</p>")
+def card(r, mark=None):
+    """One claim, scannable in a couple of seconds.
 
-    if r["status"] in (st.PENDING,):
-        bid = r["bid"] if r["bid"] is not None else 0
-        if r["bid_low"] is not None and r["bid_high"] is not None:
-            span = (f"{r['bid_low']}" if r["bid_low"] == r["bid_high"]
-                    else f"{r['bid_low']} to {r['bid_high']}")
-            guide = f"Analysts bid {span}"
-        else:
-            guide = "No analyst put a number on him"
-        bits.append(
-            f"<p class='guide'>{e(guide)}</p>"
-            "<form method='post' action='/decide'>"
-            f"<input type='hidden' name='id' value='{e(r['id'])}'>"
-            + drop_chooser(r, options)
-            + "<div class='row'>"
-            "<span class='bidwrap'><label>Bid</label>"
-            f"<input type='number' name='bid' inputmode='numeric' min='0'"
-            f" max='{e(r['max_bid'] or 100)}' data-bid"
-            f" value='{e(bid)}'></span>"
-            f"<button class='approve' name='action' value='approve'"
-            f" data-approve>Approve at {e(bid)}</button>"
-            "<button class='decline' name='action' value='decline'>Decline</button>"
-            "</div></form>"
-            + fallback_form(r, options))
+    Top to bottom: what would happen, the one reason it is being suggested,
+    what an analyst actually said about the man, and the two decisions. The
+    drop is shown by name rather than hidden behind a list to open, because
+    who goes is half of what you are approving.
+    """
+    pending = r["status"] == st.PENDING
+    options = json.loads(r["drop_options"] or "[]")
+    bits = ["<article class='card'>"]
+    if pending:
+        # The form is declared once, empty, and the controls scattered down
+        # the card join it by id. That is what lets the drop list sit above
+        # the bid box in the flow instead of floating over it.
+        bits.append(f"<form id='f{e(r['id'])}' method='post' action='/decide'>"
+                    f"<input type='hidden' name='id' value='{e(r['id'])}'>"
+                    "</form>")
+    if mark:
+        bits.append(chain_banner(r, mark))
+
+    bits += ["<div class='headline'>",
+             "<span class='label'>Add</span>",
+             f"<span class='name'>{e(strip_paren(r['add_player_name']))}</span>",
+             pos_chip(r["add_position"]),
+             "</div>"]
+
+    if pending and options:
+        bits.append(drop_picker(r, options))
+    elif r["drop_player_name"]:
+        bits += ["<div class='dropline'>",
+                 "<span class='label'>Drop</span>",
+                 f"<span class='name small'>"
+                 f"{e(strip_paren(r['drop_player_name']))}</span>",
+                 pos_chip(r["drop_position"]),
+                 "</div>"]
+
+    bits.append(reason_line(r, options))
+
+    bits.append(evidence(r))
+
+    if pending:
+        bits.append(decide_form(r))
     else:
-        label = {st.APPROVED: "Approved", st.DECLINED: "Declined",
-                 st.SUBMITTED: "Submitted", st.FAILED: "Submission failed"}.get(
-                     r["status"], r["status"])
-        extra = f" &middot; bid {r['bid']}" if r["bid"] is not None else ""
-        line = (f"<p class='state {e(r['status'])}'>{e(label)}{extra}</p>")
-        if r["result"]:
-            line += f"<p class='why'>{e(r['result'])}</p>"
-        if r["status"] in (st.APPROVED, st.DECLINED):
-            line += ("<form class='row' method='post' action='/decide'>"
-                     f"<input type='hidden' name='id' value='{e(r['id'])}'>"
-                     "<button class='decline' name='action' value='reopen'>"
-                     "Undo</button></form>")
-        if r["status"] == st.APPROVED:
-            line += fallback_form(r, json.loads(r["drop_options"] or "[]"))
-        bits.append(line)
-    bits.append("</div>")
+        bits.append(outcome(r, options))
+    bits.append("</article>")
     return "".join(bits)
+
+
+def plain_why(text):
+    """A drop's reason as text, whatever era it was written in.
+
+    Reasons used to be built with markup entities in them. Those rows are
+    still in the database and escaping one would put a literal &amp;middot;
+    on the card, so the entity is turned back into the character it names.
+    """
+    return str(text or "").replace("&middot;", "\u00b7").replace(
+        "&mdash;", "\u2014")
+
+
+def reason_line(r, options):
+    """Why this drop, tied to the man actually selected.
+
+    It used to be written once, when the run chose a drop, and then stayed
+    put while you changed your mind underneath it - so a card could argue for
+    cutting Gainwell above a form set to cut Dobbins. It is built from the
+    chosen option now, and the script rewrites it when you choose another.
+    """
+    chosen = str(r["drop_player_id"] or "")
+    picked = next((o for o in options if str(o.get("id")) == chosen), None)
+    if picked is None:
+        return (f"<p class='reason'>{e(plain_why(r['rationale']))}</p>"
+                if r["rationale"] else "")
+    who = strip_paren(picked.get("name") or "")
+    why = plain_why(picked.get("why"))
+    return ("<p class='reason'>Dropping <b data-dropwho>" + e(who)
+            + "</b><span data-dropwhy>" + (f" &mdash; {e(why)}" if why else "")
+            + "</span>.</p>")
+
+
+def chain_banner(r, mark):
+    """Say what this claim competes with, and offer to change the order."""
+    if mark["role"] == "first":
+        text = ("<b>First choice.</b> A claim below falls back to this one "
+                "if it fails.")
+    else:
+        above, why = mark["blocker"]
+        who = strip_paren(above["add_player_name"])
+        cost = f" at {above['bid']}" if above["bid"] is not None else ""
+        text = (f"<b>Fallback.</b> Runs only if <b>{e(who)}{e(cost)}</b> "
+                f"fails, because {e(why)}.")
+    moves = ""
+    if mark["up"] or mark["down"]:
+        moves = ("<form method='post' action='/order'>"
+                 f"<input type='hidden' name='id' value='{e(r['id'])}'>"
+                 + ("<button class='movebtn' name='dir' value='up'>"
+                    "Move up</button>" if mark["up"] else "")
+                 + ("<button class='movebtn' name='dir' value='down'>"
+                    "Move down</button>" if mark["down"] else "")
+                 + "</form>")
+    return (f"<div class='chain {e(mark['role'])}'>"
+            f"<p class='chaintext'>{text}</p>{moves}</div>")
+
+
+def evidence(r):
+    """What an analyst said, when an analyst actually said something.
+
+    The quote is re-checked here and not only where it was taken. A quote
+    written before the extractor learned to reject ranking-page furniture is
+    still in the database, and the first thing read on a card should not be a
+    sentence naming eleven other men.
+    """
+    srcs = json.loads(r["sources"] or "[]")
+    src_txt = ", ".join(short_source(s) for s in srcs)
+    named = e(f"Named by {r['consensus']} analyst"
+              f"{'s' if (r['consensus'] or 0) != 1 else ''}")
+    if src_txt:
+        named += f" &middot; {e(src_txt)}"
+    quote = r["quote"] or ""
+    if ex.about(quote, r["add_player_name"]):
+        body = f"<blockquote class='quote'>{e(quote)}</blockquote>"
+    else:
+        body = ("<p class='quote muted'>Limited recent coverage &mdash; he is "
+                "on the lists, but nobody wrote him up.</p>")
+    return body + f"<p class='why'>{named}</p>"
+
+
+def decide_form(r):
+    bid = r["bid"] if r["bid"] is not None else 0
+    if r["bid_low"] is not None and r["bid_high"] is not None:
+        span = (f"{r['bid_low']}" if r["bid_low"] == r["bid_high"]
+                else f"{r['bid_low']} to {r['bid_high']}")
+        guide = f"Analysts bid {span}"
+    else:
+        guide = "No analyst put a number on him"
+    return ("<div class='bidrow'>"
+            "<label class='bidwrap'><span>Bid</span>"
+            f"<input type='number' name='bid' form='f{e(r['id'])}'"
+            f" inputmode='numeric' min='0' max='{e(r['max_bid'] or 100)}'"
+            f" data-bid data-league='{e(r['league_id'])}' value='{e(bid)}'>"
+            f"<span class='of'>of {e(r['max_bid'] or 100)}</span></label>"
+            f"<span class='guide'>{e(guide)}</span></div>"
+            "<div class='acts'>"
+            f"<button class='approve' form='f{e(r['id'])}' name='action'"
+            f" value='approve' data-approve>Approve at "
+            f"<span data-approve-bid>{e(bid)}</span></button>"
+            f"<button class='decline' form='f{e(r['id'])}' name='action'"
+            " value='decline'>Decline</button></div>")
+
+
+def outcome(r, options):
+    label = {st.APPROVED: "Approved", st.DECLINED: "Declined",
+             st.SUBMITTED: "Submitted", st.FAILED: "Submission failed"}.get(
+                 r["status"], r["status"])
+    extra = f" &middot; bid {r['bid']}" if r["bid"] is not None else ""
+    line = f"<p class='state {e(r['status'])}'>{e(label)}{extra}</p>"
+    if r["result"]:
+        line += f"<p class='why'>{e(r['result'])}</p>"
+    if r["status"] in (st.APPROVED, st.DECLINED):
+        line += ("<form method='post' action='/decide'>"
+                 f"<input type='hidden' name='id' value='{e(r['id'])}'>"
+                 "<button class='link' name='action' value='reopen'>"
+                 "Undo</button></form>")
+    if r["status"] == st.APPROVED:
+        line += fallback_form(r, options)
+    return line
+
+
+def fallback_form(r, options):
+    """Offer a second claim for the same player, cutting somebody else.
+
+    Only where there is somebody else to cut: a copy with the same drop is a
+    duplicate, and the league would process it as one.
+    """
+    spare = [o for o in options
+             if str(o.get("id")) != str(r["drop_player_id"] or "")]
+    if not spare:
+        return ""
+    return ("<form method='post' action='/fallback'>"
+            f"<input type='hidden' name='id' value='{e(r['id'])}'>"
+            "<button class='ghost wide'>"
+            f"Also claim {e(strip_paren(r['add_player_name']))} for a "
+            "different drop</button></form>")
 
 
 def drop_name(conn, proposal_id, drop_id):
@@ -602,25 +743,43 @@ def drop_name(conn, proposal_id, drop_id):
     return None
 
 
-def drop_chooser(r, options):
-    """Pick who goes, rather than being told.
+def drop_picker(r, options):
+    """Who goes - shown by name, changed in place.
 
-    Whether anyone is worth dropping decides whether the add is worth
-    bidding on at all, so the choice belongs on the card next to the bid,
-    not in the league app afterwards.
+    Closed, it reads as a plain statement of the recommendation, because
+    whether anyone is worth dropping decides whether the add is worth
+    bidding on at all and that should not need a tap to see. Open, it grows
+    downward in the flow of the card. A native select was covering the bid
+    box behind it, and a list you cannot see past is a bad place to make
+    this particular choice.
     """
-    if not options:
-        return ""
     chosen = str(r["drop_player_id"] or "")
+    picked = next((o for o in options if str(o.get("id")) == chosen),
+                  options[0] if options else None)
     rows = []
-    for option in options:
+    for n, option in enumerate(options):
         pid = str(option.get("id") or "")
+        name = strip_paren(option.get("name") or "")
+        # The first option is what the run picked, whatever is selected now:
+        # the label says where the suggestion came from, not what you chose.
+        tag = "<span class='rec'>Recommended</span>" if n == 0 else ""
         rows.append(
-            f"<option value='{e(pid)}'{' selected' if pid == chosen else ''}>"
-            f"{e(strip_paren(option.get('name') or ''))}"
-            f" — {option.get('why', '')}</option>")
-    return ("<label class='droppick'><span class='swaplabel'>Drop</span>"
-            "<select name='drop'>" + "".join(rows) + "</select></label>")
+            f"<label class='opt'>"
+            f"<input type='radio' name='drop' form='f{e(r['id'])}'"
+            f" value='{e(pid)}'{' checked' if pid == chosen else ''}"
+            f" data-name=\"{e(name)}\" data-why=\"{e(plain_why(option.get('why')))}\""
+            f" data-pos='{e(option.get('position') or '')}'>"
+            f"<span class='optbody'><span class='optname'>{e(name)}"
+            f"{pos_chip(option.get('position'))}{tag}</span>"
+            f"<span class='optwhy'>{e(plain_why(option.get('why')))}</span></span>"
+            "</label>")
+    return ("<details class='picker'><summary>"
+            "<span class='label'>Drop</span>"
+            f"<span class='name small' data-dropname>"
+            f"{e(strip_paren((picked or {}).get('name') or ''))}</span>"
+            f"<span data-droppos>{pos_chip((picked or {}).get('position'))}</span>"
+            "<span class='change'>Change</span></summary>"
+            f"<div class='opts'>{''.join(rows)}</div></details>")
 
 
 def pos_chip(pos):
@@ -1041,9 +1200,10 @@ BUSY_JS = """
 document.addEventListener('submit', function (e) {
   document.body.classList.add('busy');
   var button = e.submitter || e.target.querySelector('button');
-  // The arrows that reorder claims sit two to a form and are too small to
-  // hold a word, so they keep their glyph and only the page goes busy.
-  if (button && !button.classList.contains('movebtn')) {
+  // Reordering and Undo are small controls whose whole meaning is their
+  // label; swapping it for 'Working...' loses that and resizes the row.
+  if (button && !button.classList.contains('movebtn')
+             && !button.classList.contains('link')) {
     button.disabled = true;
     button.textContent = 'Working...';
   }
@@ -1054,11 +1214,66 @@ document.addEventListener('click', function (e) {
     document.body.classList.add('busy');
   }
 });
+
+// What pressing Approve will spend, and what the league has left after it.
+// Both follow the box as it is typed in: a budget line that describes the
+// bids the run suggested rather than the bids on screen is worse than none.
+function approveButton(box) {
+  var id = box.getAttribute('form');
+  return document.querySelector('[data-approve][form="' + id + '"]');
+}
+function recost(league) {
+  if (!league) { return; }
+  var bar = document.querySelector('.bar[data-league="' + league + '"]');
+  if (!bar) { return; }
+  var boxes = document.querySelectorAll(
+    '[data-bid][data-league="' + league + '"]');
+  var total = 0;
+  for (var i = 0; i < boxes.length; i++) {
+    total += parseInt(boxes[i].value, 10) || 0;
+  }
+  var budget = parseInt(bar.dataset.budget, 10) || 0;
+  var committed = parseInt(bar.dataset.committed, 10) || 0;
+  var cost = bar.querySelector('[data-cost]');
+  var after = bar.querySelector('[data-after]');
+  var over = bar.querySelector('[data-over]');
+  if (cost) { cost.textContent = total; }
+  if (after) { after.textContent = budget - committed - total; }
+  if (over) { over.hidden = !(budget && committed + total > budget); }
+}
 document.addEventListener('input', function (e) {
   var box = e.target.closest('[data-bid]');
   if (!box) { return; }
-  var button = box.closest('form').querySelector('[data-approve]');
-  if (button) { button.textContent = 'Approve at ' + (box.value || 0); }
+  var button = approveButton(box);
+  if (button) {
+    var span = button.querySelector('[data-approve-bid]');
+    if (span) { span.textContent = box.value || 0; }
+  }
+  recost(box.dataset.league);
+});
+
+// Choosing a drop closes the list and restates the pick in the one line
+// that is always visible, so the card never disagrees with itself.
+document.addEventListener('change', function (e) {
+  var radio = e.target.closest('.opt input[type=radio]');
+  if (!radio) { return; }
+  var picker = radio.closest('.picker');
+  if (!picker) { return; }
+  var name = picker.querySelector('[data-dropname]');
+  var pos = picker.querySelector('[data-droppos]');
+  if (name) { name.textContent = radio.dataset.name || ''; }
+  if (pos) {
+    var chip = radio.closest('.opt').querySelector('.pos');
+    pos.innerHTML = chip ? chip.outerHTML : '';
+  }
+  var card = picker.closest('.card');
+  var who = card && card.querySelector('[data-dropwho]');
+  var why = card && card.querySelector('[data-dropwhy]');
+  if (who) { who.textContent = radio.dataset.name || ''; }
+  if (why) {
+    why.textContent = radio.dataset.why ? ' \u2014 ' + radio.dataset.why : '';
+  }
+  picker.open = false;
 });
 window.addEventListener('pageshow', function () {
   document.body.classList.remove('busy');

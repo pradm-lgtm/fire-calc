@@ -43,6 +43,7 @@ CREATE TABLE IF NOT EXISTS proposals (
     platform        TEXT NOT NULL,
     league_id       TEXT NOT NULL,
     league_name     TEXT,
+    league_note     TEXT,
     add_player_id   TEXT NOT NULL,
     add_player_name TEXT NOT NULL,
     add_position    TEXT,
@@ -179,6 +180,7 @@ MIGRATIONS = [
     "ALTER TABLE proposals ADD COLUMN bid_high INTEGER",
     "ALTER TABLE proposals ADD COLUMN drop_options TEXT",
     "ALTER TABLE proposals ADD COLUMN priority INTEGER DEFAULT 0",
+    "ALTER TABLE proposals ADD COLUMN league_note TEXT",
 ]
 
 
@@ -263,6 +265,7 @@ def add_proposal(conn, run_id, **f):
         run_id=run_id, idempotency_key=key,
         platform=f.get("platform", "sleeper"),
         league_id=str(f["league_id"]), league_name=f.get("league_name"),
+        league_note=f.get("league_note"),
         add_player_id=str(f["add_player_id"]),
         add_player_name=f["add_player_name"],
         add_position=f.get("add_position"),
@@ -560,6 +563,7 @@ def add_fallback(conn, proposal_id):
         idempotency_key=f"{row['idempotency_key']}:also:{pick.get('id')}",
         platform=row["platform"], league_id=row["league_id"],
         league_name=row["league_name"],
+        league_note=claim_order.field(row, "league_note"),
         add_player_id=row["add_player_id"],
         add_player_name=row["add_player_name"],
         add_position=row["add_position"],
