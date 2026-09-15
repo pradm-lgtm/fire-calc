@@ -240,6 +240,13 @@ def log(conn, kind, detail="", proposal_id=None):
     )
 
 
+def last_event(conn, kind):
+    """The most recent event of one kind, or None."""
+    return conn.execute(
+        "SELECT * FROM events WHERE kind = ? ORDER BY id DESC LIMIT 1",
+        (kind,)).fetchone()
+
+
 def start_run(conn, season, week, sources, note=""):
     cur = conn.execute(
         "INSERT INTO runs (created_at, season, week, sources, note)"

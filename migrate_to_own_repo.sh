@@ -63,6 +63,9 @@ done
 
 cd "$DEST"
 
+TMPDIR_TESTS="$(mktemp -d)"
+trap 'rm -rf "$TMPDIR_TESTS"' EXIT
+
 echo "==> checking every entrypoint imports"
 missing=0
 for mod in "${ENTRYPOINTS[@]}"; do
@@ -81,13 +84,27 @@ fi
 echo "    all good"
 
 echo "==> running tests"
+# The exit status of a pipeline is its LAST command, so piping through tail
+# and sed reported sed's success and the guard below never fired. A failing
+# suite printed its failure and the script committed anyway.
+failed=0
 for t in test_*.py; do
   [ -f "$t" ] || continue
-  if ! python3 "$t" 2>&1 | tail -3 | sed "s/^/    $t /"; then
-    echo "Refusing to commit with failing tests."
-    exit 1
+  set +e
+  python3 "$t" > "$TMPDIR_TESTS/$t.log" 2>&1
+  status=$?
+  set -e
+  tail -3 "$TMPDIR_TESTS/$t.log" | sed "s/^/    $t /"
+  if [ "$status" != "0" ]; then
+    echo "    $t FAILED"
+    failed=1
   fi
 done
+if [ "$failed" = "1" ]; then
+  echo
+  echo "Refusing to commit with failing tests."
+  exit 1
+fi
 
 if [ ! -d .git ]; then
   git init -q -b main

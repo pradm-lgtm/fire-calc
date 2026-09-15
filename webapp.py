@@ -159,7 +159,7 @@ label { font-size:13px; color:var(--muted); }
                   font-weight:600; list-style:none; }
 .fold > summary::-webkit-details-marker { display:none; }
 .fold > summary::after { content:'+'; color:var(--muted); font-weight:400; }
-.fold[open] > summary::after { content:'\2212'; }
+.fold[open] > summary::after { content:'−'; }
 
 /* The waiver card. Hierarchy comes from size, weight and colour: nothing
    here is set in tracked-out capitals, which read as template chrome rather
@@ -203,7 +203,7 @@ label { font-size:13px; color:var(--muted); }
                     padding:2px 0; }
 .picker > summary::-webkit-details-marker { display:none; }
 .change { color:var(--action); font-size:13px; margin-left:auto; }
-.picker[open] .change::after { content:' \2212'; }
+.picker[open] .change::after { content:' −'; }
 .opts { border:1px solid var(--line); border-radius:10px; margin-top:8px;
         overflow:hidden; }
 .opt { display:flex; gap:10px; padding:10px 12px; cursor:pointer;
@@ -273,9 +273,18 @@ label { font-size:13px; color:var(--muted); }
 .changes { margin:4px 0 0; padding-left:18px; color:var(--muted);
            font-size:13px; }
 .changes li { margin:2px 0; }
-.state { font-size:14px; font-weight:600; margin:12px 0 0; }
+.settled { background:transparent; }
+.settled.approved { border-color:var(--ok); }
+.settled .name { font-size:17px; }
+.settled .quote, .settled .reason { display:none; }
+.state { display:flex; align-items:baseline; gap:8px; flex-wrap:wrap;
+         font-size:15px; font-weight:650; margin:12px 0 0; }
+.statemark { font-weight:700; }
+.statenote { color:var(--muted); font-size:12.5px; font-weight:400; }
 .state.approved { color:var(--ok); } .state.declined { color:var(--no); }
 .state.submitted { color:var(--action); }
+.state.failed { color:var(--urgent); }
+.trouble { border-color:var(--urgent); }
 .empty { color:var(--muted); padding:20px 0; }
 .bar { display:flex; flex-wrap:wrap; gap:4px 14px;
        background:var(--card); border:1px solid var(--line); border-radius:10px;
@@ -406,6 +415,10 @@ def render(conn):
            f"<div class='counts'>{counts}</div>",
            refresh_button("Re-check waivers")]
 
+    trouble = refresh_trouble(conn)
+    if trouble:
+        out.append(trouble)
+
     ready = [r for r in rows if r["status"] == st.APPROVED
              and not r["submitted_at"]]
     if ready:
@@ -420,6 +433,28 @@ def render(conn):
         for r in items:
             out.append(card(r, marks.get(r["id"])))
     return page("".join(out), "Spike — waivers")
+
+
+def refresh_trouble(conn):
+    """Say so when the last attempt to work the proposals out again failed.
+
+    The button used to swallow the error and redirect, so a refresh that
+    never ran was indistinguishable from one that found nothing to change -
+    and what you were reading stayed weeks old without saying so.
+    """
+    failed = st.last_event(conn, "refresh_failed")
+    if not failed:
+        return ""
+    ok = st.last_event(conn, "refresh_ok")
+    if ok and ok["id"] > failed["id"]:
+        return ""
+    when = said_ago(age_of({"created_at": failed["at"]}))
+    return (f"<div class='card trouble'><p class='paneltop'>The last re-check "
+            f"failed, {e(when)}</p>"
+            f"<p class='why'>{e(failed['detail'] or 'no detail recorded')}"
+            "</p><p class='why'>What is below is from the run before it, so "
+            "it may be out of date. Re-checking from a computer that can "
+            "reach the article sites is the way round it.</p></div>")
 
 
 def league_heading(conn, lid, lname, items, waiting, live):
@@ -552,7 +587,10 @@ def card(r, mark=None):
     """
     pending = r["status"] == st.PENDING
     options = json.loads(r["drop_options"] or "[]")
-    bits = ["<article class='card'>"]
+    # A decided card stays where it was - the list should not jump under you
+    # - but it stops looking like one waiting for an answer.
+    settled = "" if pending else f" settled {e(r['status'])}"
+    bits = [f"<article class='card{settled}'>"]
     if pending:
         # The form is declared once, empty, and the controls scattered down
         # the card join it by id. That is what lets the drop list sit above
@@ -692,12 +730,28 @@ def decide_form(r):
             " value='decline'>Decline</button></div>")
 
 
+# What a decided card says about itself, and the mark that goes with it.
+STATES = {
+    st.APPROVED: ("\u2713", "Approved", "waiting to be placed in Sleeper"),
+    st.DECLINED: ("\u2715", "Declined", "this one will not be filed"),
+    st.SUBMITTED: ("\u2713", "Placed in Sleeper", "pending until waivers run"),
+    st.FAILED: ("!", "Could not be placed", ""),
+}
+
+
 def outcome(r, options):
-    label = {st.APPROVED: "Approved", st.DECLINED: "Declined",
-             st.SUBMITTED: "Submitted", st.FAILED: "Submission failed"}.get(
-                 r["status"], r["status"])
-    extra = f" &middot; bid {r['bid']}" if r["bid"] is not None else ""
-    line = f"<p class='state {e(r['status'])}'>{e(label)}{extra}</p>"
+    """The result, stated plainly enough to see from across the room.
+
+    A green line of small text under a card that still looked exactly like
+    the ones above it was not enough to answer "did that work?".
+    """
+    glyph, label, note = STATES.get(
+        r["status"], ("", str(r["status"]).title(), ""))
+    extra = f" at {r['bid']}" if r["bid"] is not None else ""
+    line = (f"<p class='state {e(r['status'])}'><span class='statemark'>{glyph}"
+            f"</span>{e(label)}{e(extra)}"
+            + (f"<span class='statenote'>{e(note)}</span>" if note else "")
+            + "</p>")
     if r["result"]:
         line += f"<p class='why'>{e(r['result'])}</p>"
     if r["status"] in (st.APPROVED, st.DECLINED):
@@ -892,10 +946,18 @@ def refresh_waivers(conn, db_path):
                "your leagues."
     try:
         run_weekly.main_for(username, db_path, force=True)
+        st.log(conn, "refresh_ok", "")
+        conn.commit()
         return None
     except Exception as exc:
         traceback.print_exc()
-        return scrub(f"{type(exc).__name__}: {exc}")
+        # Recorded rather than returned into the void. A refresh that fails
+        # silently looks exactly like one that found nothing new, which is
+        # how a fortnight-old set of proposals can sit there looking current.
+        detail = scrub(f"{type(exc).__name__}: {exc}")
+        st.log(conn, "refresh_failed", detail)
+        conn.commit()
+        return detail
 
 
 def refresh_button(label):
@@ -1202,11 +1264,17 @@ document.addEventListener('submit', function (e) {
   var button = e.submitter || e.target.querySelector('button');
   // Reordering and Undo are small controls whose whole meaning is their
   // label; swapping it for 'Working...' loses that and resizes the row.
-  if (button && !button.classList.contains('movebtn')
-             && !button.classList.contains('link')) {
+  if (!button || button.classList.contains('movebtn')
+              || button.classList.contains('link')) { return; }
+  // The wait matters. A form's data is built AFTER this handler returns, and
+  // disabled controls are left out of it - so disabling the button that was
+  // just pressed deletes its own name and value from the request. That is
+  // how Approve sent a post with no action in it and the page came back with
+  // the card untouched. Deferring puts the change after the data is built.
+  setTimeout(function () {
     button.disabled = true;
     button.textContent = 'Working...';
-  }
+  }, 0);
 });
 document.addEventListener('click', function (e) {
   var link = e.target.closest('nav a');

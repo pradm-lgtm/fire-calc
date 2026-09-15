@@ -479,5 +479,19 @@ class SubmitButton(unittest.TestCase):
         self.assertIsNone(st.pending_submit_request(conn))
 
 
+class Stylesheet(unittest.TestCase):
+    """The stylesheet is a Python string, which is a trap.
+
+    A CSS escape like \\2212 is also an octal escape to Python: it becomes
+    one control character and a stray digit, and the page draws a 2 where it
+    meant a minus sign. Anything a designer would write as an escape has to
+    be the character itself here.
+    """
+
+    def test_no_control_characters_reached_the_stylesheet(self):
+        bad = [c for c in webapp.CSS if ord(c) < 32 and c not in "\n\t"]
+        self.assertEqual(bad, [])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
