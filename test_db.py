@@ -149,5 +149,35 @@ class WhichDatabase(unittest.TestCase):
         self.assertEqual(db.backend(), db.SQLITE)
 
 
+class WhatTheHostAsksFor(unittest.TestCase):
+    """The hosted page must not get a throwaway database."""
+
+    def setUp(self):
+        self.had = os.environ.get("DATABASE_URL")
+        self.addCleanup(self.restore)
+        os.environ["DATABASE_URL"] = "postgres://pretend/nowhere"
+
+    def restore(self):
+        if self.had is None:
+            os.environ.pop("DATABASE_URL", None)
+        else:
+            os.environ["DATABASE_URL"] = self.had
+
+    def test_only_an_explicit_memory_path_forces_sqlite(self):
+        # ":memory:" was the Vercel handler's placeholder for "no file".
+        # Once that started forcing SQLite, every request got its own empty
+        # database: writes reported success and vanished with the request.
+        self.assertEqual(db.Connection(":memory:").kind, db.SQLITE)
+        self.assertEqual(db.backend(), db.POSTGRES)
+
+    def test_the_hosted_handler_asks_for_no_path(self):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location(
+            "vercel_entry", "api/index.py")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        self.assertIsNone(module.handler.db_path)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

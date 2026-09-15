@@ -19,8 +19,11 @@ from webapp import Handler as _Handler  # noqa: E402
 
 
 class handler(_Handler):
-    # Ignored when DATABASE_URL is set, but keeps the attribute defined.
-    db_path = os.environ.get("FANTASY_DB", ":memory:")
+    # None, not ":memory:". Asking for an in-memory database now means
+    # SQLite whatever the environment says - which is right for tests and
+    # was catastrophic here: every request got its own empty database, so
+    # every write reported success and vanished with the request.
+    db_path = os.environ.get("FANTASY_DB") or None
 
     def log_message(self, fmt, *args):
         # Vercel captures stdout as function logs; keep request noise out.

@@ -1240,13 +1240,14 @@ class Handler(BaseHTTPRequestHandler):
                 # deploys, so the message has to be here. It names the
                 # database host and the schema, so only someone who has
                 # signed in or holds the API token gets to read it.
+                backend = db.backend()
                 state = f"database unreachable: {type(exc).__name__}"
                 if self._authed() or auth.check_api_token(
                         self.headers.get("Authorization")):
                     state += f": {scrub(exc)}"
                 else:
                     state += " (sign in or send the API token for the detail)"
-            self._send(200, f"{state} (db={db.backend()})", "text/plain")
+            self._send(200, f"{state} (db={backend})", "text/plain")
             return
         if path == "/login":
             self._send(200, page(login_page(
