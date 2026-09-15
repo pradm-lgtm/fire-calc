@@ -299,7 +299,9 @@ def render(conn):
         return page(nav("/") + "<h1>Waiver proposals</h1>"
                     + refresh_button("Re-check waivers")
                     + "<p class='empty'>Nothing yet. The weekly job runs "
-                      "Monday night, after the last game.</p>", "Spike — waivers")
+                      "Monday morning, and again after Monday night "
+                      "football. Re-check waivers works it out now.</p>",
+                    "Spike — waivers")
 
     rows = st.proposals_for_run(conn, run["id"])
     if not rows:
