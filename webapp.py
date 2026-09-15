@@ -285,6 +285,8 @@ label { font-size:13px; color:var(--muted); }
 .state.submitted { color:var(--action); }
 .state.failed { color:var(--urgent); }
 .trouble { border-color:var(--urgent); }
+.trouble code { font-size:12.5px; background:var(--bg); padding:2px 5px;
+                border-radius:5px; }
 .empty { color:var(--muted); padding:20px 0; }
 .bar { display:flex; flex-wrap:wrap; gap:4px 14px;
        background:var(--card); border:1px solid var(--line); border-radius:10px;
@@ -415,6 +417,7 @@ def render(conn):
            f"<div class='counts'>{counts}</div>",
            refresh_button("Re-check waivers")]
 
+    out.append(stale_warning(run))
     trouble = refresh_trouble(conn)
     if trouble:
         out.append(trouble)
@@ -433,6 +436,59 @@ def render(conn):
         for r in items:
             out.append(card(r, marks.get(r["id"])))
     return page("".join(out), "Spike — waivers")
+
+
+def run_summary(conn):
+    """What the page is actually showing, in numbers.
+
+    "It looks stale" and "it is stale" were impossible to tell apart from a
+    screenshot, and guessing at it twice was twice too often. This says which
+    run is on the page, how old it is, and how many players each proposal
+    offers to drop - which is the tell, since three of them means the run
+    predates the change that offers the whole roster.
+    """
+    run = st.latest_run(conn)
+    if not run:
+        return {"run": None, "proposals": 0,
+                "note": "no run has ever been filed here"}
+    rows = st.proposals_for_run(conn, run["id"])
+    counts = sorted(len(json.loads(r["drop_options"] or "[]")) for r in rows)
+    failed = st.last_event(conn, "refresh_failed")
+    ok = st.last_event(conn, "refresh_ok")
+    return {
+        "run": run["id"],
+        "season": run["season"],
+        "week": run["week"],
+        "filed": run["created_at"],
+        "age": said_ago(age_of(run)),
+        "proposals": len(rows),
+        "drop_options": {"fewest": counts[0] if counts else 0,
+                         "most": counts[-1] if counts else 0},
+        "statuses": {k: sum(1 for r in rows if r["status"] == k)
+                     for k in {r["status"] for r in rows}},
+        "last_refresh_failure": (
+            None if not failed or (ok and ok["id"] > failed["id"])
+            else {"at": failed["at"], "detail": failed["detail"]}),
+        "database": conn.kind,
+    }
+
+
+def stale_warning(run):
+    """Say when what is on the page is too old to act on.
+
+    Waivers are a weekly thing, so a run from the week before last is not
+    merely out of date: the players in it have been claimed and the article
+    it read has been replaced.
+    """
+    days = (age_of(run) or timedelta(0)).days
+    if days < 4:
+        return ""
+    return (f"<div class='card trouble'><p class='paneltop'>These proposals "
+            f"are {days} days old</p><p class='why'>They were worked out for "
+            f"week {e(run['week'])}, from articles published then, against "
+            "rosters as they were then. Re-check waivers below, or run "
+            "<code>python3 run_weekly.py --force</code> where the weekly job "
+            "lives if this page cannot reach the article sites.</p></div>")
 
 
 def refresh_trouble(conn):
@@ -1697,6 +1753,19 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/login":
             self._send(200, page(login_page(
                 "Sign in to review this week's waiver proposals."), "Spike"))
+            return
+        if path == "/api/status":
+            if not auth.check_api_token(self.headers.get("Authorization")):
+                self._json(401, {"error": auth.token_complaint(
+                    self.headers.get("Authorization"))})
+                return
+            conn = self._conn()
+            try:
+                self._json(200, run_summary(conn))
+            except Exception as exc:
+                self._json(500, {"error": f"{type(exc).__name__}: {exc}"})
+            finally:
+                conn.close()
             return
         if path == "/api/claims":
             if not auth.check_api_token(self.headers.get("Authorization")):

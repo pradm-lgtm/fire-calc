@@ -297,6 +297,8 @@ def main():
     ap.add_argument("--moves", type=int, default=3)
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--db", default=str(st.DB_PATH))
+    ap.add_argument("--status", action="store_true",
+                    help="say what is on the approval page now, and stop")
     ap.add_argument("--force", action="store_true",
                     help="propose again even if this week already has a run")
     ap.add_argument("--update", action="store_true",
@@ -304,12 +306,54 @@ def main():
                          "decisions already made on it")
     args = ap.parse_args()
 
+    if args.status:
+        return say_status()
+
     username = args.username
     if not username:
         print("Give a Sleeper username: python3 run_weekly.py YOUR_USERNAME")
         return 1
     return _run(username, args.url, args.moves, args.dry_run, args.db,
                 args.force, args.update)
+
+
+def say_status():
+    """Print what the approval page is actually showing.
+
+    A screenshot cannot tell a page that is wrong from a page that is merely
+    old, and two rounds went on guessing which. The number to look at is the
+    drop options: three of them means the run predates the change that offers
+    the whole roster, and no amount of deploying will alter it - only a new
+    run will.
+    """
+    import cloud_client as cloud
+    if not cloud.configured():
+        print("FANTASY_API_URL is not set, so there is no hosted page to ask.")
+        return 1
+    try:
+        info = cloud.status()
+    except cloud.RemoteError as exc:
+        print(f"ERROR: {exc}")
+        return 1
+    if not info.get("run"):
+        print("The page has no proposals at all yet.")
+        return 0
+    print(f"Run {info['run']} - season {info['season']}, week {info['week']}")
+    print(f"  filed        {info['filed']} ({info['age']})")
+    print(f"  proposals    {info['proposals']}  {info.get('statuses') or ''}")
+    drops = info.get("drop_options") or {}
+    print(f"  drop options {drops.get('fewest')} to {drops.get('most')}"
+          " per proposal")
+    print(f"  database     {info.get('database')}")
+    if (drops.get("most") or 0) <= 3:
+        print("\n  Three or fewer drop options means this run was worked out")
+        print("  before the whole roster was offered. Re-run to replace it:")
+        print("      python3 run_weekly.py --force")
+    if info.get("last_refresh_failure"):
+        fail = info["last_refresh_failure"]
+        print(f"\n  The last Re-check waivers failed at {fail['at']}:")
+        print(f"      {fail['detail']}")
+    return 0
 
 
 def _run(username, urls, moves, dry_run, db_path, force=False,

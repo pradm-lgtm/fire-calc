@@ -10,6 +10,7 @@ those arrived on a card as the reason to spend real FAAB.
 
 import re
 import unittest
+from datetime import datetime, timedelta, timezone
 
 import expert_extract as ex
 import run_weekly as rw
@@ -311,6 +312,58 @@ class Page(unittest.TestCase):
                           rationale="RB &middot; 5 rostered")
         self.assertNotIn("&amp;middot;", body)
         self.assertIn("\u00b7", body)
+
+
+class Staleness(unittest.TestCase):
+    """Telling a page that is wrong from a page that is merely old."""
+
+    def build(self, days_old, options=2):
+        conn = st.connect(":memory:")
+        run = st.start_run(conn, "2026", 1, ["ESPN"])
+        opts = [{"id": f"d{i}", "name": f"Player {i} (GB RB)",
+                 "position": "RB", "why": "weakest"} for i in range(options)]
+        st.add_proposal(conn, run, league_id="1", league_name="LEHG",
+                        add_player_id="a", add_player_name="Add Him (SF RB)",
+                        add_position="RB", drop_player_id="d0",
+                        drop_player_name="Player 0 (GB RB)",
+                        drop_position="RB", bid=4, max_bid=100, consensus=1,
+                        sources=[], rationale="", quote="",
+                        drop_options=opts)
+        when = (datetime.now(timezone.utc)
+                - timedelta(days=days_old)).isoformat(timespec="seconds")
+        conn.execute("UPDATE runs SET created_at = ? WHERE id = ?", (when, run))
+        conn.commit()
+        return conn
+
+    def test_a_fortnight_old_run_says_so(self):
+        body = webapp.render(self.build(13)).decode()
+        self.assertIn("These proposals are 13 days old", body)
+
+    def test_a_run_from_this_morning_does_not(self):
+        body = webapp.render(self.build(0)).decode()
+        self.assertNotIn("days old", body)
+
+    def test_the_status_reports_what_is_on_the_page(self):
+        info = webapp.run_summary(self.build(13, options=3))
+        self.assertEqual(info["week"], 1)
+        self.assertEqual(info["proposals"], 1)
+        self.assertEqual(info["drop_options"], {"fewest": 3, "most": 3})
+        self.assertEqual(info["statuses"], {st.PENDING: 1})
+
+    def test_the_status_of_an_empty_page_does_not_explode(self):
+        info = webapp.run_summary(st.connect(":memory:"))
+        self.assertIsNone(info["run"])
+
+    def test_a_refresh_failure_is_reported_until_one_succeeds(self):
+        conn = self.build(1)
+        st.log(conn, "refresh_failed", "TimeoutError: espn.com took too long")
+        conn.commit()
+        self.assertIn("took too long", webapp.render(conn).decode())
+        self.assertIsNotNone(webapp.run_summary(conn)["last_refresh_failure"])
+        st.log(conn, "refresh_ok", "")
+        conn.commit()
+        self.assertNotIn("took too long", webapp.render(conn).decode())
+        self.assertIsNone(webapp.run_summary(conn)["last_refresh_failure"])
 
 
 class Candidates(unittest.TestCase):

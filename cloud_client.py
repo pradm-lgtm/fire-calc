@@ -102,6 +102,15 @@ def finish_submit_request(request_id, detail=""):
                  {"id": int(request_id), "detail": str(detail)[:500]})
 
 
+def status():
+    """What the host currently has on the page, in numbers.
+
+    No payload, so this goes out as a GET - the point is to read what is
+    there without touching it.
+    """
+    return _call("/api/status")
+
+
 def recent_claims():
     """Approved and recently submitted claims, for auditing."""
     return _call("/api/claims?include=submitted").get("claims", [])
