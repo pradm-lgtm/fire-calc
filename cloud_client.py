@@ -65,11 +65,12 @@ def approved_unsubmitted():
     return _call("/api/claims").get("claims", [])
 
 
-def push_proposals(season, week, sources, proposals, force=False):
+def push_proposals(season, week, sources, proposals, force=False,
+                   update=False):
     """Send a week's proposals to the host that serves the approval page."""
     return _call("/api/proposals", {
         "season": season, "week": week, "sources": sources,
-        "proposals": proposals, "force": force,
+        "proposals": proposals, "force": force, "update": update,
     }, timeout=120)
 
 
@@ -85,6 +86,20 @@ def push_trades(season, week, source, leagues):
     return _call("/api/trades", {
         "season": season, "week": week, "source": source, "leagues": leagues,
     }, timeout=120)
+
+
+def claim_submit_request():
+    """Take the pending "place them now" request, if there is one.
+
+    Claimed rather than merely read, so two runs cannot both act on one
+    press of the button.
+    """
+    return _call("/api/submit/claim", {})
+
+
+def finish_submit_request(request_id, detail=""):
+    return _call("/api/submit/done",
+                 {"id": int(request_id), "detail": str(detail)[:500]})
 
 
 def recent_claims():

@@ -325,8 +325,9 @@ first-party option now.
 Then set three repository secrets in GitHub (Settings, Secrets and
 variables, Actions) so the scheduled jobs can reach it: `FANTASY_API_URL`
 (your Vercel URL), `FANTASY_API_TOKEN` (the same token), and `FANTASY_USER`
-(your Sleeper username). Waivers run Monday night after the last game, so they are waiting on
-Tuesday morning; start/sit runs Sunday morning. Both can be run by hand
+(your Sleeper username). Waivers run Monday morning, when the analysts have already written, and
+again after Monday night football to add whatever changed rather than
+starting over; start/sit runs Sunday morning. Both can be run by hand
 from the Actions tab, and from a button on the page itself.
 
 Finally, point the local half at the host by adding two lines to `.env`:
@@ -343,13 +344,18 @@ which is why the same code needs no `.env` on Vercel or in Actions.
 `submitter.py` then reads approved claims from the host instead of a local
 file, and reports back what happened.
 
-It is not scheduled by default. Filing proposals is reading; placing claims
-reaches into a league, and starting that on a timer should be a decision made
-once rather than a default inherited. `install_schedule.py --submit` schedules
-it for Tuesday evening, before waivers process overnight. Either way it only
-ever reads claims already approved on the page, so an unattended run can do
-nothing you have not already agreed to — and it drives a real browser, so
-that Mac has to be awake and signed in to Sleeper.
+The page cannot place a claim itself: it runs where there is no browser and
+no Sleeper session. So the waivers page carries a **Place them in Sleeper
+now** button that records the request, and `install_schedule.py --watch`
+runs a check on your Mac every minute that acts on it. Every submission still
+begins with you pressing something, which is the difference between this and
+a timer.
+
+`--submit` installs a timer instead, Tuesday evening, for when you would
+rather they went in whether or not you are there. Either way the submitter's
+only query is approved-and-unsubmitted, so nothing pending or declined is
+visible to it, and it drives a real browser, so that Mac has to be awake and
+signed in to Sleeper.
 
 ### Storage
 

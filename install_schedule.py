@@ -2,23 +2,30 @@
 """
 Install the Tuesday job and the always-on approval page as launchd services.
 
-    python3 install_schedule.py --user pradm7          # install both
-    python3 install_schedule.py --user pradm7 --day tue --hour 8
+    python3 install_schedule.py --user pradm7            # page and weekly job
+    python3 install_schedule.py --user pradm7 --watch   # and the submit button
+    python3 install_schedule.py --user pradm7 --day mon --hour 8
     python3 install_schedule.py --status               # what is installed
     python3 install_schedule.py --uninstall            # remove both
 
-Three services, two of them on by default:
+Four services, two of them on by default:
 
-  weekly  fires Tuesday morning, gathers this week's articles, files
-          proposals, then exits. Waivers process Wednesday overnight, so
-          Tuesday morning leaves the whole day to review.
+  weekly  gathers this week's articles and files proposals, then exits.
+          Monday morning by default: the analysts have written by then, and
+          waiting for the last game costs a day of review for a picture that
+          barely moves.
   web     keeps the approval page up, restarting it if it dies and starting
           it again at login, so the URL simply works when you open it.
-  submit  places the claims you approved, Tuesday evening by default. OFF
-          unless you ask for it with --submit, because filing proposals is
-          reading and placing claims reaches into a league. It only ever
-          reads claims already approved on the page, and needs Chrome
-          signed in to Sleeper and this Mac awake.
+  watch   checks the page's "place them now" button every minute and acts
+          on it. OFF unless you ask for it with --watch. This is the one to
+          use: every submission still begins with you pressing something,
+          and the page cannot place claims itself because it runs where
+          there is no browser and no Sleeper session.
+  submit  places approved claims on a timer instead, Tuesday evening by
+          default, with --submit. Use it only if you want them placed
+          whether or not you are there.
+
+Both need Chrome running and signed in to Sleeper, and this Mac awake.
 
 launchd will not wake a sleeping Mac on its own. If the machine is asleep at
 the scheduled time the job runs when it next wakes, which for a Tuesday
@@ -38,6 +45,7 @@ LAUNCH_DIR = Path.home() / "Library" / "LaunchAgents"
 WEEKLY_LABEL = "com.fantasyagent.weekly"
 WEB_LABEL = "com.fantasyagent.web"
 SUBMIT_LABEL = "com.fantasyagent.submit"
+WATCH_LABEL = "com.fantasyagent.watch"
 DAYS = {"sun": 0, "mon": 1, "tue": 2, "wed": 3, "thu": 4, "fri": 5, "sat": 6}
 
 
@@ -55,6 +63,25 @@ def weekly_plist(username, weekday, hour, minute):
         "StandardOutPath": str(HERE / "logs" / "weekly.log"),
         "StandardErrorPath": str(HERE / "logs" / "weekly.err"),
         "RunAtLoad": False,
+    }
+
+
+def watch_plist(username):
+    """Check the page's button every minute and act on it.
+
+    Not a timer that submits: a timer that looks for your press. Every
+    submission still begins with you pressing something, which is the
+    difference between this and a scheduled run.
+    """
+    return {
+        "Label": WATCH_LABEL,
+        "ProgramArguments": [python_bin(), str(HERE / "submitter.py"),
+                             username, "--watch"],
+        "WorkingDirectory": str(HERE),
+        "StartInterval": 60,
+        "RunAtLoad": False,
+        "StandardOutPath": str(HERE / "logs" / "submit.log"),
+        "StandardErrorPath": str(HERE / "logs" / "submit.err"),
     }
 
 
@@ -151,7 +178,8 @@ def reachable_urls(port):
 def status():
     out = subprocess.run(["launchctl", "list"], capture_output=True,
                          text=True).stdout
-    for label in (WEEKLY_LABEL, WEB_LABEL, SUBMIT_LABEL):
+    for label in (WEEKLY_LABEL, WEB_LABEL, SUBMIT_LABEL,
+                  WATCH_LABEL):
         installed = (LAUNCH_DIR / f"{label}.plist").exists()
         running = label in out
         print(f"  {label}: "
@@ -183,7 +211,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--user", help="Sleeper username the weekly job runs for")
-    ap.add_argument("--day", default="tue", choices=sorted(DAYS))
+    ap.add_argument("--day", default="mon", choices=sorted(DAYS))
     ap.add_argument("--hour", type=int, default=8)
     ap.add_argument("--minute", type=int, default=30)
     ap.add_argument("--host", default="127.0.0.1",
@@ -191,6 +219,9 @@ def main():
     ap.add_argument("--port", type=int, default=8777)
     ap.add_argument("--wake", action="store_true",
                     help="also schedule a system wake before the job")
+    ap.add_argument("--watch", action="store_true",
+                    help="act on the page's 'place them now' button, checking "
+                         "every minute (recommended over --submit)")
     ap.add_argument("--submit", action="store_true",
                     help="also place approved claims on a schedule "
                          "(off by default; it reaches into your leagues)")
@@ -212,6 +243,7 @@ def main():
         unload(WEEKLY_LABEL)
         unload(WEB_LABEL)
         unload(SUBMIT_LABEL)
+        unload(WATCH_LABEL)
         return 0
     if not args.user:
         print("Need --user YOUR_SLEEPER_USERNAME (or --status / --uninstall)")
@@ -221,6 +253,10 @@ def main():
     ok = write_and_load(WEEKLY_LABEL, weekly_plist(
         args.user, DAYS[args.day], args.hour, args.minute))
     ok &= write_and_load(WEB_LABEL, web_plist(args.host, args.port))
+    if args.watch:
+        ok &= write_and_load(WATCH_LABEL, watch_plist(args.user))
+    else:
+        unload(WATCH_LABEL)
     if args.submit:
         ok &= write_and_load(SUBMIT_LABEL, submit_plist(
             DAYS[args.submit_day], args.submit_hour, args.submit_minute))
@@ -245,16 +281,22 @@ def main():
               "from your phone.")
     print(f"Weekly job: {args.day.title()} {args.hour:02d}:{args.minute:02d}, "
           f"logging to logs/weekly.log")
+    if args.watch:
+        print("Submitter: waiting for the page's button, checked every "
+              "minute, logging to logs/submit.log")
+        print("  Nothing is placed until you press it. Chrome has to be "
+              "running and signed in to Sleeper.")
     if args.submit:
         print(f"Submitter: {args.submit_day.title()} "
               f"{args.submit_hour:02d}:{args.submit_minute:02d}, placing only "
               "claims you have approved, logging to logs/submit.log")
         print("  It drives Chrome, so that Mac has to be awake and signed in "
               "to Sleeper.")
-    else:
-        print("Submitter: not scheduled. Approved claims wait for "
+    elif not args.watch:
+        print("Submitter: not running. Approved claims wait for "
               "`python3 submitter.py`.")
-        print("  Add --submit to have it place them Tuesday evening instead.")
+        print("  --watch acts on the page's button; --submit runs it on a "
+              "timer instead.")
     print("\nCheck anytime with:  python3 install_schedule.py --status")
     return 0 if ok else 1
 

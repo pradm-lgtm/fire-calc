@@ -329,6 +329,11 @@ def render(conn):
            f"<div class='counts'>{counts}</div>",
            refresh_button("Re-check waivers")]
 
+    ready = [r for r in rows if r["status"] == st.APPROVED
+             and not r["submitted_at"]]
+    if ready:
+        out.append(submit_panel(conn, ready))
+
     for (lid, lname), items in by_league.items():
         budget = items[0]["max_bid"] or 0
         committed = st.budget_committed(conn, lid)
@@ -351,6 +356,41 @@ def render(conn):
         for r in items:
             out.append(card(r))
     return page("".join(out), "Spike — waivers")
+
+
+def submit_panel(conn, ready):
+    """Ask the Mac to place what you have approved.
+
+    The page runs on a server with no browser and no Sleeper session, so it
+    cannot place anything itself. Pressing this records the request; the Mac
+    that does have a browser picks it up within the minute.
+    """
+    last = st.last_submit_request(conn)
+    note = ""
+    if last:
+        if last["finished_at"]:
+            note = (f"Last run {e(said_ago(age_of_field(last, 'finished_at')))}"
+                    f": {e(last['detail'] or 'done')}")
+        elif last["claimed_at"]:
+            note = "Your Mac is placing them now."
+        else:
+            note = ("Waiting for your Mac to pick this up. It has to be awake "
+                    "and signed in to Sleeper.")
+    waiting = last and not last["finished_at"]
+    return ("<div class='card'>"
+            f"<div class='move'><span class='add'>{len(ready)} claim"
+            f"{'s' if len(ready) != 1 else ''} approved and not yet placed"
+            "</span></div>"
+            + (f"<p class='why'>{note}</p>" if note else "")
+            + ("" if waiting else
+               "<form method='post' action='/submit'>"
+               "<button class='approve' style='width:100%;margin-top:12px'>"
+               "Place them in Sleeper now</button></form>")
+            + "</div>")
+
+
+def age_of_field(row, field):
+    return age_of({"created_at": row[field]})
 
 
 def card(r):
@@ -1286,19 +1326,68 @@ class Handler(BaseHTTPRequestHandler):
             rows = payload.get("proposals") or []
             conn = self._conn()
             try:
-                if already_ran_this_week(conn) and not payload.get("force"):
+                current = st.latest_run(conn)
+                fresh = already_ran_this_week(conn)
+                if fresh and not (payload.get("force")
+                                  or payload.get("update")):
                     self._json(200, {"ok": True,
                                      "skipped": "already ran this week"})
                     return
-                run_id = st.start_run(conn, payload.get("season"),
-                                      payload.get("week"),
-                                      payload.get("sources") or [])
+                if payload.get("update") and fresh and current:
+                    # Add to the week's run rather than replacing it. Monday
+                    # night only changes the picture a little, and starting
+                    # over would hide every decision made during the day.
+                    run_id = current["id"]
+                    added = "added to"
+                else:
+                    run_id = st.start_run(conn, payload.get("season"),
+                                          payload.get("week"),
+                                          payload.get("sources") or [])
+                    added = "filed as"
                 written = sum(1 for r in rows
                               if st.add_proposal(conn, run_id, **r) is not None)
-                self._json(200, {"ok": True, "run": run_id,
+                self._json(200, {"ok": True, "run": run_id, "mode": added,
                                  "written": written, "received": len(rows)})
             except Exception as exc:
                 self._json(500, {"error": f"{type(exc).__name__}: {exc}"})
+            finally:
+                conn.close()
+            return
+
+        if path == "/api/submit/claim":
+            if not auth.check_api_token(self.headers.get("Authorization")):
+                self._json(401, {"error": auth.token_complaint(
+                    self.headers.get("Authorization"))})
+                return
+            self.rfile.read(length)
+            conn = self._conn()
+            try:
+                waiting = st.pending_submit_request(conn)
+                if not waiting:
+                    self._json(200, {"requested": False})
+                    return
+                st.claim_submit_request(conn, waiting["id"])
+                self._json(200, {"requested": True, "id": waiting["id"],
+                                 "asked_at": waiting["asked_at"]})
+            finally:
+                conn.close()
+            return
+
+        if path == "/api/submit/done":
+            if not auth.check_api_token(self.headers.get("Authorization")):
+                self._json(401, {"error": auth.token_complaint(
+                    self.headers.get("Authorization"))})
+                return
+            try:
+                payload = json.loads(self.rfile.read(length) or b"{}")
+            except json.JSONDecodeError:
+                self._json(400, {"error": "body was not JSON"})
+                return
+            conn = self._conn()
+            try:
+                st.finish_submit_request(conn, int(payload.get("id") or 0),
+                                         payload.get("detail", ""))
+                self._json(200, {"ok": True})
             finally:
                 conn.close()
             return
@@ -1406,6 +1495,23 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(200, {"ok": True})
             finally:
                 conn.close()
+            return
+
+        if path == "/submit":
+            if not self._authed():
+                self.send_response(303)
+                self.send_header("Location", "/login")
+                self.end_headers()
+                return
+            self.rfile.read(length)
+            conn = self._conn()
+            try:
+                st.ask_to_submit(conn)
+            finally:
+                conn.close()
+            self.send_response(303)
+            self.send_header("Location", "/")
+            self.end_headers()
             return
 
         if path == "/trades/refresh":

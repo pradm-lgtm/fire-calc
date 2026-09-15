@@ -7,17 +7,19 @@ name: weekly waiver job
 
 on:
   schedule:
-    # Monday 21:00 US Pacific, after Monday night football, so the proposals
-    # account for the last game of the week and are waiting on Tuesday
-    # morning. That is Tuesday in UTC, which is what cron reads. GitHub cron
-    # ignores daylight saving, so both offsets are listed; the host ignores a
-    # second run in the same week.
+    # Monday morning, because the analysts have already written by then and
+    # waiting until the last game costs a day of review for a picture that
+    # barely moves.
+    - cron: "0 15 * * 1"  # Mon 08:00 PDT
+    - cron: "0 16 * * 1"  # Mon 08:00 PST
+    # Again after Monday night football, adding whatever changed rather than
+    # starting over. That is Tuesday in UTC, which is what cron reads.
     - cron: "0 4 * * 2"   # Mon 21:00 PDT
     - cron: "0 5 * * 2"   # Mon 21:00 PST
   workflow_dispatch:
     inputs:
       force:
-        description: "Propose again even if this week already ran"
+        description: "Start the week over, discarding the current proposals"
         type: boolean
         default: false
 
@@ -36,7 +38,7 @@ jobs:
           FANTASY_USER: ${{ secrets.FANTASY_USER }}
         run: |
           python3 run_weekly.py "$FANTASY_USER" \
-            ${{ inputs.force && '--force' || '' }}
+            ${{ inputs.force && '--force' || '--update' }}
 
       - name: Work out the trade offers
         env:

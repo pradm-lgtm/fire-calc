@@ -170,6 +170,9 @@ def main():
     ap.add_argument("--db", default=str(st.DB_PATH))
     ap.add_argument("--force", action="store_true",
                     help="propose again even if this week already has a run")
+    ap.add_argument("--update", action="store_true",
+                    help="add anything new to this week's run, keeping the "
+                         "decisions already made on it")
     args = ap.parse_args()
 
     username = args.username
@@ -177,10 +180,11 @@ def main():
         print("Give a Sleeper username: python3 run_weekly.py YOUR_USERNAME")
         return 1
     return _run(username, args.url, args.moves, args.dry_run, args.db,
-                args.force)
+                args.force, args.update)
 
 
-def _run(username, urls, moves, dry_run, db_path, force=False):
+def _run(username, urls, moves, dry_run, db_path, force=False,
+         update=False):
     try:
         state = sc.current_state()
         season, week = state.get("season"), state.get("week") or 1
@@ -223,12 +227,13 @@ def _run(username, urls, moves, dry_run, db_path, force=False):
             # runs wherever there is time and posts the finished proposals.
             import cloud_client
             result = cloud_client.push_proposals(
-                season, week, sorted(texts), all_proposals, force)
+                season, week, sorted(texts), all_proposals, force, update)
             if result.get("skipped"):
                 print(f"\nHost says: {result['skipped']}")
                 return 0
-            print(f"\nSent {result.get('written', 0)} proposal(s) to "
-                  f"{cloud_client.base_url()} as run {result.get('run')}.")
+            print(f"\nSent {result.get('written', 0)} new proposal(s) to "
+                  f"{cloud_client.base_url()}, "
+                  f"{result.get('mode', 'filed as')} run {result.get('run')}.")
             return 0
 
         conn = st.connect(db_path)

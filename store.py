@@ -140,6 +140,17 @@ CREATE TABLE IF NOT EXISTS trade_leagues (
 
 CREATE INDEX IF NOT EXISTS idx_trade_leagues_run ON trade_leagues(run_id);
 
+-- "Place them now", pressed on the page. The page runs on a server with no
+-- browser and no Sleeper session, so it cannot submit anything itself; it
+-- records that you asked, and the Mac that does have a browser picks it up.
+CREATE TABLE IF NOT EXISTS submit_requests (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    asked_at   TEXT NOT NULL,
+    claimed_at TEXT,
+    finished_at TEXT,
+    detail     TEXT
+);
+
 CREATE TABLE IF NOT EXISTS events (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     at          TEXT NOT NULL,
@@ -387,6 +398,42 @@ def trade_leagues(conn, run_id):
              "summary": r["summary"],
              "settings": json.loads(r["settings"] or "{}"),
              "offers": json.loads(r["offers"] or "[]")} for r in rows]
+
+
+def ask_to_submit(conn):
+    """Record that you pressed the button. Returns the request id."""
+    cur = conn.execute(
+        "INSERT INTO submit_requests (asked_at) VALUES (?)", (now(),))
+    conn.commit()
+    return cur.lastrowid
+
+
+def pending_submit_request(conn):
+    """The oldest request nobody has picked up yet."""
+    return conn.execute(
+        "SELECT * FROM submit_requests WHERE claimed_at IS NULL"
+        " ORDER BY id LIMIT 1").fetchone()
+
+
+def claim_submit_request(conn, request_id):
+    """Take a request, so two runs cannot both act on one press."""
+    cur = conn.execute(
+        "UPDATE submit_requests SET claimed_at = ?"
+        " WHERE id = ? AND claimed_at IS NULL", (now(), request_id))
+    conn.commit()
+    return cur
+
+
+def finish_submit_request(conn, request_id, detail=""):
+    conn.execute(
+        "UPDATE submit_requests SET finished_at = ?, detail = ? WHERE id = ?",
+        (now(), str(detail)[:500], request_id))
+    conn.commit()
+
+
+def last_submit_request(conn):
+    return conn.execute(
+        "SELECT * FROM submit_requests ORDER BY id DESC LIMIT 1").fetchone()
 
 
 def settle(conn, season, week, league_id, slot, player_id):

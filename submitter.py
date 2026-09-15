@@ -625,6 +625,51 @@ def do_audit(conn, user_id, week):
     return 0
 
 
+def do_watch(args):
+    """Act on the page's button, if it has been pressed.
+
+    The page runs where there is no browser and no Sleeper session, so it
+    cannot place a claim itself. It records that you asked; this runs on the
+    Mac that can, checks once, and exits. Scheduled every minute, pressing
+    the button is as good as running the command - and unlike a timer, every
+    submission still begins with you pressing something.
+    """
+    import cloud_client
+
+    if not cloud_client.configured():
+        print("--watch needs FANTASY_API_URL; without a hosted page there is "
+              "no button to watch.")
+        return 1
+    try:
+        asked = cloud_client.claim_submit_request()
+    except Exception as exc:
+        print(f"could not reach the page: {type(exc).__name__}: {exc}")
+        return 1
+    if not asked.get("requested"):
+        return 0
+
+    print(f"Button pressed {asked.get('asked_at')}; placing approved claims.")
+    from playwright.sync_api import sync_playwright  # noqa: F401
+    state = sc.current_state()
+    user = sc.resolve_user(args.username)
+    conn = st.connect(args.db)
+    try:
+        code = run(conn, user["user_id"], state.get("week") or 1,
+                   False, args.limit, "auto")
+        detail = "placed what was approved" if code == 0 else \
+                 "finished with problems; see logs/submit.log"
+    except Exception as exc:
+        code, detail = 1, f"{type(exc).__name__}: {exc}"
+        print(detail)
+    finally:
+        conn.close()
+    try:
+        cloud_client.finish_submit_request(asked["id"], detail)
+    except Exception as exc:
+        print(f"could not report back: {type(exc).__name__}: {exc}")
+    return code
+
+
 def main():
     localenv.load()
     ap = argparse.ArgumentParser(description=__doc__,
@@ -647,6 +692,9 @@ def main():
     ap.add_argument("--audit", action="store_true")
     ap.add_argument("--retry", action="store_true",
                     help="return failed claims to the approved queue")
+    ap.add_argument("--watch", action="store_true",
+                    help="wait for the page's 'place them now' button and "
+                         "act on it, then exit")
     ap.add_argument("--limit", type=int, default=0)
     ap.add_argument("--db", default=str(st.DB_PATH))
     args = ap.parse_args()
@@ -657,6 +705,9 @@ def main():
         print("Playwright is needed for the browser steps:")
         print("  pip3 install playwright && python3 -m playwright install chromium")
         return 1
+
+    if args.watch:
+        return do_watch(args)
 
     if args.start_chrome:
         return 0 if start_chrome() else 1

@@ -425,5 +425,59 @@ class AfterKickoff(unittest.TestCase):
         self.assertIn("Mark as done", html)
 
 
+class SubmitButton(unittest.TestCase):
+    """Asking the Mac to place what you approved."""
+
+    def ready(self):
+        import store as st
+        conn = st.connect(":memory:")
+        run = st.start_run(conn, "2026", 3, ["ESPN"])
+        pid = st.add_proposal(conn, run, league_id="1", league_name="OTG",
+                              add_player_id="9",
+                              add_player_name="Someone (LV RB)",
+                              add_position="RB", bid=6, max_bid=100,
+                              consensus=2, sources=["https://espn.com/x"],
+                              rationale="RB is deep")
+        st.decide(conn, pid, st.APPROVED, bid=6)
+        return conn
+
+    def test_the_button_appears_only_with_something_to_place(self):
+        import store as st
+        conn = self.ready()
+        self.assertIn("Place them in Sleeper now",
+                      webapp.render(conn).decode())
+        empty = st.connect(":memory:")
+        st.start_run(empty, "2026", 3, ["ESPN"])
+        self.assertNotIn("Place them in Sleeper now",
+                         webapp.render(empty).decode())
+
+    def test_pressing_it_replaces_the_button_with_what_it_is_waiting_for(self):
+        import store as st
+        conn = self.ready()
+        st.ask_to_submit(conn)
+        html = webapp.render(conn).decode()
+        self.assertNotIn("Place them in Sleeper now", html)
+        self.assertIn("awake and signed in", html)
+
+    def test_a_finished_run_reports_back_on_the_page(self):
+        import store as st
+        conn = self.ready()
+        request = st.ask_to_submit(conn)
+        st.claim_submit_request(conn, request)
+        st.finish_submit_request(conn, request, "placed what was approved")
+        html = webapp.render(conn).decode()
+        self.assertIn("placed what was approved", html)
+        self.assertIn("Place them in Sleeper now", html)
+
+    def test_one_press_cannot_be_claimed_twice(self):
+        # Two runs acting on one press would try to place the same claim
+        # twice; the second finds nothing waiting.
+        import store as st
+        conn = self.ready()
+        request = st.ask_to_submit(conn)
+        st.claim_submit_request(conn, request)
+        self.assertIsNone(st.pending_submit_request(conn))
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
