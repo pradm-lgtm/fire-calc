@@ -322,6 +322,33 @@ class LocalEvents(unittest.TestCase):
         self.assertEqual(len(self.events()), 3 + 1)  # +1 from add_proposal
 
 
+class LeagueIds(unittest.TestCase):
+    """Catching a placeholder before it opens a browser.
+
+    Sleeper redirects an unknown league id to whichever league you looked at
+    last rather than erroring, so a probe of LEAGUE_ID quietly dumps a
+    different league and everything downstream is about the wrong one.
+    """
+
+    def test_a_real_one_passes(self):
+        self.assertTrue(
+            submitter.looks_like_league_id("1389721149700571136"))
+
+    def test_a_placeholder_does_not(self):
+        self.assertFalse(submitter.looks_like_league_id("LEAGUE_ID"))
+
+    def test_a_short_number_does_not(self):
+        self.assertFalse(submitter.looks_like_league_id("12345"))
+
+    def test_nothing_does_not(self):
+        self.assertFalse(submitter.looks_like_league_id(""))
+        self.assertFalse(submitter.looks_like_league_id(None))
+
+    def test_surrounding_space_is_forgiven(self):
+        self.assertTrue(
+            submitter.looks_like_league_id("  1389721149700571136 "))
+
+
 class WhatThePageIsTold(unittest.TestCase):
     """The submitter's report is what the person reads, so it has to say
     what to do rather than point at a log file."""

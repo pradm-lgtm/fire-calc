@@ -453,8 +453,27 @@ PROBE_JS = r"""
     return true;
   });
   const ACTION = /\b(confirm|submit|place|claim|cancel|done|save|bid|waiver|continue|next)\b/i;
+
+  // Who could actually be claimed from this page right now. The dedupe above
+  // collapses every waiver link into one row, because they all read "W Thu" -
+  // so the names have to be gathered separately or the page looks as though
+  // it holds a single claimable player.
+  const named = new Set();
+  for (const link of document.querySelectorAll('a.player-action-button.waiver')) {
+    let el = link;
+    for (let i = 0; i < 8 && el; i++) {
+      el = el.parentElement;
+      if (!el) break;
+      const n = el.querySelector('.scrolled-name');
+      if (n && (n.innerText || '').trim()) {
+        named.add((n.innerText || '').trim());
+        break;
+      }
+    }
+  }
   return {url: location.href, title: document.title, inputs,
           actions: uniq.filter(c => ACTION.test(c.text)),
+          claimable: [...named].slice(0, 20),
           clickable: uniq.slice(0, 150)};
 }
 """
@@ -484,13 +503,34 @@ def dump(page, label):
     return data
 
 
-def do_probe(pw, league_id, player=None):
+def looks_like_league_id(value):
+    """Sleeper league ids are long digit strings, and nothing else is."""
+    text = str(value or "").strip()
+    return text.isdigit() and len(text) >= 12
+
+
+def claimable(page):
+    """Players on this page that actually have a waiver link beside them."""
+    try:
+        return page.evaluate(PROBE_JS).get("claimable") or []
+    except Exception:
+        return []
+
+
+def do_probe(pw, league_id, player=None, username="YOUR_USERNAME"):
     """Walk the claim flow, reporting the real controls at each step.
 
     A single snapshot of the players page is not enough: the claim controls
     only exist after searching for a player and opening him, so the probe has
     to take the same steps the submitter will.
     """
+    if not looks_like_league_id(league_id):
+        print(f"{league_id!r} is not a Sleeper league id. They are long")
+        print("numbers - the one in the address bar on your league page.")
+        print("Sleeper quietly redirects an unknown one to whichever league")
+        print("you looked at last, so the dump would be of a league you did")
+        print("not ask about, which is worse than an error.")
+        return
     sel = load_selectors()
     ctx = browser_context(pw, headed=True)
     page = ctx.pages[0] if ctx.pages else ctx.new_page()
@@ -505,11 +545,20 @@ def do_probe(pw, league_id, player=None):
         return
     dump(page, "STEP 1 - players page")
 
+    free = claimable(page)
     if not player:
         print("")
-        print("Re-run with a player name to walk the claim flow, e.g.")
-        print("  python3 submitter.py USER --probe %s --player 'Dylan Sampson'"
-              % league_id)
+        if free:
+            print("Players you can claim in this league right now:")
+            for name in free:
+                print("    " + name)
+            print("")
+            print("Re-run naming one of them to walk the claim flow:")
+            print("  python3 submitter.py %s --probe %s --player '%s'"
+                  % (username, league_id, free[0]))
+        else:
+            print("No claimable players on this page. Open the Players tab in")
+            print("Sleeper and check somebody is on waivers or free.")
         return
 
     box = sel.get("search_box")
@@ -531,7 +580,15 @@ def do_probe(pw, league_id, player=None):
         print("waiver links on the page: %d" % count)
         if count == 0:
             print("No waiver link for this player — he may be rostered, or")
-            print("the search returned nothing.")
+            print("the search matched nobody.")
+            page.fill(sel.get("search_box"), "", timeout=8000)
+            page.wait_for_timeout(2000)
+            free = claimable(page)
+            if free:
+                print("")
+                print("Names that would work here:")
+                for name in free:
+                    print("    " + name)
         else:
             page.locator(claim).first.click(timeout=8000)
             page.wait_for_timeout(2500)
@@ -998,7 +1055,7 @@ def main():
         return 0
     if args.probe:
         with sync_playwright() as pw:
-            do_probe(pw, args.probe, args.player)
+            do_probe(pw, args.probe, args.player, args.username)
         return 0
     if args.inspect:
         with sync_playwright() as pw:
