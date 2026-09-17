@@ -29,10 +29,8 @@ DEF = "DEF"
 # projections are not precise enough for the difference to mean anything.
 MIN_EDGE = 1.5
 
-# A defense that is barely ahead this week and much better next week is
-# still worth taking. This is how much of next week counts when the two are
-# close - a tiebreaker, not a second opinion.
-NEXT_WEEK_SHARE = 0.35
+# Next week is consulted only when two defenses land in the same place on
+# everything else. A tiebreaker, not a second opinion.
 
 
 def wants_defense(league):
@@ -82,31 +80,50 @@ def rank_of(pid, consensus):
     return row if isinstance(row, int) else None
 
 
-def merit(pid, this_week, next_week):
-    """One number for choosing between defenses, this week weighted most."""
-    now, then = outlook(pid, this_week, next_week)
-    return now + NEXT_WEEK_SHARE * then
+def places(rows, key, missing=None):
+    """{id: position} when these rows are ordered by `key`, best first.
+
+    Turning both signals into positions is what lets them be combined at
+    all. Projected points and a rank out of 32 are different scales, and
+    adding them produces a number that means neither; where each defense
+    stands among the ones you could actually claim is the same question
+    asked of both, so the answers can be averaged.
+    """
+    ranked = [r for r in rows if key(r) is not None]
+    ranked.sort(key=key)
+    out = {r["id"]: i for i, r in enumerate(ranked)}
+    if missing is not None:
+        for r in rows:
+            out.setdefault(r["id"], missing)
+    return out
 
 
 def candidates(free, this_week, next_week, consensus=None):
     """Available defenses, best first.
 
-    Sorted on the blend, so the order is this week's matchup with next week
-    breaking ties. Analyst rank is carried for the card rather than folded
-    into the number: two scales added together is a number that means
-    neither of them.
+    Two signals, both as standings: the projection, which encodes this
+    week's matchup, and where the analysts have him this week. A defense
+    nobody ranked is judged on the projection alone rather than penalised
+    for an absence that says nothing about him.
+
+    Next week breaks ties and only ties, which is how the choice is actually
+    made: two good matchups beat one when the rest is close, and do not beat
+    a clearly better week now.
     """
     rows = []
     for pid in free:
         now, then = outlook(pid, this_week, next_week)
-        rows.append({
-            "id": pid,
-            "points": now,
-            "next_points": then,
-            "rank": rank_of(pid, consensus),
-            "merit": merit(pid, this_week, next_week),
-        })
-    rows.sort(key=lambda r: (-r["merit"], r["id"]))
+        rows.append({"id": pid, "points": now, "next_points": then,
+                     "rank": rank_of(pid, consensus)})
+
+    by_points = places(rows, lambda r: -r["points"])
+    by_analyst = places(rows, lambda r: r["rank"])
+    for row in rows:
+        seen = [by_points[row["id"]]]
+        if row["id"] in by_analyst:
+            seen.append(by_analyst[row["id"]])
+        row["standing"] = sum(seen) / len(seen)
+    rows.sort(key=lambda r: (r["standing"], -r["next_points"], r["id"]))
     return rows
 
 

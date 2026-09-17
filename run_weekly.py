@@ -63,12 +63,35 @@ def gather_articles(urls, week, verbose=True):
     return texts
 
 
-def week_outlook(season, week):
-    """Projected points for this week and next, and next week's opponents.
+def defense_ranks(players, verbose=False):
+    """{player_id: {rank, sources, spread}} from the weekly defense list.
 
-    Two projection calls. The second is the whole point of the look-ahead: a
-    defense with two good matchups is worth more than one with a single good
-    week, and nothing else on hand says who anyone plays next week.
+    The analysts rank defenses week by week, which is half of how this
+    decision gets made and was the half nothing was fetching. The source is
+    already configured for the start/sit check; this asks for the defense
+    page alone rather than the whole set.
+    """
+    import lineup
+    import rankings as rk
+    urls = [entry["url"] for entry in rk.load_sources()
+            if "DEF" in [str(p).upper()
+                         for p in (entry.get("positions") or [])]]
+    if not urls:
+        return {}
+    try:
+        per_source = lineup.gather_rankings(urls, players, verbose=verbose)
+    except Exception:
+        return {}
+    return rk.merge(per_source).get("DEF") or {}
+
+
+def week_outlook(season, week, players=None, verbose=False):
+    """Projections for this week and next, next week's games, and DST ranks.
+
+    Two projection calls and the analysts' defense page. The second week is
+    the whole point of the look-ahead: a defense with two good matchups is
+    worth more than one with a single good week, and nothing else on hand
+    says who anyone plays next week.
     """
     import nfl_week
     out = {"points": {}, "next_points": {}, "next_games": {}, "dst_ranks": {}}
@@ -83,6 +106,8 @@ def week_outlook(season, week):
         out["next_games"] = nfl_week.matchups_from(ahead)
     except Exception:
         pass
+    if players:
+        out["dst_ranks"] = defense_ranks(players, verbose)
     return out
 
 
@@ -553,7 +578,7 @@ def _run(username, urls, moves, dry_run, db_path, force=False,
         except Exception:
             bye_weeks = {}
 
-        weeks = week_outlook(season, week)
+        weeks = week_outlook(season, week, players, verbose=True)
 
         all_proposals, quiet = [], {}
         for league in leagues:

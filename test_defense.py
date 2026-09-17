@@ -65,10 +65,10 @@ class Choosing(unittest.TestCase):
                                   {"SF": 5.0, "NYJ": 5.0})
         self.assertEqual(rows[0]["id"], "SF")
 
-    def test_next_week_separates_two_that_are_close(self):
-        # Half a point apart now, six apart next week.
+    def test_next_week_separates_two_that_stand_level(self):
+        # Level on both signals; next week is the only thing left.
         rows = defense.candidates(["SF", "NYJ"],
-                                  {"SF": 9.0, "NYJ": 9.5},
+                                  {"SF": 9.0, "NYJ": 9.0},
                                   {"SF": 12.0, "NYJ": 4.0})
         self.assertEqual(rows[0]["id"], "SF")
 
@@ -78,11 +78,36 @@ class Choosing(unittest.TestCase):
                                   {"SF": 14.0, "NYJ": 2.0})
         self.assertEqual(rows[0]["id"], "NYJ")
 
-    def test_an_analyst_rank_is_carried_but_not_added_in(self):
+    def test_the_analysts_can_change_the_order(self):
+        # Second on projection, first with the analysts, better next week.
+        free = ["SF", "NYJ", "DAL"]
+        points = {"SF": 9.0, "NYJ": 8.5, "DAL": 8.0}
+        ahead = {"SF": 3.0, "NYJ": 11.0, "DAL": 4.0}
+        plain = defense.candidates(free, points, ahead)
+        self.assertEqual(plain[0]["id"], "SF")
+        with_analysts = defense.candidates(
+            free, points, ahead,
+            consensus={"NYJ": {"rank": 1}, "SF": {"rank": 9},
+                       "DAL": {"rank": 12}})
+        self.assertEqual(with_analysts[0]["id"], "NYJ")
+
+    def test_a_defense_nobody_ranked_is_not_punished_for_it(self):
+        # Only SF appears on the analysts' page; NYJ projects far better and
+        # must not be pushed down for being absent from it.
+        rows = defense.candidates(["SF", "NYJ"], {"SF": 4.0, "NYJ": 14.0}, {},
+                                  consensus={"SF": {"rank": 1}})
+        self.assertEqual(rows[0]["id"], "NYJ")
+
+    def test_the_rank_is_still_carried_for_the_card(self):
         rows = defense.candidates(["SF"], {"SF": 8.0}, {},
                                   consensus={"SF": {"rank": 3}})
         self.assertEqual(rows[0]["rank"], 3)
-        self.assertEqual(rows[0]["merit"], 8.0)
+
+    def test_two_signals_that_agree_leave_the_order_alone(self):
+        rows = defense.candidates(["SF", "NYJ"], {"SF": 12.0, "NYJ": 5.0}, {},
+                                  consensus={"SF": {"rank": 2},
+                                             "NYJ": {"rank": 20}})
+        self.assertEqual([r["id"] for r in rows], ["SF", "NYJ"])
 
 
 class Suggesting(unittest.TestCase):
@@ -216,6 +241,50 @@ class InAWeeklyRun(unittest.TestCase):
                  "next_games": {}}
         rows, _why = self.run_it(weeks=weeks)
         self.assertEqual(rows, [])
+
+
+class RanksAreActuallyFetched(unittest.TestCase):
+    """The half that was missing: nothing was asking for the DST page.
+
+    dst_ranks was initialised empty and never filled, so the analyst signal
+    was not merely unused in the ordering - it never arrived, and the line
+    about it on the card could not have printed.
+    """
+
+    def test_the_outlook_asks_for_the_defense_rankings(self):
+        import run_weekly as rw
+        asked = {}
+
+        def fake(players, verbose=False):
+            asked["players"] = players
+            return {"SF": {"rank": 2}}
+        real = rw.defense_ranks
+        rw.defense_ranks = fake
+        try:
+            out = rw.week_outlook("2026", 2, players={"SF": {}})
+        finally:
+            rw.defense_ranks = real
+        self.assertEqual(out["dst_ranks"], {"SF": {"rank": 2}})
+        self.assertEqual(asked["players"], {"SF": {}})
+
+    def test_it_only_wants_the_defense_source(self):
+        import rankings as rk
+        wanted = [e for e in rk.load_sources()
+                  if "DEF" in [str(p).upper()
+                               for p in (e.get("positions") or [])]]
+        self.assertEqual(len(wanted), 1)
+        self.assertIn("dst", wanted[0]["url"].lower())
+
+    def test_a_page_that_will_not_load_is_not_fatal(self):
+        import run_weekly as rw
+        import lineup
+        real = lineup.gather_rankings
+        lineup.gather_rankings = lambda *_a, **_k: (_ for _ in ()).throw(
+            RuntimeError("no browser"))
+        try:
+            self.assertEqual(rw.defense_ranks({"SF": {}}), {})
+        finally:
+            lineup.gather_rankings = real
 
 
 if __name__ == "__main__":
