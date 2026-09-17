@@ -518,6 +518,8 @@ class ThursdayFirst(unittest.TestCase):
         body = self.build("Thu", "Sun")
         self.assertIn("Playing Thursday", body)
         self.assertIn("1 decision for Thursday night", body)
+        # Said once, briefly - the heading below repeats it otherwise.
+        self.assertNotIn("Sunday morning", body)
 
     def test_the_rest_stay_where_they_were(self):
         body = self.build("Thu", "Sun")

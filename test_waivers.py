@@ -571,18 +571,70 @@ class DraftCost(unittest.TestCase):
     def test_it_never_fades_to_nothing(self):
         self.assertGreater(ew.draft_weight({"round": 2}, 30), 0)
 
-    def test_it_never_outweighs_being_a_starter(self):
-        # A first-round pick on the bench must still be offered before a
-        # starter, or the ordering stops meaning anything.
+    def test_it_moves_people_around_without_deciding_everything(self):
+        # Two players of the same worth, one of them a second-round pick.
         players = {
-            "bench": {"full_name": "Bench Man", "position": "RB"},
-            "start": {"full_name": "Starting Man", "position": "RB"},
+            "cheap": {"full_name": "Cheap Man", "position": "RB",
+                      "search_rank": 300},
+            "dear": {"full_name": "Dear Man", "position": "RB",
+                     "search_rank": 300},
         }
-        roster = {"starters": ["start"], "players": ["start", "bench"]}
+        roster = {"starters": [], "players": ["cheap", "dear"]}
         depth = {"RB": (2, 1.0, "deep")}
         ranked = ew.drop_candidates(roster, players, {}, depth,
-                                    cost={"bench": {"round": 1}}, week=1)
-        self.assertEqual(ranked[0][2], "bench")
+                                    cost={"dear": {"round": 2}}, week=1)
+        self.assertEqual(ranked[0][2], "cheap")
+
+
+class BenchIsNotAVerdict(unittest.TestCase):
+    """Being out of the lineup says less than it used to.
+
+    Starting was worth more than every other signal combined, so any bench
+    player was offered before any starter. People sit out weeks for reasons
+    that say nothing about their value - a bye being the obvious one - and a
+    star resting outranked every scrub on the roster.
+    """
+
+    PLAYERS = {
+        "scrub": {"full_name": "Bench Scrub", "position": "RB",
+                  "search_rank": 600},
+        "weak": {"full_name": "Weak Starter", "position": "RB",
+                 "search_rank": 400},
+        "star": {"full_name": "Star On Bye", "position": "RB",
+                 "search_rank": 12},
+    }
+    ROSTER = {"starters": ["weak"], "players": ["scrub", "weak", "star"]}
+    DEPTH = {"RB": (3, 1.0, "deep")}
+
+    def order(self):
+        return [r[2] for r in ew.drop_candidates(
+            self.ROSTER, self.PLAYERS, {}, self.DEPTH)]
+
+    def test_the_worst_player_is_still_offered_first(self):
+        self.assertEqual(self.order()[0], "scrub")
+
+    def test_a_weak_starter_is_offered_before_a_benched_star(self):
+        got = self.order()
+        self.assertLess(got.index("weak"), got.index("star"))
+
+    def test_starting_still_counts_for_something(self):
+        # Same player twice, one of them in the lineup.
+        players = {"a": dict(self.PLAYERS["weak"]),
+                   "b": dict(self.PLAYERS["weak"])}
+        roster = {"starters": ["a"], "players": ["a", "b"]}
+        ranked = ew.drop_candidates(roster, players, {}, self.DEPTH)
+        self.assertEqual(ranked[0][2], "b")
+
+    def test_a_bye_is_named_rather_than_left_to_look_like_a_benching(self):
+        why = rw.drop_reason({"position": "RB"}, "deep",
+                             {"RB": (5, 2, "deep")}, False, 4, 5, on_bye=True)
+        self.assertIn("on bye this week", why)
+
+    def test_a_starter_is_never_also_called_on_bye(self):
+        why = rw.drop_reason({"position": "RB"}, "deep",
+                             {"RB": (5, 2, "deep")}, True, 4, 5, on_bye=True)
+        self.assertIn("in your lineup", why)
+        self.assertNotIn("bye", why)
 
     def test_the_card_says_what_you_paid(self):
         self.assertIn("drafted in round 6",

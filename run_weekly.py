@@ -63,7 +63,7 @@ def gather_articles(urls, week, verbose=True):
 
 
 def proposals_for_league(league, user_id, players, trending, texts, max_moves,
-                         week=1):
+                         week=1, byes=None):
     """(proposals, why none) - the reasoning, returned as data not text.
 
     A league that yields nothing says why. There are five ways to come back
@@ -116,6 +116,11 @@ def proposals_for_league(league, user_id, players, trending, texts, max_moves,
         if said:
             per_source_drops[source] = said
     advice = ex.merge_drops(per_source_drops)
+    byes = byes or {}
+
+    def resting(pid):
+        team = (players.get(pid) or {}).get("team")
+        return bool(team) and byes.get(team) == week
 
     def sort_key(item):
         pid, info = item
@@ -156,7 +161,8 @@ def proposals_for_league(league, user_id, players, trending, texts, max_moves,
             "starter": starts,
             "why": drop_reason(p, label, depth, starts,
                                *place.get(cid, (None, None)),
-                               cost=cost.get(cid), advice=advice.get(cid)),
+                               cost=cost.get(cid), advice=advice.get(cid),
+                               on_bye=resting(cid)),
         } for _rank, _score, cid, p, label, starts in candidates]
         add_score = wa.score_player(players.get(pid, {}), trending.get(pid, 0))
         if drop_score > add_score * 1.5:
@@ -319,7 +325,7 @@ def advice_note(advice):
 
 
 def drop_reason(player, label, depth, starting=False, place=None, total=None,
-                cost=None, advice=None):
+                cost=None, advice=None, on_bye=False):
     """The whole case for cutting this particular man, in one clause.
 
     Every candidate carries its own, so the card can restate the argument
@@ -338,6 +344,11 @@ def drop_reason(player, label, depth, starting=False, place=None, total=None,
     bits.append(advice_note(advice))
     if starting:
         bits.insert(0, "in your lineup")
+    elif on_bye:
+        # Not being in the lineup is usually a judgement about a player. On
+        # a bye it is a judgement about the calendar, and the card should
+        # not let the two look the same.
+        bits.insert(0, "on bye this week")
     if hurt:
         bits.insert(0, hurt.lower())
     return ", ".join(b for b in bits if b)
@@ -450,10 +461,17 @@ def _run(username, urls, moves, dry_run, db_path, force=False,
         players = sc.all_players()
         trending = wa.trending_adds()
 
+        try:
+            import nfl_week
+            bye_weeks = nfl_week.byes(season)
+        except Exception:
+            bye_weeks = {}
+
         all_proposals, quiet = [], {}
         for league in leagues:
             rows, why = proposals_for_league(league, user["user_id"], players,
-                                             trending, texts, moves, week)
+                                             trending, texts, moves, week,
+                                             byes=bye_weeks)
             name = league.get("name") or league.get("league_id")
             print(f"  {name}: {len(rows)} proposal(s)"
                   + (f" — {why}" if why else ""))

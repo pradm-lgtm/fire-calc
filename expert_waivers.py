@@ -157,6 +157,15 @@ def positional_depth(league, roster, players):
     return depth
 
 
+# How much being in this week's lineup protects somebody: a tiebreaker
+# between players of similar worth, and nothing more. It used to be 5000,
+# worth more than every other signal combined, so a bench player was always
+# offered before any starter - and people sit out weeks for reasons that say
+# nothing about their value, a bye being the obvious one. Small enough that
+# a clearly better player on the bench is still offered after a weak starter.
+STARTER_WEIGHT = 40
+
+
 def draft_weight(cost, week=1):
     """How much what you paid for somebody should protect him, this week.
 
@@ -215,8 +224,14 @@ def drop_candidates(roster, players, trending, depth, cost=None, week=1):
         label = depth.get(player.get("position"), (0, 0, "ok"))[2]
         penalty = {"thin": 1000, "ok": 100, "deep": 0, "extra": 0}.get(label, 100)
         paid = draft_weight(cost.get(pid), week)
-        # A starter sorts below every bench player, and is still offered.
-        ranked.append((score + penalty + paid + (5000 if pid in starting else 0),
+        # Starting is a nudge, not a wall. It used to be worth more than
+        # every other signal combined, which meant a bench player was always
+        # offered first - and plenty of people are on the bench this week for
+        # reasons that say nothing about their value, a bye being the obvious
+        # one. A weak starter should still be offered before a good player
+        # who happens not to be playing.
+        sits = STARTER_WEIGHT if pid in starting else 0
+        ranked.append((score + penalty + paid + sits,
                        score, pid, player, label, pid in starting))
     ranked.sort(key=lambda row: row[0])
     return ranked

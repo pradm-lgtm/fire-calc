@@ -1344,9 +1344,7 @@ def render_lineup(conn, force=False):
         out.append(
             "<div class='card trouble'><p class='paneltop'>"
             f"{len(thursday)} decision{'s' if len(thursday) != 1 else ''} "
-            "for Thursday night</p><p class='why'>These players kick off "
-            "before the rest of the week, so they have to be settled first. "
-            "Everything below them can wait until Sunday morning.</p></div>")
+            "for Thursday night</p></div>")
         section("Playing Thursday", thursday, True,
                 f"{len(thursday)} to settle")
     section("Fix these", urgent, True, f"{len(urgent)} left")
