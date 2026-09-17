@@ -239,6 +239,38 @@ class RateLimits(unittest.TestCase):
         self.assertEqual(self.slept, [])
 
 
+class Refusals(unittest.TestCase):
+    """Yahoo's noes, told apart from each other."""
+
+    def test_a_403_is_explained_as_provisioning_not_code(self):
+        said = yc.complain(403, '{"error": {"description": "This application '
+                                'is not authorized to use the Fantasy API"}}')
+        self.assertIn("not authorised for the Fantasy API", said)
+        self.assertIn("Confirmation Form", said)
+        self.assertNotIn("HTTP 403", said)
+
+    def test_a_401_points_at_re_authorising(self):
+        self.assertIn("--auth-url", yc.complain(401, "token expired"))
+
+    def test_anything_else_is_reported_as_itself(self):
+        said = yc.complain(404, "no such league")
+        self.assertIn("404", said)
+        self.assertIn("no such league", said)
+
+    def test_a_403_that_is_not_about_authorisation_is_not_reworded(self):
+        said = yc.complain(403, "rate limit exceeded for this account")
+        self.assertIn("403", said)
+
+    def test_the_client_id_is_identified_without_being_printed(self):
+        os.environ["YAHOO_CLIENT_ID"] = "abcdefghijklmnop"
+        try:
+            said = yc.complain(403, "This application is not authorized")
+        finally:
+            os.environ.pop("YAHOO_CLIENT_ID", None)
+        self.assertIn("ijklmnop", said)
+        self.assertNotIn("abcdefgh", said)
+
+
 class TheAgreement(unittest.TestCase):
     """Terms that are easy to honour today and easy to lose later."""
 

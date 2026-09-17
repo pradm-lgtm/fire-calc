@@ -148,16 +148,48 @@ def get(path):
             if exc.code not in (429, 500, 502, 503, 504):
                 detail = ""
                 try:
-                    detail = exc.read().decode("utf-8", "replace")[:200]
+                    detail = exc.read().decode("utf-8", "replace")[:400]
                 except Exception:
                     pass
-                raise YahooError(f"HTTP {exc.code} from Yahoo: {detail}")
+                raise YahooError(complain(exc.code, detail))
         except Exception as exc:
             last = exc
         if attempt < RETRIES - 1:
             time.sleep(wait)
             wait *= BACKOFF
     raise YahooError(f"Yahoo did not answer after {RETRIES} attempts: {last}")
+
+
+def complain(code, detail):
+    """Turn Yahoo's refusal into something that says what to do about it.
+
+    A 403 here is nearly always provisioning rather than code: the Fantasy
+    API is granted per application, and an approved developer whose client id
+    has not had the grant attached to it gets refused exactly like one who
+    was never approved.
+    """
+    if code == 403 and "not authori" in detail.lower():
+        return (
+            "Yahoo says this application is not authorised for the Fantasy "
+            "API.\n"
+            "  That is about the app, not the code or the token. Approval is "
+            "granted\n"
+            "  to a specific client id, so check, in this order:\n"
+            "    1. The Yahoo Developer page for this app lists Fantasy "
+            "Sports permissions.\n"
+            "    2. The Developer Application Confirmation Form has been "
+            "submitted with\n"
+            "       this exact client id - the approval email asks for it "
+            "whether or not\n"
+            "       the permissions already show.\n"
+            "    3. The signed agreement has been processed. It is not "
+            "instant.\n"
+            "  The client id in use ends "
+            f"{(os.environ.get('YAHOO_CLIENT_ID') or '')[-8:] or '(unset)'}.")
+    if code == 401:
+        return ("Yahoo rejected the token. Re-authorise with:\n"
+                "    python3 yahoo_auth_check.py --auth-url")
+    return f"HTTP {code} from Yahoo: {detail[:200]}"
 
 
 # ------------------------------------------------------------------ JSON

@@ -311,8 +311,10 @@ def main():
         print("   is listening there. The code is in the browser's ADDRESS BAR:")
         print(f"   {uri}?code=THIS_PART")
         print()
-        print("3. Run:  python3 yahoo_auth_check.py --exchange THIS_PART")
-        print("   (pasting the whole address-bar URL instead also works)")
+        print("3. Run:  python3 yahoo_auth_check.py --exchange")
+        print("   It will ask for the URL - paste the whole thing from the")
+        print("   address bar. Do not put it on the command line: the ? and &")
+        print("   in it are shell characters and zsh will refuse the command.")
         print()
         print(f"Redirect URI in use: {uri} — must match one registered on the")
         print("Yahoo app exactly. Override with YAHOO_REDIRECT_URI in .env.")
@@ -323,10 +325,26 @@ def main():
         return 0
 
     if args[:1] == ["--exchange"]:
-        if len(args) < 2:
-            print("Usage: python3 yahoo_auth_check.py --exchange <code>")
+        # Asked for rather than taken from the command line. The redirect URL
+        # has a ? and an & in it, which a shell treats as a glob and a job
+        # control character - zsh refuses the whole command with "no matches
+        # found" before Python ever runs. Reading it from a prompt sidesteps
+        # every quoting rule there is, and means nothing has to be edited
+        # into a command before pasting.
+        given = " ".join(args[1:]).strip()
+        if not given:
+            print("Paste the URL from the browser's address bar (the one that")
+            print("failed to load), or just the code from it, then press enter.")
+            print()
+            try:
+                given = input("code or URL: ").strip()
+            except (EOFError, KeyboardInterrupt):
+                print()
+                return 1
+        if not given:
+            print("Nothing pasted.")
             return 1
-        if not exchange_code(env, args[1], env_path):
+        if not exchange_code(env, given, env_path):
             return 2
         env = load_env(env_path)
         print()
