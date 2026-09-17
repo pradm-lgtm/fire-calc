@@ -129,6 +129,60 @@ def cdp_alive(timeout=0.7):
     return cdp_probe(timeout)[0]
 
 
+def cdp_call(path, method="GET", timeout=5):
+    """One of Chrome's own debugging endpoints, proxy-free. Parsed, or None.
+
+    Used in preference to driving Playwright for this: a tab opened through
+    Chrome's HTTP interface belongs to Chrome, and outlives the Python
+    process. A page created through an attached Playwright browser belongs to
+    the connection, and closing that connection can take the tab with it -
+    which would shut the very window we opened for someone to sign in to.
+    """
+    import json as _json
+    import urllib.request
+    try:
+        direct = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+        req = urllib.request.Request(f"{CDP_URL}{path}", method=method)
+        with direct.open(req, timeout=timeout) as resp:
+            body = resp.read().decode("utf-8", "replace")
+    except Exception:
+        return None
+    try:
+        return _json.loads(body)
+    except ValueError:
+        return body
+
+
+def cdp_tabs():
+    """[(target id, url)] for the real pages open in that Chrome."""
+    found = cdp_call("/json/list")
+    if not isinstance(found, list):
+        return []
+    return [(t.get("id"), t.get("url") or "") for t in found
+            if t.get("type") == "page"]
+
+
+def cdp_open(url):
+    """Open a tab in that Chrome. Returns its target id, or None.
+
+    Chrome wants PUT on /json/new since v111 and answers GET on older
+    builds, so try the modern spelling first and fall back.
+    """
+    from urllib.parse import quote
+    path = f"/json/new?{quote(url, safe=':/?=&')}"
+    for method in ("PUT", "GET"):
+        made = cdp_call(path, method=method)
+        if isinstance(made, dict) and made.get("id"):
+            return made["id"]
+    return None
+
+
+def cdp_activate(target_id):
+    """Bring one tab to the front. True if Chrome said it did."""
+    said = cdp_call(f"/json/activate/{target_id}")
+    return said is not None
+
+
 def start_chrome():
     """Launch Chrome in the background with a debugging port.
 
@@ -294,13 +348,9 @@ def do_login(pw):
     try:
         browser = pw.chromium.connect_over_cdp(CDP_URL)
         pages = [p.url for c in browser.contexts for p in c.pages]
-        print(f"Attached. {len(pages)} tab(s) open.")
-        if not any("sleeper" in (u or "").lower() for u in pages):
-            print("No Sleeper tab is open in it. Open sleeper.com there and")
-            print("sign in, then run the dry run.")
-        else:
-            print("Sign in to Sleeper there if you have not, then run:")
-            print("    python3 submitter.py YOUR_USERNAME")
+        print(f"Attached. {len(pages)} tab(s) open:")
+        for url in pages:
+            print(f"    {url or '(blank)'}")
         browser.close()
     except Exception as exc:
         print(f"That Chrome would not attach: {type(exc).__name__}: {exc}")
@@ -311,6 +361,42 @@ def do_login(pw):
         print("Quit that Chrome (Cmd-Q) and run this again - the one it")
         print("starts carries the flag.")
         by_hand()
+        return
+
+    # Telling someone their browser is fine while they cannot see it is not
+    # much use. Put a Sleeper tab in front of them.
+    show_sleeper()
+
+
+def show_sleeper():
+    """Put a Sleeper tab in front, opening one if there is not one already."""
+    tabs = cdp_tabs()
+    where = sleeper_tab([url for _id, url in tabs])
+    if where is None:
+        made = cdp_open("https://sleeper.com")
+        if not made:
+            print("\nCould not open a tab in it. Open sleeper.com there "
+                  "yourself.")
+            return
+        print("\nOpened a Sleeper tab in it.")
+        cdp_activate(made)
+    else:
+        print("\nIt already has a Sleeper tab.")
+        cdp_activate(tabs[where][0])
+    print("That window should be in front now. If you still cannot see it,")
+    print("look for a second Chrome in the Dock or under Cmd-Tab: it runs on")
+    print("its own profile, so it is a separate icon from your everyday one.")
+    print()
+    print("Sign in to Sleeper there, leave the window open, then run:")
+    print("    python3 submitter.py YOUR_USERNAME")
+
+
+def sleeper_tab(urls):
+    """Index of the first Sleeper tab in a list of tab URLs, or None."""
+    for i, url in enumerate(urls):
+        if "sleeper.com" in (url or "").lower():
+            return i
+    return None
 
 
 def by_hand():

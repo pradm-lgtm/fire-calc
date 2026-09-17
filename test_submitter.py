@@ -184,6 +184,96 @@ class Port9222(unittest.TestCase):
         self.assertIn("--remote-allow-origins='*'", submitter.launch_hint())
 
 
+class WhichTab(unittest.TestCase):
+    """Finding the Sleeper tab among whatever else is open.
+
+    Reporting "1 tab(s) open" to someone who cannot see a window is not
+    help. The login step opens or surfaces a Sleeper tab so there is
+    something to look at.
+    """
+
+    def test_it_finds_sleeper_among_others(self):
+        self.assertEqual(submitter.sleeper_tab(
+            ["https://news.ycombinator.com", "https://sleeper.com/leagues"]), 1)
+
+    def test_the_first_one_wins(self):
+        self.assertEqual(submitter.sleeper_tab(
+            ["https://sleeper.com/draft", "https://sleeper.com/leagues"]), 0)
+
+    def test_no_sleeper_tab_is_none_not_zero(self):
+        self.assertIsNone(submitter.sleeper_tab(["about:blank"]))
+
+    def test_an_empty_browser_is_none(self):
+        self.assertIsNone(submitter.sleeper_tab([]))
+
+    def test_a_tab_with_no_url_does_not_explode(self):
+        self.assertIsNone(submitter.sleeper_tab([None, ""]))
+
+    def test_a_lookalike_domain_is_not_sleeper(self):
+        self.assertIsNone(submitter.sleeper_tab(["https://sleeperbot.io"]))
+
+
+class ChromeEndpoints(unittest.TestCase):
+    """Driving the tab through Chrome rather than through Playwright.
+
+    A page created on an attached Playwright browser belongs to that
+    connection, and closing the connection can take the tab with it - which
+    would shut the very window opened for someone to sign in. Chrome's own
+    HTTP interface hands back a tab that belongs to Chrome.
+    """
+
+    def setUp(self):
+        self.calls = []
+        self.answer = None
+        self.real = submitter.cdp_call
+
+        def fake(path, method="GET", timeout=5):
+            self.calls.append((method, path))
+            return self.answer(path, method) if callable(self.answer) \
+                else self.answer
+        submitter.cdp_call = fake
+
+    def tearDown(self):
+        submitter.cdp_call = self.real
+
+    def test_only_pages_count_as_tabs(self):
+        self.answer = [
+            {"id": "a", "type": "page", "url": "https://sleeper.com"},
+            {"id": "b", "type": "service_worker", "url": "https://x.dev/sw.js"},
+            {"id": "c", "type": "background_page", "url": "chrome://ext"},
+        ]
+        self.assertEqual(submitter.cdp_tabs(), [("a", "https://sleeper.com")])
+
+    def test_a_browser_that_answers_nonsense_has_no_tabs(self):
+        self.answer = "not json at all"
+        self.assertEqual(submitter.cdp_tabs(), [])
+
+    def test_a_browser_that_does_not_answer_has_no_tabs(self):
+        self.answer = None
+        self.assertEqual(submitter.cdp_tabs(), [])
+
+    def test_opening_a_tab_tries_the_modern_verb_first(self):
+        self.answer = lambda _p, method: ({"id": "new1"} if method == "PUT"
+                                          else None)
+        self.assertEqual(submitter.cdp_open("https://sleeper.com"), "new1")
+        self.assertEqual(self.calls[0][0], "PUT")
+
+    def test_opening_falls_back_for_older_chrome(self):
+        self.answer = lambda _p, method: ({"id": "new2"} if method == "GET"
+                                          else None)
+        self.assertEqual(submitter.cdp_open("https://sleeper.com"), "new2")
+        self.assertEqual([m for m, _p in self.calls], ["PUT", "GET"])
+
+    def test_the_url_survives_into_the_request(self):
+        self.answer = {"id": "x"}
+        submitter.cdp_open("https://sleeper.com")
+        self.assertIn("https://sleeper.com", self.calls[0][1])
+
+    def test_a_refusal_to_open_is_reported_not_guessed(self):
+        self.answer = None
+        self.assertIsNone(submitter.cdp_open("https://sleeper.com"))
+
+
 class WhatThePageIsTold(unittest.TestCase):
     """The submitter's report is what the person reads, so it has to say
     what to do rather than point at a log file."""
