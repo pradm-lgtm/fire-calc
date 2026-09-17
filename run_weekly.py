@@ -63,11 +63,19 @@ def gather_articles(urls, week, verbose=True):
 
 
 def proposals_for_league(league, user_id, players, trending, texts, max_moves):
-    """The same reasoning as the CLI report, returned as data instead of text."""
+    """(proposals, why none) - the reasoning, returned as data not text.
+
+    A league that yields nothing says why. There are five ways to come back
+    empty here and they mean entirely different things: nobody was written
+    up, nobody can be dropped, nobody available is better than what you
+    already have. Returning a bare empty list for all of them meant a league
+    could stop producing proposals for a fortnight and look exactly like a
+    league with a settled roster.
+    """
     rosters = sc.league_rosters(league["league_id"])
     mine = sc.my_roster(rosters, user_id)
     if not mine:
-        return []
+        return [], "your roster is not in this league"
 
     settings = league.get("settings") or {}
     budget = settings.get("waiver_budget") or 0
@@ -87,7 +95,8 @@ def proposals_for_league(league, user_id, players, trending, texts, max_moves):
             per_source[source] = recs
     consensus = ex.merge_sources(per_source)
     if not consensus:
-        return []
+        return [], ("no article recommended anyone who is actually available "
+                    "here")
 
     depth = ew.positional_depth(league, mine, players)
 
@@ -100,18 +109,27 @@ def proposals_for_league(league, user_id, players, trending, texts, max_moves):
 
     ordered = sorted(consensus.items(), key=sort_key, reverse=True)
 
-    out, protect, budget_left = [], set(), remaining
+    out, protect, budget_left, why = [], set(), remaining, None
     for pid, info in ordered:
         if len(out) >= max_moves:
             break
-        drops = ew.choose_drop(mine, players, trending, depth, protect)
-        if not drops:
-            break
-        _, drop_score, drop_pid, drop_player, drop_label = drops[0]
         # Everyone you could cut, not only the bench and not only the one it
         # picked. Whether there is anyone worth dropping is half the
         # decision, and it was being made for you out of sight.
         candidates = ew.drop_candidates(mine, players, trending, depth)
+        drops = ew.choose_drop(mine, players, trending, depth, protect)
+        if drops:
+            _, drop_score, drop_pid, drop_player, drop_label = drops[0]
+        else:
+            # The bench is used up or is entirely never-drops. That decided
+            # the whole league produced nothing, while the card underneath
+            # would happily have offered a starter - the gate was stricter
+            # than the choice it was gating.
+            spare = [c for c in candidates if c[2] not in protect]
+            if not spare:
+                why = "there is nobody on the roster left to drop"
+                break
+            _rank, drop_score, drop_pid, drop_player, drop_label, _st = spare[0]
         place = standings(candidates)
         options = [{
             "id": cid,
@@ -122,12 +140,17 @@ def proposals_for_league(league, user_id, players, trending, texts, max_moves):
         } for _rank, _score, cid, p, label, starts in candidates]
         add_score = wa.score_player(players.get(pid, {}), trending.get(pid, 0))
         if drop_score > add_score * 1.5:
+            best = strip_label(sc.player_label(players, pid))
+            why = (f"the best player available ({best}) is not worth more "
+                   "than the weakest player you would have to drop")
             break
 
         bid = None
         if budget_left and info["faab_median"] is not None:
             bid = max(1, round(remaining * info["faab_median"] / 100))
             if bid > budget_left:
+                why = (f"the next claim would cost {bid} FAAB and only "
+                       f"{budget_left} is left")
                 break
             budget_left -= bid
         elif remaining:
@@ -166,7 +189,7 @@ def proposals_for_league(league, user_id, players, trending, texts, max_moves):
             quote=quote, rank=len(out) + 1,
         ))
         protect.add(drop_pid)
-    return out
+    return out, (why if not out else None)
 
 
 def league_note(league, rosters):
@@ -375,16 +398,21 @@ def _run(username, urls, moves, dry_run, db_path, force=False,
         players = sc.all_players()
         trending = wa.trending_adds()
 
-        all_proposals = []
+        all_proposals, quiet = [], {}
         for league in leagues:
-            rows = proposals_for_league(league, user["user_id"], players,
-                                        trending, texts, moves)
-            print(f"  {league.get('name')}: {len(rows)} proposal(s)")
+            rows, why = proposals_for_league(league, user["user_id"], players,
+                                             trending, texts, moves)
+            name = league.get("name") or league.get("league_id")
+            print(f"  {name}: {len(rows)} proposal(s)"
+                  + (f" — {why}" if why else ""))
+            if why:
+                quiet[name] = why
             all_proposals.extend(rows)
 
         if not all_proposals:
             print("No moves worth proposing this week.")
-            return 0
+            if not quiet:
+                return 0
 
         if dry_run:
             print("\n--- dry run, nothing written ---")
@@ -400,7 +428,8 @@ def _run(username, urls, moves, dry_run, db_path, force=False,
             # runs wherever there is time and posts the finished proposals.
             import cloud_client
             result = cloud_client.push_proposals(
-                season, week, sorted(texts), all_proposals, force, update)
+                season, week, sorted(texts), all_proposals, force, update,
+                note=json.dumps(quiet) if quiet else "")
             if result.get("skipped"):
                 print(f"\nHost says: {result['skipped']}")
                 return 0
@@ -410,7 +439,8 @@ def _run(username, urls, moves, dry_run, db_path, force=False,
             return 0
 
         conn = st.connect(db_path)
-        run_id = st.start_run(conn, season, week, sorted(texts))
+        run_id = st.start_run(conn, season, week, sorted(texts),
+                              note=json.dumps(quiet) if quiet else "")
         written = sum(1 for p in all_proposals
                       if st.add_proposal(conn, run_id, **p) is not None)
         conn.close()

@@ -94,15 +94,23 @@ for t in test_*.py; do
   python3 "$t" > "$TMPDIR_TESTS/$t.log" 2>&1
   status=$?
   set -e
-  tail -3 "$TMPDIR_TESTS/$t.log" | sed "s/^/    $t /"
-  if [ "$status" != "0" ]; then
-    echo "    $t FAILED"
+  if [ "$status" = "0" ]; then
+    tail -3 "$TMPDIR_TESTS/$t.log" | sed "s/^/    $t /"
+  else
+    # Keep the whole thing. Printing three lines and deleting the log on the
+    # way out is how a failure becomes "Refusing to commit with failing
+    # tests" and nothing else - the one moment the output was needed.
+    cp "$TMPDIR_TESTS/$t.log" "$DEST/failed-$t.log"
+    echo "    $t FAILED:"
+    sed "s/^/      /" "$TMPDIR_TESTS/$t.log" | tail -30
+    echo "      (full output: $DEST/failed-$t.log)"
     failed=1
   fi
 done
 if [ "$failed" = "1" ]; then
   echo
-  echo "Refusing to commit with failing tests."
+  echo "Refusing to commit with failing tests. The files were copied, so"
+  echo "the code is here and runnable - only the commit was held back."
   exit 1
 fi
 

@@ -351,14 +351,24 @@ class TheAgreement(unittest.TestCase):
 
 
 class WithoutCredentials(unittest.TestCase):
-    """What happens on a machine that has not been set up yet."""
+    """What happens on a machine that has not been set up yet.
+
+    Emptying the environment is not enough: configured() loads .env before it
+    looks, so on a machine that has one - which is any machine this actually
+    runs on - the variables come straight back and the test passes for the
+    wrong reason, or fails for one. The file has to be taken out of the
+    picture too.
+    """
 
     def setUp(self):
         self.saved = {k: os.environ.pop(k, None) for k in
                       ("YAHOO_CLIENT_ID", "YAHOO_CLIENT_SECRET",
                        "YAHOO_REFRESH_TOKEN")}
+        self.real_load = yc.localenv.load
+        yc.localenv.load = lambda *_a, **_k: []
 
     def tearDown(self):
+        yc.localenv.load = self.real_load
         for key, value in self.saved.items():
             if value is not None:
                 os.environ[key] = value

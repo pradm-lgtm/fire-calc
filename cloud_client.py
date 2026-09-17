@@ -66,11 +66,16 @@ def approved_unsubmitted():
 
 
 def push_proposals(season, week, sources, proposals, force=False,
-                   update=False):
-    """Send a week's proposals to the host that serves the approval page."""
+                   update=False, note=""):
+    """Send a week's proposals to the host that serves the approval page.
+
+    `note` carries why any league produced nothing, so the page can say so
+    rather than leaving a silent gap where a league used to be.
+    """
     return _call("/api/proposals", {
         "season": season, "week": week, "sources": sources,
         "proposals": proposals, "force": force, "update": update,
+        "note": note,
     }, timeout=120)
 
 

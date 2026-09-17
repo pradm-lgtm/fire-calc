@@ -26,6 +26,7 @@ it is fully testable offline.
 
 import re
 import statistics
+from urllib.parse import urlparse
 from collections import defaultdict
 
 # Suffixes and punctuation that vary between sources for the same player.
@@ -503,13 +504,29 @@ def extract_recommendations(text, gazetteer, source=None, players=None,
     return results
 
 
+def publication(url):
+    """Who published this, rather than which page it was on.
+
+    Two waiver articles from one site are one opinion. Counting URLs made
+    them two, and since the count is what ranks a player against the rest, a
+    site that files twice a week quietly outvoted sites that file once.
+    """
+    host = urlparse(str(url or "")).netloc.lower()
+    if not host:
+        return str(url or "")
+    host = host.split("@")[-1].split(":")[0]
+    if host.startswith("www."):
+        host = host[4:]
+    return host
+
+
 def merge_sources(per_source):
     """Combine {source: {pid: rec}} into a consensus view per player.
 
     Returns {pid: {sources, count, faab_values, faab_median, contexts}}.
     Consensus count is the headline number: how many independent analysts
     named this player, which is exactly the signal the user reads articles
-    for.
+    for - so it counts publications, not pages.
     """
     merged = defaultdict(lambda: {
         "sources": [], "faab_values": [], "contexts": []
@@ -528,7 +545,7 @@ def merge_sources(per_source):
         faabs = entry["faab_values"]
         out[pid] = {
             "sources": entry["sources"],
-            "count": len(entry["sources"]),
+            "count": len({publication(u) for u in entry["sources"]}),
             "faab_values": faabs,
             "faab_median": round(statistics.median(faabs), 1) if faabs else None,
             "contexts": entry["contexts"],

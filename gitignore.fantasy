@@ -10,3 +10,6 @@ __pycache__/
 *.pyc
 
 .DS_Store
+
+# Test output kept when the migration refuses to commit.
+failed-*.log

@@ -8,6 +8,7 @@ furniture that names a dozen players and analyses none of them, and one of
 those arrived on a card as the reason to spend real FAAB.
 """
 
+import json
 import re
 import unittest
 from datetime import datetime, timedelta, timezone
@@ -418,6 +419,130 @@ class Submitting(unittest.TestCase):
         req = st.ask_to_submit(conn)
         st.claim_submit_request(conn, req)
         self.assertIn("placing them now", webapp.render(conn).decode())
+
+
+class Consensus(unittest.TestCase):
+    """How many analysts, as opposed to how many pages."""
+
+    def merged(self, *urls):
+        return ex.merge_sources({u: {"p1": {"faab": 5, "context": "x"}}
+                                 for u in urls})["p1"]
+
+    def test_two_articles_from_one_site_are_one_analyst(self):
+        got = self.merged("https://www.rotoballer.com/a",
+                          "https://rotoballer.com/b")
+        self.assertEqual(got["count"], 1)
+
+    def test_different_sites_still_count_separately(self):
+        got = self.merged("https://www.rotoballer.com/a",
+                          "https://www.draftsharks.com/b",
+                          "https://www.espn.com/c")
+        self.assertEqual(got["count"], 3)
+
+    def test_every_page_is_still_kept_for_showing(self):
+        got = self.merged("https://www.rotoballer.com/a",
+                          "https://rotoballer.com/b")
+        self.assertEqual(len(got["sources"]), 2)
+
+    def test_www_and_a_port_do_not_make_a_new_publication(self):
+        self.assertEqual(ex.publication("https://www.espn.com:443/x"),
+                         "espn.com")
+
+    def test_the_card_does_not_name_a_site_twice(self):
+        conn = st.connect(":memory:")
+        run = st.start_run(conn, "2026", 2, [])
+        st.add_proposal(conn, run, league_id="1", league_name="LEHG",
+                        add_player_id="a", add_player_name="Add Him (SF RB)",
+                        add_position="RB", drop_player_id="d",
+                        drop_player_name="Cut Him (GB RB)",
+                        drop_position="RB", bid=4, max_bid=100, consensus=2,
+                        sources=["https://www.rotoballer.com/a",
+                                 "https://rotoballer.com/b",
+                                 "https://www.draftsharks.com/c"],
+                        rationale="", quote="", drop_options=[])
+        body = webapp.render(conn).decode().split("</style></head>")[1]
+        self.assertIn("rotoballer.com, draftsharks.com", body)
+        self.assertNotIn("rotoballer.com, rotoballer.com", body)
+
+
+class QuietLeagues(unittest.TestCase):
+    """A league that produced nothing says why it produced nothing."""
+
+    def build(self, note):
+        conn = st.connect(":memory:")
+        st.start_run(conn, "2026", 2, ["ESPN"], note=note)
+        return webapp.render(conn).decode().split("</style></head>")[1]
+
+    def test_the_reason_is_shown_not_the_absence(self):
+        body = self.build(json.dumps(
+            {"OTG Alumni": "the best player available is not worth more than "
+                           "the weakest player you would have to drop"}))
+        self.assertIn("OTG Alumni", body)
+        self.assertIn("not worth more than", body)
+        self.assertIn("Nothing to do in 1 league", body)
+
+    def test_several_leagues_are_listed(self):
+        body = self.build(json.dumps({"OTG Alumni": "one", "LEHG": "two"}))
+        self.assertIn("Nothing to do in 2 leagues", body)
+
+    def test_a_run_with_no_note_says_nothing_extra(self):
+        self.assertNotIn("Nothing to do in", self.build(""))
+
+    def test_a_note_that_is_not_json_is_ignored_not_fatal(self):
+        self.assertNotIn("Nothing to do in", self.build("just some text"))
+
+
+class NoBench(unittest.TestCase):
+    """A league whose bench is unavailable still gets a recommendation.
+
+    The gate deciding whether to propose anything looked only at the bench,
+    while the card underneath offered the whole roster - so a bench that was
+    full, or entirely never-drops, silently produced nothing for a league
+    that would happily have cut a starter for a better player.
+    """
+
+    PLAYERS = {
+        "s1": {"full_name": "My Starter", "position": "RB", "team": "GB",
+               "active": True, "status": "Active", "fantasy_positions": ["RB"]},
+        "s2": {"full_name": "Second Starter", "position": "WR", "team": "NYJ",
+               "active": True, "status": "Active", "fantasy_positions": ["WR"]},
+        "free": {"full_name": "Kaelon Black", "position": "RB", "team": "SF",
+                 "active": True, "status": "Active",
+                 "fantasy_positions": ["RB"]},
+    }
+    ROSTER = {"roster_id": 1, "owner_id": "me", "starters": ["s1", "s2"],
+              "players": ["s1", "s2"], "settings": {"waiver_budget_used": 0}}
+    LEAGUE = {"league_id": "L1", "name": "OTG Alumni",
+              "settings": {"num_teams": 10, "waiver_budget": 100},
+              "scoring_settings": {"rec": 0.5},
+              "roster_positions": ["RB", "WR"]}
+    ARTICLE = ("Kaelon Black, RB, 49ers: Black is the top waiver add this "
+               "week. Spend 4% of your FAAB budget to add him.")
+
+    def run_it(self):
+        import run_weekly as rw
+        import sleeper_client as sc
+        real = sc.league_rosters
+        sc.league_rosters = lambda _lid: [self.ROSTER]
+        try:
+            return rw.proposals_for_league(
+                self.LEAGUE, "me", self.PLAYERS, {},
+                {"https://espn.com/x": self.ARTICLE}, 3)
+        finally:
+            sc.league_rosters = real
+
+    def test_a_roster_with_no_bench_still_proposes(self):
+        rows, why = self.run_it()
+        self.assertEqual(len(rows), 1, why)
+        self.assertIn("Kaelon Black", rows[0]["add_player_name"])
+
+    def test_the_drop_it_picks_is_on_the_roster(self):
+        rows, _why = self.run_it()
+        self.assertIn(rows[0]["drop_player_id"], ("s1", "s2"))
+
+    def test_and_the_card_still_offers_the_alternatives(self):
+        rows, _why = self.run_it()
+        self.assertGreaterEqual(len(rows[0]["drop_options"]), 2)
 
 
 class Candidates(unittest.TestCase):

@@ -287,6 +287,7 @@ label { font-size:13px; color:var(--muted); }
 .state.unconfirmed { color:var(--warn); }
 .state.won { color:var(--ok); } .state.lost { color:var(--muted); }
 .trouble { border-color:var(--urgent); }
+.quiet { border-style:dashed; }
 .trouble code { font-size:12.5px; background:var(--bg); padding:2px 5px;
                 border-radius:5px; }
 .outcome { font-size:13.5px; color:var(--ink); margin:10px 0 0; }
@@ -394,7 +395,9 @@ def render(conn):
     if not rows:
         return page(nav("/") + "<h1>Waiver proposals</h1>"
                     + refresh_button("Re-check waivers")
-                    + "<p class='empty'>That run produced no proposals.</p>",
+                    + (quiet_leagues(run)
+                       or "<p class='empty'>That run produced no proposals."
+                          "</p>"),
                     "Spike — waivers")
 
     by_league = {}
@@ -421,6 +424,7 @@ def render(conn):
            refresh_button("Re-check waivers")]
 
     out.append(stale_warning(run))
+    out.append(quiet_leagues(run))
     trouble = refresh_trouble(conn)
     if trouble:
         out.append(trouble)
@@ -474,6 +478,28 @@ def run_summary(conn):
             else {"at": failed["at"], "detail": failed["detail"]}),
         "database": conn.kind,
     }
+
+
+def quiet_leagues(run):
+    """Name the leagues that produced nothing, and why.
+
+    A league with a settled roster and a league whose reasoning fell over
+    both showed up as an absence, and an absence is not something anyone
+    notices. Saying "OTG: nothing, because the best player available is not
+    worth more than your weakest droppable one" is a conclusion; a missing
+    heading is not.
+    """
+    try:
+        quiet = json.loads(run["note"] or "{}")
+    except (ValueError, TypeError):
+        return ""
+    if not isinstance(quiet, dict) or not quiet:
+        return ""
+    rows = "".join(f"<li><b>{e(name)}</b> &mdash; {e(why)}</li>"
+                   for name, why in sorted(quiet.items()))
+    return (f"<div class='card quiet'><p class='paneltop'>Nothing to do in "
+            f"{len(quiet)} league{'s' if len(quiet) != 1 else ''}</p>"
+            f"<ul class='queue'>{rows}</ul></div>")
 
 
 def stale_warning(run):
@@ -759,7 +785,16 @@ def evidence(r):
     sentence naming eleven other men.
     """
     srcs = json.loads(r["sources"] or "[]")
-    src_txt = ", ".join(short_source(s) for s in srcs)
+    # One site that filed twice is one name here, to match the count beside
+    # it - "3 analysts - rotoballer.com, rotoballer.com" was arguing with
+    # itself in the same sentence.
+    seen, names = set(), []
+    for url in srcs:
+        name = short_source(url)
+        if name not in seen:
+            seen.add(name)
+            names.append(name)
+    src_txt = ", ".join(names)
     named = e(f"Named by {r['consensus']} analyst"
               f"{'s' if (r['consensus'] or 0) != 1 else ''}")
     if src_txt:
@@ -1898,7 +1933,8 @@ class Handler(BaseHTTPRequestHandler):
                 else:
                     run_id = st.start_run(conn, payload.get("season"),
                                           payload.get("week"),
-                                          payload.get("sources") or [])
+                                          payload.get("sources") or [],
+                                          note=payload.get("note") or "")
                     added = "filed as"
                 written = sum(1 for r in rows
                               if st.add_proposal(conn, run_id, **r) is not None)
