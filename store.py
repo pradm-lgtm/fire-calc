@@ -621,8 +621,13 @@ def reorder(conn, proposal_id, direction):
 
 
 def decide(conn, proposal_id, status, bid=None, drop_player_id=None,
-           drop_player_name=None):
-    """Record a person's decision. Only pending rows can be decided."""
+           drop_player_name=None, drop_position=None):
+    """Record a person's decision. Only pending rows can be decided.
+
+    The position travels with the name. Changing the drop used to move the
+    id and the name and leave the position behind, so a card that swapped a
+    running back for a wide receiver went on wearing the old chip.
+    """
     if status not in (APPROVED, DECLINED, PENDING):
         raise ValueError(f"bad status {status!r}")
     row = conn.execute("SELECT * FROM proposals WHERE id = ?",
@@ -638,9 +643,30 @@ def decide(conn, proposal_id, status, bid=None, drop_player_id=None,
     if drop_player_id is not None:
         sets += ["drop_player_id = ?", "drop_player_name = ?"]
         vals += [str(drop_player_id), drop_player_name]
+        if drop_position is not None:
+            sets.append("drop_position = ?")
+            vals.append(drop_position)
     vals.append(proposal_id)
     conn.execute(f"UPDATE proposals SET {', '.join(sets)} WHERE id = ?", vals)
     log(conn, status, f"bid={bid}" if bid is not None else "", proposal_id)
+    conn.commit()
+    return True
+
+
+def retire(conn, proposal_id, detail=""):
+    """Take a claim out of the queue for good, without pretending it ran.
+
+    For a claim the league has settled - the player is on somebody's roster
+    now - it neither succeeded nor failed at anything. Leaving it approved
+    means re-checking and re-refusing it every run until the season ends.
+    """
+    row = conn.execute("SELECT * FROM proposals WHERE id = ?",
+                       (int(proposal_id),)).fetchone()
+    if row is None or row["submitted_at"]:
+        return False
+    conn.execute("UPDATE proposals SET status = ?, result = ? WHERE id = ?",
+                 (SKIPPED, detail, int(proposal_id)))
+    log(conn, SKIPPED, detail, int(proposal_id))
     conn.commit()
     return True
 

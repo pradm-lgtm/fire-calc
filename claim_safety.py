@@ -63,14 +63,22 @@ def my_roster_id(league_id, user_id):
 
 
 def preflight(proposal, user_id, players=None):
-    """(ok, reason). Re-verify a proposal against the live league."""
+    """(ok, reason, settled). Re-verify a proposal against the live league.
+
+    `settled` means the answer cannot change before waivers process, so the
+    claim is finished rather than waiting. A player another team now owns is
+    settled; a bid that no longer fits the budget is not, because approving
+    fewer claims frees it up again. Without the distinction a dead claim sits
+    in the approved queue forever, re-checked and re-refused every run, and
+    the queue fills with things that can never happen.
+    """
     league_id = proposal["league_id"]
     add_id = str(proposal["add_player_id"])
     drop_id = str(proposal["drop_player_id"]) if proposal["drop_player_id"] else None
 
     rosters = sc.league_rosters(league_id)
     if not rosters:
-        return False, "could not read the league's rosters"
+        return False, "could not read the league's rosters", False
 
     mine = None
     taken = set()
@@ -80,16 +88,18 @@ def preflight(proposal, user_id, players=None):
         if str(r.get("owner_id")) == str(user_id):
             mine = r
     if mine is None:
-        return False, "your roster is not in this league"
+        return False, "your roster is not in this league", False
 
     if add_id in taken:
         mine_ids = {str(p) for p in (mine.get("players") or [])}
         who = "you already have him" if add_id in mine_ids \
             else "another team has him"
-        return False, f"{proposal['add_player_name']} is no longer free — {who}"
+        # Nobody gives a player back before waivers run.
+        return False, f"{proposal['add_player_name']} is no longer free — {who}", True
 
     if drop_id and drop_id not in {str(p) for p in (mine.get("players") or [])}:
-        return False, f"{proposal['drop_player_name']} is no longer on your roster"
+        return False, (f"{proposal['drop_player_name']} is no longer on your "
+                       "roster"), False
 
     if drop_id and players:
         # Belt and braces: the drop chooser already skips these, but a bad
@@ -97,7 +107,7 @@ def preflight(proposal, user_id, players=None):
         import waiver_analyzer as wa
         if wa.is_protected(players.get(drop_id)):
             return False, (f"{proposal['drop_player_name']} is on your "
-                           "never-drop list")
+                           "never-drop list"), True
 
     note = "ok"
     if drop_id and drop_id in {str(p) for p in (mine.get("starters") or []) if p}:
@@ -117,10 +127,11 @@ def preflight(proposal, user_id, players=None):
         if used is not None and budget:
             left = budget - used
             if bid > left:
-                return False, f"bid {bid} exceeds the {left} FAAB you have left"
+                return False, (f"bid {bid} exceeds the {left} FAAB you have "
+                               "left"), False
         if bid < 0:
-            return False, "negative bid"
-    return True, note
+            return False, "negative bid", True
+    return True, note, False
 
 
 def verify_submitted(conn, proposal, user_id, week):

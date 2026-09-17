@@ -263,7 +263,7 @@ class Telling(unittest.TestCase):
     def test_a_fallback_passes_preflight_while_its_original_is_pending(self):
         # Both claims cut the same player, and he is still on the roster
         # because nothing has processed yet. Both must be placeable.
-        ok, why = cs.preflight(self.proposal("d1"), "me")
+        ok, why, _settled = cs.preflight(self.proposal("d1"), "me")
         self.assertTrue(ok, why)
 
 

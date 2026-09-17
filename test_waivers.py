@@ -177,6 +177,18 @@ class Drops(unittest.TestCase):
         self.assertEqual(after["drop_player_id"], "d2")
         self.assertEqual(after["drop_player_name"], "Alec Pierce (IND WR)")
 
+    def test_the_position_travels_with_the_name(self):
+        # A drop swapped from a back to a receiver kept the old chip.
+        conn = self.build()
+        row = st.proposals_for_run(conn, st.latest_run(conn)["id"])[0]
+        pick = webapp.drop_pick(conn, row["id"], "d2")
+        st.decide(conn, row["id"], st.APPROVED, bid=5,
+                  drop_player_id="d2", drop_player_name=pick["name"],
+                  drop_position=pick["position"])
+        after = st.proposals_for_run(conn, st.latest_run(conn)["id"])[0]
+        self.assertEqual(after["drop_player_name"], "Alec Pierce (IND WR)")
+        self.assertEqual(after["drop_position"], "WR")
+
     def test_the_name_comes_from_the_options_not_the_form(self):
         # So a posted form cannot name one player and identify another.
         conn = self.build()
@@ -480,17 +492,39 @@ class Starters(unittest.TestCase):
                              "bid": 3, "max_bid": 100}, "me")
 
     def test_a_starter_you_chose_is_not_refused(self):
-        ok, why = self.preflight("s1")
+        ok, why, _settled = self.preflight("s1")
         self.assertTrue(ok)
         self.assertIn("as approved", why)
 
     def test_a_bench_drop_says_nothing_extra(self):
-        self.assertEqual(self.preflight("b1"), (True, "ok"))
+        self.assertEqual(self.preflight("b1"), (True, "ok", False))
 
     def test_somebody_who_left_your_roster_is_still_refused(self):
-        ok, why = self.preflight("gone")
+        ok, why, settled = self.preflight("gone")
         self.assertFalse(ok)
         self.assertIn("no longer on your roster", why)
+        # You can pick a different drop, so this one is not finished.
+        self.assertFalse(settled)
+
+    def test_a_player_another_team_took_is_finished_not_waiting(self):
+        import claim_safety as cs
+        import sleeper_client as sc
+        rosters = [dict(self.ROSTERS[0]),
+                   {"owner_id": "them", "roster_id": 2, "starters": [],
+                    "players": ["new"], "settings": {}}]
+        real = sc.league_rosters
+        sc.league_rosters = lambda _lid: rosters
+        try:
+            ok, why, settled = cs.preflight(
+                {"league_id": "1", "add_player_id": "new",
+                 "add_player_name": "Kaelon Black (IND RB)",
+                 "drop_player_id": "b1", "drop_player_name": "b1",
+                 "bid": 3, "max_bid": 100}, "me")
+        finally:
+            sc.league_rosters = real
+        self.assertFalse(ok)
+        self.assertIn("another team has him", why)
+        self.assertTrue(settled)
 
 
 if __name__ == "__main__":

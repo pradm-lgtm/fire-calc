@@ -116,13 +116,16 @@ def recent_claims():
     return _call("/api/claims?include=submitted").get("claims", [])
 
 
-def report(proposal_id, submitted, ok=False, detail=""):
+def report(proposal_id, submitted, ok=False, detail="", settled=False):
     """Tell the host what happened.
 
     submitted=False means nothing reached the league, so the claim stays
     approved and can be tried again. Only a claim that actually reached the
     submit button is reported as submitted.
+
+    settled=False with submitted=False is "not this time"; settled=True is
+    "not ever" - the player is rostered elsewhere now - and retires it.
     """
     return _call(f"/api/claims/{int(proposal_id)}/result",
                  {"submitted": bool(submitted), "ok": bool(ok),
-                  "detail": str(detail)[:500]})
+                  "settled": bool(settled), "detail": str(detail)[:500]})

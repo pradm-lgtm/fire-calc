@@ -800,6 +800,7 @@ STATES = {
     st.DECLINED: ("\u2715", "Declined", "this one will not be filed"),
     st.SUBMITTED: ("\u2713", "Placed in Sleeper", "pending until waivers run"),
     st.FAILED: ("!", "Could not be placed", ""),
+    st.SKIPPED: ("\u2013", "No longer possible", "the league moved on"),
 }
 
 
@@ -845,11 +846,12 @@ def fallback_form(r, options):
             "different drop</button></form>")
 
 
-def drop_name(conn, proposal_id, drop_id):
-    """The name that goes with a chosen drop, from the options offered.
+def drop_pick(conn, proposal_id, drop_id):
+    """The option a chosen drop id refers to, or None.
 
     Looked up rather than posted, so the form cannot name one player and
-    identify another.
+    identify another - and so the position comes along with the name instead
+    of being left at whatever the run first suggested.
     """
     if not drop_id:
         return None
@@ -857,8 +859,14 @@ def drop_name(conn, proposal_id, drop_id):
                        (int(proposal_id),)).fetchone()
     for option in json.loads((row and row["drop_options"]) or "[]"):
         if str(option.get("id")) == str(drop_id):
-            return option.get("name")
+            return option
     return None
+
+
+def drop_name(conn, proposal_id, drop_id):
+    """Just the name, for callers that only want that."""
+    pick = drop_pick(conn, proposal_id, drop_id)
+    return pick.get("name") if pick else None
 
 
 def drop_picker(r, options):
@@ -2025,13 +2033,17 @@ class Handler(BaseHTTPRequestHandler):
             body = json.loads(self.rfile.read(length) or b"{}")
             conn = self._conn()
             try:
+                detail = str(body.get("detail", ""))[:500]
                 if body.get("submitted"):
-                    st.mark_submitted(conn, pid, bool(body.get("ok")),
-                                      str(body.get("detail", ""))[:500])
+                    st.mark_submitted(conn, pid, bool(body.get("ok")), detail)
+                elif body.get("settled"):
+                    # The league has decided this one: the player is on
+                    # somebody's roster. Retiring it keeps the queue to
+                    # claims that could still happen.
+                    st.retire(conn, pid, detail)
                 else:
                     # Nothing reached the league, so keep it retryable.
-                    st.log(conn, "attempt_failed",
-                           str(body.get("detail", ""))[:500], pid)
+                    st.log(conn, "attempt_failed", detail, pid)
                     conn.commit()
                 self._json(200, {"ok": True})
             finally:
@@ -2196,9 +2208,11 @@ class Handler(BaseHTTPRequestHandler):
                         bid_val = int(bid) if bid not in (None, "") else None
                     except ValueError:
                         bid_val = None
+                    pick = drop_pick(conn, pid, drop) or {}
                     st.decide(conn, int(pid), status, bid=bid_val,
                               drop_player_id=drop or None,
-                              drop_player_name=drop_name(conn, pid, drop))
+                              drop_player_name=pick.get("name"),
+                              drop_position=pick.get("position"))
         finally:
             conn.close()
         self.send_response(303)

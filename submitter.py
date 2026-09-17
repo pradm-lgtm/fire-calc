@@ -847,6 +847,26 @@ def clean_name(label):
     return str(label).split("(")[0].split("[")[0].strip()
 
 
+def waiting_for_you(remote):
+    """Say when the page is holding proposals nobody has decided on yet.
+
+    "Nothing passed pre-flight" is true and reads as a dead end, when what is
+    usually meant is that this week's proposal is sitting on the page one tap
+    from being placeable. Only the page knows that, so ask it.
+    """
+    if not remote:
+        return
+    try:
+        info = cloud.status()
+    except Exception:
+        return
+    pending = (info.get("statuses") or {}).get("pending") or 0
+    if pending:
+        print(f"\nThe page has {pending} proposal(s) still waiting for you to "
+              "approve.")
+        print("Approve one there and run this again.")
+
+
 def note(conn, remote, kind, detail, row):
     """Write a local event about a claim, wherever that claim lives.
 
@@ -887,9 +907,9 @@ def run(conn, user_id, week, dry_run, limit, mode='auto'):
     for group in claim_order.by_league(rows).values():
         fallbacks.update(claim_order.blockers(group))
 
-    checked = []
+    checked, retired = [], 0
     for r in rows[:limit] if limit else rows:
-        ok, why = cs.preflight(r, user_id)
+        ok, why, settled = cs.preflight(r, user_id)
         mark = "ok   " if ok else "BLOCK"
         print(f"  {mark} {r['league_name']}: ADD {clean_name(r['add_player_name'])}"
               f" / DROP {clean_name(r['drop_player_name'])} bid {r['bid']}")
@@ -900,12 +920,28 @@ def run(conn, user_id, week, dry_run, limit, mode='auto'):
         if not ok:
             print(f"        {why}")
             note(conn, remote, "preflight_blocked", why, r)
+            if settled:
+                # It can never succeed now, so take it out of the queue
+                # rather than refusing it again every run from here to the
+                # end of the season.
+                print("        retired - this one can no longer happen")
+                retired += 1
+                if remote:
+                    try:
+                        cloud.report(r["id"], False, False, why, settled=True)
+                    except cloud.RemoteError as exc:
+                        print(f"        ! could not retire it: {exc}")
+                else:
+                    st.retire(conn, r["id"], why)
         else:
             if why != "ok":
                 print(f"        note: {why}")
             checked.append(r)
     if not checked:
         print("\nNothing passed pre-flight; nothing to place.")
+        if retired:
+            print(f"{retired} of them will not be asked about again.")
+        waiting_for_you(remote)
         _note("nothing passed pre-flight - the adds or drops have moved since "
               "they were approved")
         return 1
