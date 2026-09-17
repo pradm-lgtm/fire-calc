@@ -349,6 +349,49 @@ class LeagueIds(unittest.TestCase):
             submitter.looks_like_league_id("  1389721149700571136 "))
 
 
+class Unconfirmed(unittest.TestCase):
+    """A claim the browser placed and the league will not show us.
+
+    Recording that as a failure is how you end up with two claims for one
+    player: the failure reads as "it did not go in", and the obvious response
+    to that is to put it in.
+    """
+
+    def setUp(self):
+        self.conn = st.connect(":memory:")
+        run = st.start_run(self.conn, "2026", 2, [])
+        self.pid = st.add_proposal(
+            self.conn, run, league_id="1", league_name="LEHG",
+            add_player_id="a", add_player_name="Pat Freiermuth (PIT TE)",
+            add_position="TE", drop_player_id="d",
+            drop_player_name="Chris Rodriguez (WAS RB)", drop_position="RB",
+            bid=1, max_bid=89, consensus=3, sources=[], rationale="",
+            quote="", drop_options=[])
+
+    def row(self):
+        return self.conn.execute("SELECT * FROM proposals WHERE id = ?",
+                                 (self.pid,)).fetchone()
+
+    def test_confirmed_by_the_league_is_submitted(self):
+        st.mark_submitted(self.conn, self.pid, True, "pending claim 123")
+        self.assertEqual(self.row()["status"], st.SUBMITTED)
+
+    def test_unseen_by_the_league_is_not_called_a_failure(self):
+        st.mark_submitted(self.conn, self.pid, False, "no pending claims")
+        self.assertEqual(self.row()["status"], st.UNCONFIRMED)
+
+    def test_an_unconfirmed_claim_is_never_offered_again(self):
+        st.mark_submitted(self.conn, self.pid, False, "no pending claims")
+        self.assertEqual(st.approved_unsubmitted(self.conn), [])
+        self.assertEqual(st.reset_failed(self.conn), 0)
+        self.assertEqual(self.row()["status"], st.UNCONFIRMED)
+
+    def test_it_carries_what_was_seen_so_you_can_judge(self):
+        st.mark_submitted(self.conn, self.pid, False,
+                          "confirmed in the UI; no pending waiver claims")
+        self.assertIn("confirmed in the UI", self.row()["result"])
+
+
 class WhatThePageIsTold(unittest.TestCase):
     """The submitter's report is what the person reads, so it has to say
     what to do rather than point at a log file."""

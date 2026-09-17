@@ -284,6 +284,7 @@ label { font-size:13px; color:var(--muted); }
 .state.approved { color:var(--ok); } .state.declined { color:var(--no); }
 .state.submitted { color:var(--action); }
 .state.failed { color:var(--urgent); }
+.state.unconfirmed { color:var(--warn); }
 .trouble { border-color:var(--urgent); }
 .trouble code { font-size:12.5px; background:var(--bg); padding:2px 5px;
                 border-radius:5px; }
@@ -800,6 +801,8 @@ STATES = {
     st.DECLINED: ("\u2715", "Declined", "this one will not be filed"),
     st.SUBMITTED: ("\u2713", "Placed in Sleeper", "pending until waivers run"),
     st.FAILED: ("!", "Could not be placed", ""),
+    st.UNCONFIRMED: ("?", "Placed, but not confirmed",
+                     "check Sleeper before doing anything about it"),
     st.SKIPPED: ("\u2013", "No longer possible", "the league moved on"),
 }
 

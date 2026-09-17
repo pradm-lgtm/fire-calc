@@ -1020,6 +1020,13 @@ def run(conn, user_id, week, dry_run, limit, mode='auto'):
             # The browser says it worked; the league is what decides.
             found, vdetail = cs.verify_submitted(conn, r, user_id, week)
             print(f"  verification: {vdetail}")
+            if not found:
+                print("  ! The browser pressed confirm and the league does "
+                      "not show the claim.")
+                print("    That is not the same as a failure. Look in Sleeper "
+                      "before placing")
+                print("    it again - the one outcome worse than an unplaced "
+                      "claim is two.")
             record(True, found, f"{detail}; {vdetail}")
             placed += 1 if found else 0
         if not attached:
@@ -1033,6 +1040,34 @@ def run(conn, user_id, week, dry_run, limit, mode='auto'):
         print(f"\n{placed} claim(s) confirmed present in their leagues.")
         print("They stay pending until Sleeper processes waivers, so you can "
               "review or cancel them in the app until then.")
+    return 0
+
+
+def do_transactions(league_id, week):
+    """Every transaction Sleeper reports for a few weeks around now.
+
+    The read-back asks whether one claim is visible. When it says no claims
+    at all are visible, the next question is whether the endpoint is showing
+    anything - and that wants the raw answer, not our reading of it.
+    """
+    if not looks_like_league_id(league_id):
+        print(f"{league_id!r} is not a Sleeper league id.")
+        return 1
+    try:
+        current = int(week)
+    except (TypeError, ValueError):
+        current = 1
+    for wk in range(max(1, current - 1), current + 3):
+        rows = sc.get(f"/league/{league_id}/transactions/{wk}") or []
+        print(f"\nweek {wk}: {len(rows)} transaction(s)")
+        for t in rows:
+            kind = t.get("type")
+            status = t.get("status")
+            adds = list((t.get("adds") or {}).keys())
+            drops = list((t.get("drops") or {}).keys())
+            bid = (t.get("settings") or {}).get("waiver_bid")
+            print(f"  {kind}/{status} rosters={t.get('roster_ids')} "
+                  f"adds={adds} drops={drops} bid={bid}")
     return 0
 
 
@@ -1120,6 +1155,8 @@ def main():
     ap.add_argument("--player", metavar="NAME",
                     help="with --probe, walk the claim flow for this player")
     ap.add_argument("--audit", action="store_true")
+    ap.add_argument("--transactions", metavar="LEAGUE_ID",
+                    help="dump what Sleeper reports for this league, raw")
     ap.add_argument("--retry", action="store_true",
                     help="return failed claims to the approved queue")
     ap.add_argument("--watch", action="store_true",
@@ -1138,6 +1175,10 @@ def main():
 
     if args.watch:
         return do_watch(args)
+
+    if args.transactions:
+        state = sc.current_state()
+        return do_transactions(args.transactions, sc.current_week(state))
 
     if args.start_chrome:
         return 0 if start_chrome() else 1

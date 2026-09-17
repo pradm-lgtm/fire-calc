@@ -24,6 +24,11 @@ DB_PATH = Path(__file__).resolve().parent / "fantasy.db"
 
 PENDING, APPROVED, DECLINED = "pending", "approved", "declined"
 SUBMITTED, FAILED, SKIPPED = "submitted", "failed", "skipped"
+# The browser reached the confirm button and pressed it, but reading the
+# league back through the API did not find the claim. That is not the same as
+# a failure: the claim may well be in, and treating it as a failure invites a
+# second one for the same player.
+UNCONFIRMED = "unconfirmed"
 OPEN_STATUSES = (PENDING, APPROVED)
 
 SCHEMA = """
@@ -676,7 +681,8 @@ def reset_failed(conn):
 
     Only rows that failed are eligible: a row recorded as SUBMITTED really
     reached the league and must never be resurrected, or the same claim could
-    be placed twice.
+    be placed twice. Nor is an UNCONFIRMED row, for the same reason - it
+    reached the confirm button, and we simply could not see the result.
     """
     rows = conn.execute(
         "SELECT id FROM proposals WHERE status = ?", (FAILED,)).fetchall()
@@ -690,12 +696,20 @@ def reset_failed(conn):
 
 
 def mark_submitted(conn, proposal_id, ok, detail=""):
+    """Record a claim that reached the confirm button.
+
+    `ok` is whether the league confirmed it afterwards, not whether the
+    browser thought it worked. Unconfirmed is deliberately not "failed":
+    submitted_at is set either way, so nothing here will offer to place it
+    again, because the one outcome worse than an unplaced claim is two.
+    """
+    status = SUBMITTED if ok else UNCONFIRMED
     conn.execute(
         "UPDATE proposals SET status = ?, submitted_at = ?, result = ?"
         " WHERE id = ?",
-        (SUBMITTED if ok else FAILED, now(), detail, proposal_id),
+        (status, now(), detail, proposal_id),
     )
-    log(conn, SUBMITTED if ok else FAILED, detail, proposal_id)
+    log(conn, status, detail, proposal_id)
     conn.commit()
 
 
