@@ -10,6 +10,8 @@ logged-out Sleeper, and closed again, so from the outside a window appeared
 and vanished with no explanation anywhere.
 """
 
+import contextlib
+import io
 import unittest
 
 import submitter
@@ -158,6 +160,29 @@ class Port9222(unittest.TestCase):
         self.assertIn("--remote-debugging-port=9222", hint)
         self.assertIn("--user-data-dir", hint)
 
+    def test_a_long_reply_is_read_whole(self):
+        # Chrome's /json/version runs past 400 bytes. Reading a prefix of it
+        # and parsing that was reporting a real Chrome as "not Chrome".
+        body = ('{"Browser": "Chrome/152.0.7977.83", "Protocol-Version":'
+                ' "1.3", "User-Agent": "' + "x" * 500 + '",'
+                ' "V8-Version": "', )
+        body = (body[0] + '13.1", "WebKit-Version": "537.36",'
+                ' "webSocketDebuggerUrl": "ws://127.0.0.1:9222/devtools/'
+                + "y" * 200 + '"}')
+        self.assertGreater(len(body), 400)
+        alive, saw = self.probe(body=body)
+        self.assertTrue(alive)
+        self.assertIn("Chrome/152", saw)
+
+    def test_the_flag_chrome_has_required_since_v111_is_passed(self):
+        # Without it the port answers /json/version and then refuses every
+        # attach, which reads as "something is there but will not talk".
+        self.assertIn("--remote-allow-origins=*", submitter.CHROME_FLAGS)
+
+    def test_the_printed_command_survives_a_shell(self):
+        # A bare * in a shell is a glob over the current directory.
+        self.assertIn("--remote-allow-origins='*'", submitter.launch_hint())
+
 
 class WhatThePageIsTold(unittest.TestCase):
     """The submitter's report is what the person reads, so it has to say
@@ -173,7 +198,12 @@ class WhatThePageIsTold(unittest.TestCase):
         submitter._note("")
 
     def test_being_logged_out_asks_for_a_login_in_words(self):
-        detail = submitter.ask_for_login("Sleeper is showing its log-in screen")
+        # Swallow its console output: the migration script tails the last few
+        # lines of each test file to report the result, and instructions
+        # meant for a person pushed the result itself off the bottom.
+        with contextlib.redirect_stdout(io.StringIO()):
+            detail = submitter.ask_for_login(
+                "Sleeper is showing its log-in screen")
         self.assertIn("not signed in", detail)
         self.assertIn("press the button again", detail)
 

@@ -70,9 +70,20 @@ CHROME_MAC = ("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")
 CHROME_PROFILE = Path.home() / ".fantasy-chrome"
 
 
+# Chrome 111 and later refuse a WebSocket upgrade from an origin they do not
+# recognise, and a CDP client is always such an origin. Without this the port
+# answers /json/version perfectly and then refuses every attach.
+CHROME_FLAGS = ["--remote-debugging-port=9222",
+                "--remote-allow-origins=*"]
+
+
 def launch_hint():
+    # Quoted for a shell, where a bare * is a glob and would be expanded into
+    # whatever happens to be in the current directory.
+    flags = " \\\n  ".join(
+        f.replace("=*", "='*'") for f in CHROME_FLAGS)
     return (f'"{CHROME_MAC}" \\\n'
-            f'  --remote-debugging-port=9222 \\\n'
+            f'  {flags} \\\n'
             f'  --user-data-dir="{CHROME_PROFILE}"')
 
 
@@ -104,7 +115,7 @@ def cdp_probe(timeout=0.7):
     try:
         direct = urllib.request.build_opener(urllib.request.ProxyHandler({}))
         with direct.open(f"{CDP_URL}/json/version", timeout=timeout) as resp:
-            body = resp.read(400).decode("utf-8", "replace")
+            body = resp.read().decode("utf-8", "replace")
     except Exception as exc:
         return False, f"{type(exc).__name__}: {exc}"
     try:
@@ -140,8 +151,8 @@ def start_chrome():
 
     CHROME_PROFILE.mkdir(exist_ok=True)
     subprocess.Popen(
-        [app, "--remote-debugging-port=9222",
-         f"--user-data-dir={CHROME_PROFILE}", "https://sleeper.com"],
+        [app] + CHROME_FLAGS
+        + [f"--user-data-dir={CHROME_PROFILE}", "https://sleeper.com"],
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
         start_new_session=True)
     for _ in range(40):
@@ -292,11 +303,13 @@ def do_login(pw):
             print("    python3 submitter.py YOUR_USERNAME")
         browser.close()
     except Exception as exc:
-        # Something holds the port but Playwright cannot speak to it.
-        print(f"Something is on 9222 but would not attach: "
-              f"{type(exc).__name__}: {exc}")
-        print("That is usually another program holding the port, or a Chrome")
-        print("started without the debugging flag.")
+        print(f"That Chrome would not attach: {type(exc).__name__}: {exc}")
+        print()
+        print("A Chrome answering on 9222 but refusing the attach was almost")
+        print("certainly started without --remote-allow-origins=*, which")
+        print("Chrome has required of every debugging client since v111.")
+        print("Quit that Chrome (Cmd-Q) and run this again - the one it")
+        print("starts carries the flag.")
         by_hand()
 
 
@@ -691,11 +704,19 @@ def run(conn, user_id, week, dry_run, limit, mode='auto'):
         # gets a window that opens, fails and disappears.
         try:
             ctx = attach(pw)
-        except Exception:
-            print(f"Nothing is listening on {CDP_URL}, so there is no signed-in"
-                  " browser to work in.")
+        except Exception as exc:
+            alive, saw = cdp_probe()
+            if alive:
+                why = (f"a Chrome is on 9222 ({saw}) but refused the attach "
+                       "- it was started without --remote-allow-origins=*")
+                print(f"{why}: {type(exc).__name__}: {exc}")
+                print("Quit that Chrome and run --login again.")
+            else:
+                why = "no browser was attached"
+                print(f"Nothing is listening on {CDP_URL} ({saw}), so there "
+                      "is no signed-in browser to work in.")
             print()
-            _note(ask_for_login("no browser was attached"))
+            _note(ask_for_login(why))
             return NEEDS_LOGIN
         attached = True
         page = ctx.pages[0] if ctx.pages else ctx.new_page()
