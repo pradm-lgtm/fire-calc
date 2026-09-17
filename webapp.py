@@ -285,6 +285,7 @@ label { font-size:13px; color:var(--muted); }
 .state.submitted { color:var(--action); }
 .state.failed { color:var(--urgent); }
 .state.unconfirmed { color:var(--warn); }
+.state.won { color:var(--ok); } .state.lost { color:var(--muted); }
 .trouble { border-color:var(--urgent); }
 .trouble code { font-size:12.5px; background:var(--bg); padding:2px 5px;
                 border-radius:5px; }
@@ -799,10 +800,13 @@ def decide_form(r):
 STATES = {
     st.APPROVED: ("\u2713", "Approved", "waiting to be placed in Sleeper"),
     st.DECLINED: ("\u2715", "Declined", "this one will not be filed"),
-    st.SUBMITTED: ("\u2713", "Placed in Sleeper", "pending until waivers run"),
+    st.SUBMITTED: ("\u2713", "Placed in Sleeper",
+                   "Sleeper shows nothing until waivers run"),
     st.FAILED: ("!", "Could not be placed", ""),
     st.UNCONFIRMED: ("?", "Placed, but not confirmed",
                      "check Sleeper before doing anything about it"),
+    st.WON: ("\u2713", "Won him", "the claim went through"),
+    st.LOST: ("\u2715", "Outbid", "somebody bid more; nothing was spent"),
     st.SKIPPED: ("\u2013", "No longer possible", "the league moved on"),
 }
 
@@ -2037,7 +2041,10 @@ class Handler(BaseHTTPRequestHandler):
             conn = self._conn()
             try:
                 detail = str(body.get("detail", ""))[:500]
-                if body.get("submitted"):
+                outcome = body.get("outcome")
+                if outcome in (st.WON, st.LOST):
+                    st.settle_claim(conn, pid, outcome == st.WON, detail)
+                elif body.get("submitted"):
                     st.mark_submitted(conn, pid, bool(body.get("ok")), detail)
                 elif body.get("settled"):
                     # The league has decided this one: the player is on

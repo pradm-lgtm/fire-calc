@@ -1017,24 +1017,26 @@ def run(conn, user_id, week, dry_run, limit, mode='auto'):
                 record(False, False, detail)
                 continue
 
-            # The browser says it worked; the league is what decides.
-            found, vdetail = cs.verify_submitted(conn, r, user_id, week)
-            print(f"  verification: {vdetail}")
-            if not found:
-                print("  ! The browser pressed confirm and the league does "
-                      "not show the claim.")
-                print("    That is not the same as a failure. Look in Sleeper "
-                      "before placing")
-                print("    it again - the one outcome worse than an unplaced "
-                      "claim is two.")
-            record(True, found, f"{detail}; {vdetail}")
-            placed += 1 if found else 0
+            # Sleeper will not show a pending claim, so there is nothing to
+            # read back yet. Asking anyway costs one call and catches the
+            # case where waivers have already run.
+            settled, vdetail = cs.verify_submitted(conn, r, user_id, week)
+            print(f"  league: {vdetail}")
+            record(True, True, f"{detail}; {vdetail}")
+            placed += 1
         if not attached:
             ctx.close()  # never close a Chrome window the user owns
 
     if dry_run:
         print("\nDry run only. Nothing was submitted. Re-run with --submit "
               "once the screenshots look right.")
+    elif placed:
+        print(f"\n{placed} claim(s) placed.")
+        print("Sleeper does not list a waiver claim through its API until it "
+              "processes, so")
+        print("nothing here can confirm them yet. Once waivers run:")
+        print("    python3 submitter.py YOUR_USERNAME --outcomes")
+        print("which reads the league and says which ones you actually won.")
     else:
         _note(f"placed {placed} of {len(checked)} approved claim(s)")
         print(f"\n{placed} claim(s) confirmed present in their leagues.")
@@ -1092,6 +1094,52 @@ def do_transactions(league_id, week):
             bid = (t.get("settings") or {}).get("waiver_bid")
             print(f"  {kind}/{status} rosters={t.get('roster_ids')} "
                   f"adds={adds} drops={drops} bid={bid}")
+    return 0
+
+
+def do_outcomes(conn, user_id, week):
+    """After waivers run, ask the league how each placed claim ended.
+
+    This is the read-back that can actually work. At the moment a claim is
+    placed Sleeper will not admit it exists; once it has processed it appears
+    as complete or failed, which answers the better question anyway - not
+    "did the click land" but "did you get him".
+    """
+    remote = cloud.configured()
+    if remote:
+        try:
+            rows = [r for r in cloud.recent_claims()
+                    if r.get("status") in (st.SUBMITTED, st.UNCONFIRMED)]
+        except cloud.RemoteError as exc:
+            print(f"ERROR: {exc}")
+            return 1
+    else:
+        rows = st.unsettled_claims(conn)
+    if not rows:
+        print("No placed claims are waiting on an outcome.")
+        return 0
+
+    still_waiting = 0
+    for r in rows:
+        settled, detail = cs.verify_submitted(conn, r, user_id, week)
+        name = clean_name(r["add_player_name"])
+        if not settled:
+            still_waiting += 1
+            print(f"  ....  {r['league_name']}: {name} — {detail}")
+            continue
+        got = cs.won(detail)
+        print(f"  {'WON  ' if got else 'lost '} {r['league_name']}: {name}"
+              f" — {detail}")
+        if remote:
+            try:
+                cloud.report(r["id"], False, False, detail,
+                             outcome=st.WON if got else st.LOST)
+            except cloud.RemoteError as exc:
+                print(f"        ! could not record it: {exc}")
+        else:
+            st.settle_claim(conn, r["id"], got, detail)
+    if still_waiting:
+        print(f"\n{still_waiting} still waiting for waivers to run.")
     return 0
 
 
@@ -1179,6 +1227,8 @@ def main():
     ap.add_argument("--player", metavar="NAME",
                     help="with --probe, walk the claim flow for this player")
     ap.add_argument("--audit", action="store_true")
+    ap.add_argument("--outcomes", action="store_true",
+                    help="after waivers run, record which claims won")
     ap.add_argument("--transactions", metavar="LEAGUE_ID",
                     help="dump what Sleeper reports for this league, raw")
     ap.add_argument("--confirm", metavar="PROPOSAL_ID",
@@ -1201,6 +1251,15 @@ def main():
 
     if args.watch:
         return do_watch(args)
+
+    if args.outcomes:
+        state = sc.current_state()
+        user = sc.resolve_user(args.username)
+        conn = st.connect(args.db)
+        try:
+            return do_outcomes(conn, user["user_id"], sc.current_week(state))
+        finally:
+            conn.close()
 
     if args.confirm:
         conn = st.connect(args.db)

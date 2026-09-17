@@ -10,23 +10,33 @@ live league that the add is still a free agent, the drop is still on your
 roster, and the bid still fits the budget. A stale proposal is refused, not
 submitted.
 
-READ-BACK. Sleeper's public API reports waiver claims while they are still
-pending, so after submitting we can confirm from the outside that the claim
-exists and matches what was approved. This is the audit: it does not trust
-the browser automation's own account of what it did.
+READ-BACK. Sleeper's public API does NOT report waiver claims while they are
+pending - this was assumed and it is not so. Its transactions endpoint lists
+a claim only once waivers have processed it, as complete or failed, which is
+why a league with a pending claim sitting in its own UI answers with nothing
+at all. So the read-back cannot confirm a claim at the moment it is placed,
+and pretending otherwise turned every successful submission into a reported
+failure.
+
+What it can do is settle afterwards. Once waivers run, the transaction
+appears with its outcome, and that is worth more than a confirmation of
+placement: it says whether the player was actually won, or whether somebody
+outbid you. The audit reads the league for that, and it is still the browser
+automation's account that is not trusted - only later, and for a better
+question.
 """
 
 import sleeper_client as sc
 import store as st
 
 
-def pending_claims(league_id, week):
-    """Waiver claims that exist but have not processed yet, from the API.
+def waiver_claims(league_id, week):
+    """Every waiver transaction Sleeper will admit to, around this week.
 
-    Sleeper indexes transactions by the week they belong to, and a claim
-    placed today belongs to the week it will process in - which is the next
-    one, not the current one. Checking only the current week reports a claim
-    that plainly exists as missing, so look either side of it.
+    Any status, because pending ones are never here: a claim shows up only
+    once it has processed, and then it reads complete or failed. The week
+    either side is still worth asking for, since which week a claim lands
+    under depends on when it processed rather than when it was placed.
     """
     out = []
     try:
@@ -36,11 +46,12 @@ def pending_claims(league_id, week):
     for wk in (current, current + 1, max(1, current - 1)):
         rows = sc.get(f"/league/{league_id}/transactions/{wk}") or []
         for t in rows:
-            if t.get("type") != "waiver" or t.get("status") != "pending":
+            if t.get("type") != "waiver":
                 continue
             out.append({
                 "week": wk,
                 "transaction_id": t.get("transaction_id"),
+                "status": t.get("status"),
                 "roster_ids": t.get("roster_ids") or [],
                 "adds": t.get("adds") or {},
                 "drops": t.get("drops") or {},
@@ -53,6 +64,12 @@ def pending_claims(league_id, week):
         seen.add(c["transaction_id"])
         uniq.append(c)
     return uniq
+
+
+def pending_claims(league_id, week):
+    """Kept for callers that still ask. Always empty, and honestly so."""
+    return [c for c in waiver_claims(league_id, week)
+            if c.get("status") == "pending"]
 
 
 def my_roster_id(league_id, user_id):
@@ -135,54 +152,46 @@ def preflight(proposal, user_id, players=None):
 
 
 def verify_submitted(conn, proposal, user_id, week):
-    """Confirm from the API that an approved claim really exists in the league.
+    """(settled, detail) - what the league says about this claim, if anything.
 
-    Returns (found, detail). Matching is on the added player and the roster,
-    which is what identifies a claim; the bid is reported so a mismatch is
-    visible rather than silently accepted.
+    settled is False while the claim is merely placed. That is the normal
+    state for a claim made before waivers run, not a problem: Sleeper does
+    not list pending claims, so there is nothing to find yet and nothing is
+    wrong. It turns True once the claim has processed, whether it was won or
+    lost, because either way the league has finished with it.
     """
     league_id = proposal["league_id"]
     roster_id = my_roster_id(league_id, user_id)
     add_id = str(proposal["add_player_id"])
 
-    want_drop = (str(proposal["drop_player_id"])
-                 if proposal["drop_player_id"] else None)
     mine = []
-    for claim in pending_claims(league_id, week):
+    for claim in waiver_claims(league_id, week):
         if roster_id is not None and roster_id not in claim["roster_ids"]:
             continue
         if add_id not in {str(k) for k in claim["adds"]}:
             continue
         mine.append(claim)
 
-    # A fallback shares its add with the claim above it, so the player alone
-    # no longer identifies a claim. Match the drop too where we can, and only
-    # fall back to add-only when nothing matches both.
+    want_drop = (str(proposal["drop_player_id"])
+                 if proposal["drop_player_id"] else None)
     exact = [c for c in mine
              if want_drop and want_drop in {str(k) for k in c["drops"]}]
     for claim in (exact or mine):
-        detail = f"pending claim {claim['transaction_id']}"
+        detail = f"{claim['status']} (week {claim['week']})"
         if claim["bid"] is not None:
             detail += f", bid {claim['bid']}"
             if proposal["bid"] is not None and claim["bid"] != proposal["bid"]:
                 detail += f" (approved {proposal['bid']} — MISMATCH)"
-        drops = {str(k) for k in claim["drops"]}
-        if want_drop and want_drop not in drops:
-            detail += "; drop does not match what was approved"
-        return True, detail + " (week %s)" % claim["week"]
+        return True, detail
 
-    # Say what IS queued, so a mismatch can be told from nothing at all.
-    everything = pending_claims(league_id, week)
-    if not everything:
-        return False, ("no pending waiver claims at all in this league "
-                       "(checked weeks around %s)" % week)
-    lines = []
-    for c in everything:
-        mine_flag = "yours" if roster_id in c["roster_ids"] else "another team"
-        lines.append("week %s %s adds=%s bid=%s"
-                     % (c["week"], mine_flag, list(c["adds"]), c["bid"]))
-    return False, ("no claim for this player; %d pending claim(s) exist: %s"
-                   % (len(everything), "; ".join(lines[:6])))
+    return False, ("not processed yet — Sleeper lists a waiver claim only "
+                   "after it runs, so a claim placed now is invisible here "
+                   "until then")
+
+
+def won(detail):
+    """Did a settled claim actually get the player?"""
+    return str(detail or "").startswith("complete")
 
 
 def audit(conn, user_id, week):

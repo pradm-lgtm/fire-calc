@@ -392,6 +392,112 @@ class Unconfirmed(unittest.TestCase):
         self.assertIn("confirmed in the UI", self.row()["result"])
 
 
+class ReadingTheLeagueBack(unittest.TestCase):
+    """What Sleeper will and will not tell us about a claim.
+
+    The endpoint lists a waiver claim only after it processes. A league with
+    a pending claim in its own UI answers with nothing at all, which the old
+    read-back reported as the claim having failed - turning every successful
+    submission into a false alarm.
+    """
+
+    def setUp(self):
+        import claim_safety as cs
+        import sleeper_client as sc
+        self.cs = cs
+        self.real_get = sc.get
+        self.real_rosters = sc.league_rosters
+        sc.league_rosters = lambda _lid: [
+            {"owner_id": "me", "roster_id": 3, "players": [], "starters": []}]
+        self.byweek = {}
+        sc.get = lambda path: self.byweek.get(path.rsplit("/", 1)[-1], [])
+
+    def tearDown(self):
+        import sleeper_client as sc
+        sc.get = self.real_get
+        sc.league_rosters = self.real_rosters
+
+    def claim(self, status, week="2", bid=1, drops=("d1",)):
+        self.byweek[week] = [{
+            "type": "waiver", "status": status, "transaction_id": "t1",
+            "roster_ids": [3], "adds": {"a1": 3},
+            "drops": {d: 3 for d in drops},
+            "settings": {"waiver_bid": bid}}]
+
+    def proposal(self, bid=1):
+        return {"league_id": "1", "add_player_id": "a1",
+                "add_player_name": "Pat Freiermuth (PIT TE)",
+                "drop_player_id": "d1", "drop_player_name": "d1",
+                "bid": bid, "max_bid": 89}
+
+    def test_a_league_with_nothing_processed_is_not_a_failure(self):
+        settled, detail = self.cs.verify_submitted(
+            None, self.proposal(), "me", 2)
+        self.assertFalse(settled)
+        self.assertIn("not processed yet", detail)
+
+    def test_a_won_claim_reads_as_complete(self):
+        self.claim("complete")
+        settled, detail = self.cs.verify_submitted(
+            None, self.proposal(), "me", 2)
+        self.assertTrue(settled)
+        self.assertTrue(self.cs.won(detail))
+
+    def test_an_outbid_claim_reads_as_failed(self):
+        self.claim("failed")
+        settled, detail = self.cs.verify_submitted(
+            None, self.proposal(), "me", 2)
+        self.assertTrue(settled)
+        self.assertFalse(self.cs.won(detail))
+
+    def test_a_claim_filed_under_the_next_week_is_still_found(self):
+        self.claim("complete", week="3")
+        settled, _detail = self.cs.verify_submitted(
+            None, self.proposal(), "me", 2)
+        self.assertTrue(settled)
+
+    def test_a_bid_that_does_not_match_is_called_out(self):
+        self.claim("complete", bid=7)
+        _settled, detail = self.cs.verify_submitted(
+            None, self.proposal(bid=1), "me", 2)
+        self.assertIn("MISMATCH", detail)
+
+    def test_pending_is_still_never_there(self):
+        # Kept only so a caller asking the old question gets an honest no.
+        self.claim("pending")
+        self.assertEqual(len(self.cs.pending_claims("1", 2)), 1)
+
+
+class Outcomes(unittest.TestCase):
+    """Won and lost, and what they mean for the budget."""
+
+    def setUp(self):
+        self.conn = st.connect(":memory:")
+        self.run = st.start_run(self.conn, "2026", 2, [])
+        self.won_id = self.add("won-him", 10)
+        self.lost_id = self.add("lost-him", 20)
+
+    def add(self, pid, bid):
+        return st.add_proposal(
+            self.conn, self.run, league_id="1", league_name="LEHG",
+            add_player_id=pid, add_player_name=f"{pid} (SF RB)",
+            add_position="RB", drop_player_id="d",
+            drop_player_name="Cut Him (GB RB)", drop_position="RB",
+            bid=bid, max_bid=89, consensus=1, sources=[], rationale="",
+            quote="", drop_options=[])
+
+    def test_a_lost_claim_is_not_money_you_promised(self):
+        st.settle_claim(self.conn, self.won_id, True, "complete (week 2)")
+        st.settle_claim(self.conn, self.lost_id, False, "failed (week 2)")
+        self.assertEqual(st.budget_committed(self.conn, "1"), 10)
+
+    def test_settled_claims_stop_waiting_on_an_outcome(self):
+        st.mark_submitted(self.conn, self.won_id, True, "placed")
+        self.assertEqual(len(st.unsettled_claims(self.conn)), 1)
+        st.settle_claim(self.conn, self.won_id, True, "complete (week 2)")
+        self.assertEqual(st.unsettled_claims(self.conn), [])
+
+
 class WhatThePageIsTold(unittest.TestCase):
     """The submitter's report is what the person reads, so it has to say
     what to do rather than point at a log file."""

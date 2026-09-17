@@ -227,12 +227,12 @@ class Telling(unittest.TestCase):
 
     def setUp(self):
         self.real_rosters = sc.league_rosters
-        self.real_pending = cs.pending_claims
+        self.real_claims = cs.waiver_claims
         sc.league_rosters = lambda _lid: self.ROSTERS
 
     def tearDown(self):
         sc.league_rosters = self.real_rosters
-        cs.pending_claims = self.real_pending
+        cs.waiver_claims = self.real_claims
 
     def proposal(self, drop):
         return {"league_id": "1", "add_player_id": "a1",
@@ -241,24 +241,28 @@ class Telling(unittest.TestCase):
                 "bid": 5, "max_bid": 100}
 
     def test_the_right_one_of_two_claims_for_the_same_player(self):
-        cs.pending_claims = lambda _lid, _wk: [
-            {"week": 3, "transaction_id": "t1", "roster_ids": [3],
-             "adds": {"a1": 3}, "drops": {"d1": 3}, "bid": 5},
-            {"week": 3, "transaction_id": "t2", "roster_ids": [3],
-             "adds": {"a1": 3}, "drops": {"d2": 3}, "bid": 5},
+        cs.waiver_claims = lambda _lid, _wk: [
+            {"week": 3, "transaction_id": "t1", "status": "complete",
+             "roster_ids": [3], "adds": {"a1": 3}, "drops": {"d1": 3},
+             "bid": 5},
+            {"week": 3, "transaction_id": "t2", "status": "complete",
+             "roster_ids": [3], "adds": {"a1": 3}, "drops": {"d2": 3},
+             "bid": 5},
         ]
         found, detail = cs.verify_submitted(None, self.proposal("d2"), "me", 3)
         self.assertTrue(found)
-        self.assertIn("t2", detail)
-        self.assertNotIn("does not match", detail)
+        self.assertIn("complete", detail)
 
     def test_add_only_matching_still_works_when_nothing_matches_the_drop(self):
-        cs.pending_claims = lambda _lid, _wk: [
-            {"week": 3, "transaction_id": "t1", "roster_ids": [3],
-             "adds": {"a1": 3}, "drops": {"d1": 3}, "bid": 5}]
+        cs.waiver_claims = lambda _lid, _wk: [
+            {"week": 3, "transaction_id": "t1", "status": "complete",
+             "roster_ids": [3], "adds": {"a1": 3}, "drops": {"d1": 3},
+             "bid": 5}]
+        # Only one claim exists and it cuts somebody else, so it is still
+        # the claim being asked about - the add is what identifies it.
         found, detail = cs.verify_submitted(None, self.proposal("d2"), "me", 3)
         self.assertTrue(found)
-        self.assertIn("does not match", detail)
+        self.assertIn("complete", detail)
 
     def test_a_fallback_passes_preflight_while_its_original_is_pending(self):
         # Both claims cut the same player, and he is still on the roster

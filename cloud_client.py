@@ -116,7 +116,8 @@ def recent_claims():
     return _call("/api/claims?include=submitted").get("claims", [])
 
 
-def report(proposal_id, submitted, ok=False, detail="", settled=False):
+def report(proposal_id, submitted, ok=False, detail="", settled=False,
+           outcome=None):
     """Tell the host what happened.
 
     submitted=False means nothing reached the league, so the claim stays
@@ -128,4 +129,5 @@ def report(proposal_id, submitted, ok=False, detail="", settled=False):
     """
     return _call(f"/api/claims/{int(proposal_id)}/result",
                  {"submitted": bool(submitted), "ok": bool(ok),
-                  "settled": bool(settled), "detail": str(detail)[:500]})
+                  "settled": bool(settled), "outcome": outcome,
+                  "detail": str(detail)[:500]})

@@ -29,6 +29,9 @@ SUBMITTED, FAILED, SKIPPED = "submitted", "failed", "skipped"
 # a failure: the claim may well be in, and treating it as a failure invites a
 # second one for the same player.
 UNCONFIRMED = "unconfirmed"
+# After waivers process, the league says which claims got their player. A
+# lost claim spent nothing, which is why the budget has to tell them apart.
+WON, LOST = "won", "lost"
 OPEN_STATUSES = (PENDING, APPROVED)
 
 SCHEMA = """
@@ -658,6 +661,26 @@ def decide(conn, proposal_id, status, bid=None, drop_player_id=None,
     return True
 
 
+def settle_claim(conn, proposal_id, got_him, detail=""):
+    """Record what the league did with a claim once waivers ran."""
+    status = WON if got_him else LOST
+    cur = conn.execute(
+        "UPDATE proposals SET status = ?, result = ? WHERE id = ?",
+        (status, detail, int(proposal_id)))
+    if not cur.rowcount:
+        return False
+    log(conn, status, detail, int(proposal_id))
+    conn.commit()
+    return True
+
+
+def unsettled_claims(conn):
+    """Claims that reached a league and have not been told how they ended."""
+    return conn.execute(
+        "SELECT * FROM proposals WHERE status IN (?, ?) ORDER BY id",
+        (SUBMITTED, UNCONFIRMED)).fetchall()
+
+
 def retire(conn, proposal_id, detail=""):
     """Take a claim out of the queue for good, without pretending it ran.
 
@@ -718,9 +741,10 @@ def mark_submitted(conn, proposal_id, ok, detail=""):
 
 def budget_committed(conn, league_id, exclude_id=None):
     """FAAB already promised in a league by approved-or-submitted rows."""
+    # A claim that lost spent nothing, so it is not money you have promised.
     sql = ("SELECT COALESCE(SUM(bid), 0) AS total FROM proposals"
-           " WHERE league_id = ? AND status IN (?, ?)")
-    args = [str(league_id), APPROVED, SUBMITTED]
+           " WHERE league_id = ? AND status IN (?, ?, ?, ?)")
+    args = [str(league_id), APPROVED, SUBMITTED, UNCONFIRMED, WON]
     if exclude_id:
         sql += " AND id != ?"
         args.append(exclude_id)
