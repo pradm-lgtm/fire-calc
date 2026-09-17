@@ -90,6 +90,75 @@ class SignedIn(unittest.TestCase):
         self.assertIn("sleeper.com", page.went_to)
 
 
+class Port9222(unittest.TestCase):
+    """Whether Chrome is listening, and saying which answer we got.
+
+    The probe used to return a bare True/False through urlopen, which honours
+    http_proxy - so on a machine with a proxy set, "is Chrome listening on
+    127.0.0.1?" was a question put to the proxy. A wrong yes sent the login
+    helper down the attach path, where it printed an instruction to start
+    Chrome "as above" under nothing at all.
+    """
+
+    def probe(self, body=None, error=None):
+        import urllib.request
+        real = urllib.request.build_opener
+
+        class Response:
+            def read(self, _n=None):
+                return body.encode()
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_a):
+                return False
+
+        class Opener:
+            def open(self, _url, timeout=None):
+                if error:
+                    raise error
+                return Response()
+
+        urllib.request.build_opener = lambda *_a, **_k: Opener()
+        try:
+            return submitter.cdp_probe()
+        finally:
+            urllib.request.build_opener = real
+
+    def test_a_real_chrome_is_named(self):
+        alive, saw = self.probe(body='{"Browser": "Chrome/141.0.0.0"}')
+        self.assertTrue(alive)
+        self.assertIn("Chrome/141", saw)
+
+    def test_nothing_listening_reports_the_error(self):
+        alive, saw = self.probe(error=OSError("Connection refused"))
+        self.assertFalse(alive)
+        self.assertIn("Connection refused", saw)
+
+    def test_something_that_is_not_chrome_is_not_a_yes(self):
+        # A proxy answering for localhost, which is the whole reason the
+        # probe stopped trusting a bare 200.
+        alive, saw = self.probe(body="<html>proxy error</html>")
+        self.assertFalse(alive)
+        self.assertIn("not Chrome", saw)
+
+    def test_the_old_boolean_still_works_for_its_callers(self):
+        import urllib.request
+        real = urllib.request.build_opener
+        urllib.request.build_opener = lambda *_a, **_k: (_ for _ in ()).throw(
+            OSError("nope"))
+        try:
+            self.assertFalse(submitter.cdp_alive())
+        finally:
+            urllib.request.build_opener = real
+
+    def test_the_command_to_run_by_hand_is_a_real_command(self):
+        hint = submitter.launch_hint()
+        self.assertIn("--remote-debugging-port=9222", hint)
+        self.assertIn("--user-data-dir", hint)
+
+
 class WhatThePageIsTold(unittest.TestCase):
     """The submitter's report is what the person reads, so it has to say
     what to do rather than point at a log file."""

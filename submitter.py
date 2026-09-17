@@ -87,13 +87,35 @@ def chrome_app():
     return None
 
 
-def cdp_alive(timeout=0.7):
+def cdp_probe(timeout=0.7):
+    """(alive, what we saw) for the debugging port.
+
+    Deliberately proxy-free. urlopen honours http_proxy from the environment,
+    and this URL is http://127.0.0.1 - so on a machine with a proxy set, the
+    question "is Chrome listening on 9222?" was being put to the proxy, which
+    is in no position to answer it and can say yes.
+
+    Returns what it saw either way, because "nothing is listening" and "some-
+    thing answered but it is not Chrome" need different fixes and looked
+    identical from the outside.
+    """
+    import json as _json
     import urllib.request
     try:
-        urllib.request.urlopen(f"{CDP_URL}/json/version", timeout=timeout)
-        return True
-    except Exception:
-        return False
+        direct = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+        with direct.open(f"{CDP_URL}/json/version", timeout=timeout) as resp:
+            body = resp.read(400).decode("utf-8", "replace")
+    except Exception as exc:
+        return False, f"{type(exc).__name__}: {exc}"
+    try:
+        found = _json.loads(body).get("Browser") or "an unnamed browser"
+    except ValueError:
+        return False, f"something answered on 9222 but it is not Chrome: {body[:80]}"
+    return True, found
+
+
+def cdp_alive(timeout=0.7):
+    return cdp_probe(timeout)[0]
 
 
 def start_chrome():
@@ -110,9 +132,11 @@ def start_chrome():
         return True
     app = chrome_app()
     if not app:
-        print("Could not find Chrome. Install it, or launch any Chromium with")
+        print("Could not find Chrome in any of the usual places. Install it,")
+        print("or launch any Chromium yourself with")
         print("  --remote-debugging-port=9222 --user-data-dir=<some dir>")
         return False
+    print(f"Starting {app}")
 
     CHROME_PROFILE.mkdir(exist_ok=True)
     subprocess.Popen(
@@ -129,9 +153,11 @@ def start_chrome():
             print("Next:  python3 submitter.py YOUR_USERNAME --prepare")
             return True
         time.sleep(0.5)
-    print("Chrome started but is not answering on port 9222 yet. Give it a")
-    print("moment and re-run, or check whether a Chrome is already running")
-    print("with a different profile.")
+    print("Chrome started but is not answering on port 9222 after 20s.")
+    print("Either it is still coming up - give it a moment and re-run - or")
+    print("the port is taken, or Chrome handed the window to an instance")
+    print("already running and exited, debugging flag and all. Quitting")
+    print("Chrome completely (Cmd-Q) and re-running settles which.")
     return False
 
 
@@ -233,23 +259,56 @@ def ask_for_login(why):
 
 
 def do_login(pw):
-    """Start Chrome for the user and confirm the attach works."""
+    """Start Chrome for the user and confirm the attach works.
+
+    It says what it found at each step. The version of this that only said
+    "start Chrome as above" pointed at a command that was never printed -
+    launch_hint existed and nothing called it - so the one path where a
+    person needed instructions was the path with none.
+    """
     print("This tool never logs in for you: Sleeper challenges automated")
     print("logins, and a browser it starts is detectable as one. You log in")
     print("as yourself, and only the form-filling is automated.")
     print()
-    if not cdp_alive():
-        start_chrome()
+
+    alive, saw = cdp_probe()
+    print(f"Port 9222: {saw}")
+    if not alive:
+        print()
+        if start_chrome():
+            return
+        by_hand()
         return
+
     try:
         browser = pw.chromium.connect_over_cdp(CDP_URL)
         pages = [p.url for c in browser.contexts for p in c.pages]
-        print(f"Attached to your Chrome. {len(pages)} tab(s) open.")
-        print("Run the submitter now; it will reuse this session.")
+        print(f"Attached. {len(pages)} tab(s) open.")
+        if not any("sleeper" in (u or "").lower() for u in pages):
+            print("No Sleeper tab is open in it. Open sleeper.com there and")
+            print("sign in, then run the dry run.")
+        else:
+            print("Sign in to Sleeper there if you have not, then run:")
+            print("    python3 submitter.py YOUR_USERNAME")
         browser.close()
-    except Exception:
-        print("(Nothing is listening on port 9222 yet — start Chrome as above,")
-        print(" then re-run this to confirm the attach works.)")
+    except Exception as exc:
+        # Something holds the port but Playwright cannot speak to it.
+        print(f"Something is on 9222 but would not attach: "
+              f"{type(exc).__name__}: {exc}")
+        print("That is usually another program holding the port, or a Chrome")
+        print("started without the debugging flag.")
+        by_hand()
+
+
+def by_hand():
+    """The command to run when we could not do it for you."""
+    print()
+    print("Start Chrome yourself with:")
+    print()
+    print("  " + launch_hint().replace("\n", "\n  "))
+    print()
+    print("Then sign in to Sleeper in that window, leave it open, and re-run")
+    print("this to confirm the attach works.")
 
 
 PROBE_JS = r"""
