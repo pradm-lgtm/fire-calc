@@ -1262,6 +1262,16 @@ def league_fold(name, started, bench, outstanding):
             + "</details>")
 
 
+def plays_thursday(row):
+    """Is this player's game the Thursday one, and still ahead of us?
+
+    Locked rows are left alone: once the game has kicked off the urgency is
+    gone and what is left is a record, which belongs with the other closed
+    calls rather than under a heading about a deadline.
+    """
+    return claim_order.field(row, "day") == "Thu" and not row["locked"]
+
+
 def render_lineup(conn, force=False):
     check = st.latest_lineup_check(conn)
     age = age_of(check)
@@ -1305,6 +1315,14 @@ def render_lineup(conn, force=False):
     # these", which tells you to act on something you cannot act on.
     closed = [r for r in open_calls if r["locked"]]
 
+    # Thursday players are a different decision from everyone else. They come
+    # out of both lists and into their own, because a deadline tonight and a
+    # deadline on Sunday morning do not belong under one heading - and the
+    # cost of missing the first one is the whole week for that player.
+    thursday = [r for r in urgent + close if plays_thursday(r)]
+    urgent = [r for r in urgent if not plays_thursday(r)]
+    close = [r for r in close if not plays_thursday(r)]
+
     out = [nav("/lineup"), "<h1>Start / sit</h1>",
            f"<p class='sub'>Week {e(check['week'])} &middot; checked "
            f"{e(said_ago(age))}</p>"]
@@ -1322,9 +1340,18 @@ def render_lineup(conn, force=False):
             out.append(call_card(row, bench_by_league.get(row["league_id"], []),
                                  urgent=urgent))
 
+    if thursday:
+        out.append(
+            "<div class='card trouble'><p class='paneltop'>"
+            f"{len(thursday)} decision{'s' if len(thursday) != 1 else ''} "
+            "for Thursday night</p><p class='why'>These players kick off "
+            "before the rest of the week, so they have to be settled first. "
+            "Everything below them can wait until Sunday morning.</p></div>")
+        section("Playing Thursday", thursday, True,
+                f"{len(thursday)} to settle")
     section("Fix these", urgent, True, f"{len(urgent)} left")
     section("Close calls", close, False, f"{len(close)} left")
-    if not (urgent or close):
+    if not (urgent or close or thursday):
         out.append("<h2><span>Nothing to change</span></h2>"
                    "<p class='empty'>"
                    + ("Every call this week has closed; their games have "

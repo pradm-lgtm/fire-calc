@@ -232,6 +232,27 @@ def kickoffs_from(rows):
     return out
 
 
+# Kickoff times are UTC; the day a game belongs to is its day in the eastern
+# United States, where the schedule is written. A fixed five-hour shift is
+# enough to decide that, and needs no timezone database: it can only put a
+# game on the wrong day if one kicked between midnight and 1am eastern, and
+# the earliest kickoff in the season is a London morning.
+EASTERN_SHIFT = 5 * 3600
+DAYS = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
+
+
+def game_day(kickoff):
+    """'Thu', 'Sun', 'Mon' ... for a kickoff, or None if it is not known."""
+    if not kickoff:
+        return None
+    try:
+        when = datetime.fromtimestamp(float(kickoff) - EASTERN_SHIFT,
+                                      tz=timezone.utc)
+    except (TypeError, ValueError, OSError, OverflowError):
+        return None
+    return DAYS[when.weekday()]
+
+
 def started(kickoffs, team, now=None):
     """Has this team's game begun? Unknown kickoff means no."""
     when = kickoffs.get((team or "").upper())

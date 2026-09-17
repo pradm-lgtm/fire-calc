@@ -246,11 +246,19 @@ DOT = {"GREEN": "GREEN ", "YELLOW": "YELLOW", "RED": "RED   ",
 
 
 def context_for(player, pid, week):
-    """Opponent, projected points, and whether his game has begun."""
+    """Opponent, projected points, which day he plays, and whether he has.
+
+    The day is the part that decides urgency. A Thursday player has to be
+    settled by Thursday evening; everyone else can wait until Sunday
+    morning, and a page that files both under one heading makes the whole
+    list feel like it needs answering at once.
+    """
     team = (player.get("team") or "").upper()
+    kickoff = (week.get("kickoffs") or {}).get(team)
     return {"pos": player.get("position"),
             "matchup": week["games"].get(team),
             "projection": week["points"].get(str(pid)),
+            "day": nfl_week.game_day(kickoff),
             "locked": 0 if nfl_week.yet_to_play(week, team) else 1}
 
 
@@ -350,7 +358,8 @@ def flag_rows(league, roster, players, consensus, week):
     return rows
 
 
-EMPTY_WEEK = {"points": {}, "games": {}, "kickoffs": {}}
+EMPTY_WEEK = {"points": {}, "games": {}, "kickoffs": {},
+              "statuses": {}}
 
 
 def league_rows(league, user_id, players, consensus, week=None):

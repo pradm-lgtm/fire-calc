@@ -191,5 +191,38 @@ class Kickoffs(unittest.TestCase):
                          {"JAX": "vs CLE"})
 
 
+class WhichDay(unittest.TestCase):
+    """The day travels with the player, so the page can sort by deadline."""
+
+    def week(self, kickoff):
+        return {"points": {}, "games": {"MIN": "at CHI"},
+                "kickoffs": {"MIN": kickoff}, "statuses": {}}
+
+    def test_a_thursday_player_is_marked_thursday(self):
+        from datetime import datetime, timezone
+        thursday = datetime(2026, 9, 18, 0, 15,
+                            tzinfo=timezone.utc).timestamp()
+        got = lineup.context_for({"team": "MIN", "position": "WR"}, "p1",
+                                 self.week(thursday))
+        self.assertEqual(got["day"], "Thu")
+
+    def test_a_sunday_player_is_not(self):
+        from datetime import datetime, timezone
+        sunday = datetime(2026, 9, 20, 17, 0, tzinfo=timezone.utc).timestamp()
+        got = lineup.context_for({"team": "MIN", "position": "WR"}, "p1",
+                                 self.week(sunday))
+        self.assertEqual(got["day"], "Sun")
+
+    def test_an_unknown_kickoff_leaves_the_day_unset(self):
+        got = lineup.context_for({"team": "MIN", "position": "WR"}, "p1",
+                                 self.week(None))
+        self.assertIsNone(got["day"])
+
+    def test_a_week_with_no_kickoffs_at_all_does_not_explode(self):
+        got = lineup.context_for({"team": "MIN", "position": "WR"}, "p1",
+                                 lineup.EMPTY_WEEK)
+        self.assertIsNone(got["day"])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

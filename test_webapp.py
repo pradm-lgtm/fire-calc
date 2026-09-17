@@ -10,6 +10,7 @@ route 404s when that goes wrong, which is what it did.
 
 import unittest
 
+import store as st
 import webapp
 
 
@@ -491,6 +492,51 @@ class Stylesheet(unittest.TestCase):
     def test_no_control_characters_reached_the_stylesheet(self):
         bad = [c for c in webapp.CSS if ord(c) < 32 and c not in "\n\t"]
         self.assertEqual(bad, [])
+
+
+class ThursdayFirst(unittest.TestCase):
+    """A deadline tonight and a deadline on Sunday are not one heading."""
+
+    def build(self, *days):
+        conn = st.connect(":memory:")
+        rows = []
+        for n, day in enumerate(days):
+            rows.append({
+                "league_id": "1", "league_name": "LEHG", "slot": "WR",
+                "position": n, "verdict": "RED", "player_id": f"p{n}",
+                "player_name": f"Player {n} (MIN WR)", "rank_text": "WR20",
+                "better_name": f"Other {n} (GB WR)",
+                "detail": "Analysts rank him higher.", "role": "starter",
+                "pos": "WR", "matchup": "at CHI", "projection": 9.1,
+                "overall_text": "120", "day": day, "locked": 0,
+            })
+        st.write_lineup_check(conn, "2026", 3, ["FantasyPros"], rows)
+        return webapp.render_lineup(conn).decode().split(
+            "</style></head>")[1]
+
+    def test_a_thursday_call_gets_its_own_heading(self):
+        body = self.build("Thu", "Sun")
+        self.assertIn("Playing Thursday", body)
+        self.assertIn("1 decision for Thursday night", body)
+
+    def test_the_rest_stay_where_they_were(self):
+        body = self.build("Thu", "Sun")
+        self.assertIn("Fix these", body)
+
+    def test_a_week_with_no_thursday_player_says_nothing(self):
+        body = self.build("Sun", "Sun")
+        self.assertNotIn("Playing Thursday", body)
+        self.assertNotIn("Thursday night", body)
+
+    def test_several_thursday_calls_are_counted(self):
+        self.assertIn("2 decisions for Thursday night",
+                      self.build("Thu", "Thu", "Sun"))
+
+    def test_a_thursday_player_is_not_also_in_the_list_below(self):
+        body = self.build("Thu")
+        self.assertIn("Playing Thursday", body)
+        # The only open call is the Thursday one, so nothing is left to fix.
+        self.assertNotIn("Fix these", body)
 
 
 if __name__ == "__main__":

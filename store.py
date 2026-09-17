@@ -108,6 +108,7 @@ CREATE TABLE IF NOT EXISTS lineup_flags (
     matchup      TEXT,
     projection   REAL,
     overall_text TEXT,
+    day          TEXT,
     locked       INTEGER DEFAULT 0
 );
 
@@ -189,6 +190,7 @@ MIGRATIONS = [
     "ALTER TABLE proposals ADD COLUMN drop_options TEXT",
     "ALTER TABLE proposals ADD COLUMN priority INTEGER DEFAULT 0",
     "ALTER TABLE proposals ADD COLUMN league_note TEXT",
+    "ALTER TABLE lineup_flags ADD COLUMN day TEXT",
 ]
 
 
@@ -332,7 +334,8 @@ def add_lineup_flag(conn, check_id, **f):
         better_name=f.get("better_name"), detail=f.get("detail", ""),
         role=f.get("role", "starter"), pos=f.get("pos"),
         matchup=f.get("matchup"), projection=f.get("projection"),
-        overall_text=f.get("overall_text"), locked=int(f.get("locked") or 0),
+        overall_text=f.get("overall_text"), day=f.get("day"),
+        locked=int(f.get("locked") or 0),
     )
     names = ", ".join(cols)
     marks = ", ".join("?" for _ in cols)
