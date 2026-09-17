@@ -271,6 +271,52 @@ class Refusals(unittest.TestCase):
         self.assertNotIn("abcdefgh", said)
 
 
+class Ready(unittest.TestCase):
+    """The one-line check for whether the grant has landed."""
+
+    def setUp(self):
+        self.real = yc.get
+        os.environ["YAHOO_CLIENT_ID"] = "xxxxxxxxXq9goioO"
+
+    def tearDown(self):
+        yc.get = self.real
+        os.environ.pop("YAHOO_CLIENT_ID", None)
+
+    def run_it(self):
+        import contextlib
+        import io
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            code = yc.ready()
+        return code, out.getvalue()
+
+    def test_a_working_app_says_yes(self):
+        yc.get = lambda _p: {"fantasy_content": {}}
+        code, said = self.run_it()
+        self.assertEqual(code, 0)
+        self.assertIn("Yes.", said)
+        self.assertIn("Xq9goioO", said)
+
+    def test_an_unprovisioned_app_says_wait_not_fix(self):
+        def refused(_p):
+            raise yc.YahooError(
+                "Yahoo says this application is not authorised for the "
+                "Fantasy API.")
+        yc.get = refused
+        code, said = self.run_it()
+        self.assertEqual(code, 1)
+        self.assertIn("Not yet.", said)
+        self.assertIn("Nothing to fix here", said)
+
+    def test_a_different_failure_is_not_called_provisioning(self):
+        def broken(_p):
+            raise yc.YahooError("could not reach Yahoo: timed out")
+        yc.get = broken
+        code, said = self.run_it()
+        self.assertEqual(code, 1)
+        self.assertIn("Something else is wrong", said)
+
+
 class TheAgreement(unittest.TestCase):
     """Terms that are easy to honour today and easy to lose later."""
 

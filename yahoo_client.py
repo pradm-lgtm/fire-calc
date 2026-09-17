@@ -424,6 +424,32 @@ def summary():
     return 0
 
 
+def ready():
+    """Has the Fantasy permission reached this app yet?
+
+    /game/nfl needs no user data and no league, so it answers for the
+    application alone. A 403 here means the grant is not attached yet, and no
+    amount of re-authorising will change it - the thing to do is wait, which
+    is worth knowing in one line rather than after a full diagnostic.
+    """
+    app = (os.environ.get("YAHOO_CLIENT_ID") or "")[-8:] or "(unset)"
+    try:
+        get("/game/nfl")
+    except YahooError as exc:
+        if "not authorised for the Fantasy API" in str(exc):
+            print(f"Not yet. App ending {app} still has no Fantasy Sports "
+                  "permission.")
+            print("Nothing to fix here - Yahoo attaches it to the client id "
+                  "when the")
+            print("application is processed. Try again later.")
+            return 1
+        print(f"Something else is wrong: {exc}")
+        return 1
+    print(f"Yes. App ending {app} can reach the Fantasy API.")
+    print("    python3 yahoo_client.py        your leagues")
+    return 0
+
+
 def main():
     import argparse
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[1])
@@ -431,6 +457,8 @@ def main():
                     help="list your leagues, teams and rules (the default)")
     ap.add_argument("--wire", metavar="LEAGUE_KEY",
                     help="who is available in that league right now")
+    ap.add_argument("--ready", action="store_true",
+                    help="has Yahoo attached Fantasy access to this app yet")
     args = ap.parse_args()
     if not configured():
         print("Yahoo is not set up here. YAHOO_CLIENT_ID, YAHOO_CLIENT_SECRET")
@@ -438,6 +466,8 @@ def main():
         print("    python3 yahoo_auth_check.py --auth-url")
         return 1
     try:
+        if args.ready:
+            return ready()
         if args.wire:
             for player in free_agents(args.wire, count=25):
                 hurt = f"  [{player['status']}]" if player["status"] else ""
