@@ -36,7 +36,7 @@ TREES=(api .github)
 # Checked after copying, because "it copied" is not "it runs": a module that
 # was left behind only shows up when something tries to import it.
 ENTRYPOINTS=(webapp submitter run_weekly lineup scores expert_waivers check_sources
-             source_discovery install_schedule yahoo_client)
+             source_discovery install_schedule yahoo_client defense)
 
 echo "==> creating $DEST"
 mkdir -p "$DEST"

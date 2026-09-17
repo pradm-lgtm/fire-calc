@@ -19,6 +19,7 @@ import json
 import os
 import sys
 
+import defense
 import expert_extract as ex
 import expert_waivers as ew
 import localenv
@@ -62,8 +63,78 @@ def gather_articles(urls, week, verbose=True):
     return texts
 
 
+def week_outlook(season, week):
+    """Projected points for this week and next, and next week's opponents.
+
+    Two projection calls. The second is the whole point of the look-ahead: a
+    defense with two good matchups is worth more than one with a single good
+    week, and nothing else on hand says who anyone plays next week.
+    """
+    import nfl_week
+    out = {"points": {}, "next_points": {}, "next_games": {}, "dst_ranks": {}}
+    try:
+        out["points"] = nfl_week.points_from(
+            nfl_week.projection_rows(season, week))
+    except Exception:
+        pass
+    try:
+        ahead = nfl_week.projection_rows(season, int(week) + 1)
+        out["next_points"] = nfl_week.points_from(ahead)
+        out["next_games"] = nfl_week.matchups_from(ahead)
+    except Exception:
+        pass
+    return out
+
+
+def defense_proposal(league, mine, players, rosters, weeks, remaining,
+                      week=1):
+    """A defense worth streaming this week, as a proposal, or None.
+
+    Kept apart from the article reasoning because it answers a different
+    question. Nobody writes up a defense as a player worth owning; they are
+    picked on who they play, and the projections already say that.
+    """
+    found = defense.suggest(league, mine, players, rosters,
+                            weeks.get("points") or {},
+                            weeks.get("next_points") or {},
+                            consensus=weeks.get("dst_ranks"),
+                            matchups=weeks.get("next_games"))
+    if not found:
+        return None
+    add_id, drop_id, reason = found
+    # Streaming is cheap and meant to stay cheap: a rental for one week is
+    # not worth a bid that limits what you can do about a real player.
+    bid = min(2, remaining) if remaining else None
+    options = []
+    if drop_id:
+        options = [{
+            "id": drop_id,
+            "name": sc.player_label(players, drop_id),
+            "position": defense.DEF,
+            "starter": True,
+            "why": "the defense you are streaming now",
+        }]
+    return dict(
+        platform="sleeper",
+        league_id=league["league_id"],
+        league_name=league.get("name"),
+        league_note=league_note(league, rosters),
+        add_player_id=add_id,
+        add_player_name=sc.player_label(players, add_id),
+        add_position=defense.DEF,
+        drop_player_id=drop_id,
+        drop_player_name=sc.player_label(players, drop_id) if drop_id else None,
+        drop_position=defense.DEF if drop_id else None,
+        bid=bid, max_bid=remaining, bid_low=None, bid_high=None,
+        drop_options=options,
+        consensus=0, sources=[],
+        rationale=f"Streaming a defense \u2014 {reason}.",
+        quote="", rank=99,
+    )
+
+
 def proposals_for_league(league, user_id, players, trending, texts, max_moves,
-                         week=1, byes=None):
+                         week=1, byes=None, weeks=None):
     """(proposals, why none) - the reasoning, returned as data not text.
 
     A league that yields nothing says why. There are five ways to come back
@@ -94,8 +165,16 @@ def proposals_for_league(league, user_id, players, trending, texts, max_moves,
                                           players=players)
         if recs:
             per_source[source] = recs
+    # A defense is picked on who it plays, not on who wrote about it, so
+    # this is settled before the articles are consulted and survives a week
+    # where they turned up nothing.
+    streamed = defense_proposal(league, mine, players, rosters, weeks or {},
+                                remaining, week)
+
     consensus = ex.merge_sources(per_source)
     if not consensus:
+        if streamed:
+            return [streamed], None
         return [], ("no article recommended anyone who is actually available "
                     "here")
 
@@ -215,6 +294,13 @@ def proposals_for_league(league, user_id, players, trending, texts, max_moves,
             quote=quote, rank=len(out) + 1,
         ))
         protect.add(drop_pid)
+
+    # Appended outside the loop: a defense is not competing with the skill
+    # players for a roster spot, because it replaces itself.
+    if streamed:
+        out.append(streamed)
+        why = None
+
     return out, (why if not out else None)
 
 
@@ -467,11 +553,13 @@ def _run(username, urls, moves, dry_run, db_path, force=False,
         except Exception:
             bye_weeks = {}
 
+        weeks = week_outlook(season, week)
+
         all_proposals, quiet = [], {}
         for league in leagues:
             rows, why = proposals_for_league(league, user["user_id"], players,
                                              trending, texts, moves, week,
-                                             byes=bye_weeks)
+                                             byes=bye_weeks, weeks=weeks)
             name = league.get("name") or league.get("league_id")
             print(f"  {name}: {len(rows)} proposal(s)"
                   + (f" — {why}" if why else ""))
