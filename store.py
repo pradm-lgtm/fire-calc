@@ -704,13 +704,16 @@ def mark_submitted(conn, proposal_id, ok, detail=""):
     again, because the one outcome worse than an unplaced claim is two.
     """
     status = SUBMITTED if ok else UNCONFIRMED
-    conn.execute(
+    cur = conn.execute(
         "UPDATE proposals SET status = ?, submitted_at = ?, result = ?"
         " WHERE id = ?",
         (status, now(), detail, proposal_id),
     )
+    if not cur.rowcount:
+        return False
     log(conn, status, detail, proposal_id)
     conn.commit()
+    return True
 
 
 def budget_committed(conn, league_id, exclude_id=None):

@@ -109,6 +109,15 @@ class _Cursor:
         self._cur = cur
         self.lastrowid = rowid
 
+    @property
+    def rowcount(self):
+        """How many rows the statement touched.
+
+        Both drivers expose it; this wrapper did not, so an UPDATE could not
+        tell "changed the row" from "matched nothing".
+        """
+        return getattr(self._cur, "rowcount", -1)
+
     def fetchone(self):
         return self._cur.fetchone()
 

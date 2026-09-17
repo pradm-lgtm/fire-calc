@@ -1043,6 +1043,30 @@ def run(conn, user_id, week, dry_run, limit, mode='auto'):
     return 0
 
 
+def do_confirm(conn, proposal_id):
+    """Record a claim you have seen in the league with your own eyes.
+
+    The read-back is a check, not an oracle. When it cannot see a claim that
+    is plainly there, the row is left saying so - and a row that says a claim
+    failed is one command away from being placed a second time. This is how
+    you close that gap without editing a database by hand.
+    """
+    detail = "confirmed by hand: seen in the league"
+    if cloud.configured():
+        try:
+            cloud.report(int(proposal_id), True, True, detail)
+        except cloud.RemoteError as exc:
+            print(f"could not reach the page: {exc}")
+            return 1
+        print(f"Proposal {proposal_id} on the page is recorded as placed.")
+        return 0
+    if not st.mark_submitted(conn, int(proposal_id), True, detail):
+        print(f"No proposal {proposal_id} here.")
+        return 1
+    print(f"Proposal {proposal_id} is recorded as placed.")
+    return 0
+
+
 def do_transactions(league_id, week):
     """Every transaction Sleeper reports for a few weeks around now.
 
@@ -1157,6 +1181,8 @@ def main():
     ap.add_argument("--audit", action="store_true")
     ap.add_argument("--transactions", metavar="LEAGUE_ID",
                     help="dump what Sleeper reports for this league, raw")
+    ap.add_argument("--confirm", metavar="PROPOSAL_ID",
+                    help="record a claim you have seen in the league yourself")
     ap.add_argument("--retry", action="store_true",
                     help="return failed claims to the approved queue")
     ap.add_argument("--watch", action="store_true",
@@ -1175,6 +1201,13 @@ def main():
 
     if args.watch:
         return do_watch(args)
+
+    if args.confirm:
+        conn = st.connect(args.db)
+        try:
+            return do_confirm(conn, args.confirm)
+        finally:
+            conn.close()
 
     if args.transactions:
         state = sc.current_state()

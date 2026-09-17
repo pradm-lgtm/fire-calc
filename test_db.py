@@ -179,5 +179,23 @@ class WhatTheHostAsksFor(unittest.TestCase):
         self.assertIsNone(module.handler.db_path)
 
 
+class RowCount(unittest.TestCase):
+    """An UPDATE has to be able to say whether it hit anything."""
+
+    def setUp(self):
+        self.conn = db.Connection(db.MEMORY)
+        self.conn.execute("CREATE TABLE t (id INTEGER PRIMARY KEY, v TEXT)")
+        self.conn.execute("INSERT INTO t (id, v) VALUES (1, 'a')")
+        self.conn.commit()
+
+    def test_a_row_that_exists_counts_one(self):
+        cur = self.conn.execute("UPDATE t SET v = ? WHERE id = ?", ("b", 1))
+        self.assertEqual(cur.rowcount, 1)
+
+    def test_a_row_that_does_not_counts_zero(self):
+        cur = self.conn.execute("UPDATE t SET v = ? WHERE id = ?", ("b", 99))
+        self.assertEqual(cur.rowcount, 0)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
