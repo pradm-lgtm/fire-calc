@@ -157,17 +157,53 @@ def positional_depth(league, roster, players):
     return depth
 
 
-def drop_candidates(roster, players, trending, depth):
+def draft_weight(cost, week=1):
+    """How much what you paid for somebody should protect him, this week.
+
+    A sixth-round pick and a waiver flier look identical to a ranking model,
+    and they are plainly not the same thing to the person who spent the pick.
+    Auction prices say it better than rounds do, being continuous.
+
+    It fades. In September what you paid is most of what anyone knows about
+    a player; by November there are ten games of evidence and the draft is
+    the sunk cost it always was. So this is a strong tiebreaker early, a
+    faint one late, and never a veto at any point - the whole argument for
+    showing it is that you get to overrule it.
+    """
+    if not cost:
+        return 0.0
+    amount = cost.get("amount")
+    if isinstance(amount, int) and amount > 0:
+        raw = amount * 1.5
+    else:
+        rnd = cost.get("round")
+        if not isinstance(rnd, int) or rnd <= 0:
+            return 0.0
+        raw = max(0, 16 - rnd) * 4.0
+    try:
+        age = max(1, int(week))
+    except (TypeError, ValueError):
+        age = 1
+    return raw * max(0.2, 1.0 - (age - 1) / 12.0)
+
+
+def drop_candidates(roster, players, trending, depth, cost=None, week=1):
     """Everyone you could cut, weakest first.
 
     The whole roster, not just the bench: dropping a starter is a normal
     thing to do when the man you are adding is better than him. Only the
     never-drop list is held back, because that is the one place you have
     said no in advance.
+
+    What you paid for a player is folded into the ordering. It moves people
+    around within a position rather than overriding depth or starter status,
+    which keeps it a hint about who you would actually part with rather than
+    a rule about who can be parted with.
     """
     starters, bench = sc.split_roster(roster)
     starting = {str(p) for p in starters}
     protected = wa.never_drop_names()
+    cost = cost or {}
 
     ranked = []
     for pid in list(bench) + list(starters):
@@ -178,8 +214,9 @@ def drop_candidates(roster, players, trending, depth):
         score = wa.score_player(player, trending.get(pid, 0))
         label = depth.get(player.get("position"), (0, 0, "ok"))[2]
         penalty = {"thin": 1000, "ok": 100, "deep": 0, "extra": 0}.get(label, 100)
+        paid = draft_weight(cost.get(pid), week)
         # A starter sorts below every bench player, and is still offered.
-        ranked.append((score + penalty + (5000 if pid in starting else 0),
+        ranked.append((score + penalty + paid + (5000 if pid in starting else 0),
                        score, pid, player, label, pid in starting))
     ranked.sort(key=lambda row: row[0])
     return ranked

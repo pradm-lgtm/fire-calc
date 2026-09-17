@@ -62,7 +62,8 @@ def gather_articles(urls, week, verbose=True):
     return texts
 
 
-def proposals_for_league(league, user_id, players, trending, texts, max_moves):
+def proposals_for_league(league, user_id, players, trending, texts, max_moves,
+                         week=1):
     """(proposals, why none) - the reasoning, returned as data not text.
 
     A league that yields nothing says why. There are five ways to come back
@@ -100,6 +101,22 @@ def proposals_for_league(league, user_id, players, trending, texts, max_moves):
 
     depth = ew.positional_depth(league, mine, players)
 
+    # What each player cost in the draft, and whether anyone has written that
+    # he is finished. The first protects the people you would not part with;
+    # the second is what lets you part with them anyway.
+    try:
+        cost = sc.draft_cost(league["league_id"])
+    except Exception:
+        cost = {}
+    held = ex.build_gazetteer(players,
+                              [str(p) for p in (mine.get("players") or [])])
+    per_source_drops = {}
+    for source, text in texts.items():
+        said = ex.extract_drops(text, held)
+        if said:
+            per_source_drops[source] = said
+    advice = ex.merge_drops(per_source_drops)
+
     def sort_key(item):
         pid, info = item
         pos = (players.get(pid) or {}).get("position")
@@ -116,7 +133,8 @@ def proposals_for_league(league, user_id, players, trending, texts, max_moves):
         # Everyone you could cut, not only the bench and not only the one it
         # picked. Whether there is anyone worth dropping is half the
         # decision, and it was being made for you out of sight.
-        candidates = ew.drop_candidates(mine, players, trending, depth)
+        candidates = ew.drop_candidates(mine, players, trending, depth,
+                                        cost=cost, week=week)
         drops = ew.choose_drop(mine, players, trending, depth, protect)
         if drops:
             _, drop_score, drop_pid, drop_player, drop_label = drops[0]
@@ -136,7 +154,9 @@ def proposals_for_league(league, user_id, players, trending, texts, max_moves):
             "name": sc.player_label(players, cid),
             "position": p.get("position"),
             "starter": starts,
-            "why": drop_reason(p, label, depth, starts, *place.get(cid, (None, None))),
+            "why": drop_reason(p, label, depth, starts,
+                               *place.get(cid, (None, None)),
+                               cost=cost.get(cid), advice=advice.get(cid)),
         } for _rank, _score, cid, p, label, starts in candidates]
         add_score = wa.score_player(players.get(pid, {}), trending.get(pid, 0))
         if drop_score > add_score * 1.5:
@@ -269,7 +289,37 @@ def depth_clause(label):
     return ""
 
 
-def drop_reason(player, label, depth, starting=False, place=None, total=None):
+def paid_note(cost):
+    """'drafted in round 6' or 'you paid $24 for him', or nothing."""
+    if not cost:
+        return ""
+    amount = cost.get("amount")
+    if isinstance(amount, int) and amount > 0:
+        return f"you paid ${amount} for him"
+    rnd = cost.get("round")
+    if isinstance(rnd, int) and rnd > 0:
+        return f"drafted in round {rnd}"
+    return ""
+
+
+def advice_note(advice):
+    """What the analysts say about cutting him, if any of them said anything.
+
+    The counterweight to the line above it. What you paid is a reason to keep
+    somebody, and the reason you will keep him too long; somebody else saying
+    he is finished is the thing worth putting next to it.
+    """
+    if not advice:
+        return ""
+    count = advice.get("count") or 0
+    if count < 1:
+        return ""
+    who = "1 analyst says" if count == 1 else f"{count} analysts say"
+    return f"{who} to let him go"
+
+
+def drop_reason(player, label, depth, starting=False, place=None, total=None,
+                cost=None, advice=None):
     """The whole case for cutting this particular man, in one clause.
 
     Every candidate carries its own, so the card can restate the argument
@@ -284,6 +334,8 @@ def drop_reason(player, label, depth, starting=False, place=None, total=None):
     # nothing that "your only TE" has not already said.
     if (total or 0) > 1:
         bits.append(depth_clause(label))
+    bits.append(paid_note(cost))
+    bits.append(advice_note(advice))
     if starting:
         bits.insert(0, "in your lineup")
     if hurt:
@@ -401,7 +453,7 @@ def _run(username, urls, moves, dry_run, db_path, force=False,
         all_proposals, quiet = [], {}
         for league in leagues:
             rows, why = proposals_for_league(league, user["user_id"], players,
-                                             trending, texts, moves)
+                                             trending, texts, moves, week)
             name = league.get("name") or league.get("league_id")
             print(f"  {name}: {len(rows)} proposal(s)"
                   + (f" — {why}" if why else ""))

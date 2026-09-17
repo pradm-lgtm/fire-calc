@@ -313,6 +313,33 @@ def _paragraph_bounds(text, index):
 
 _SENTENCE_END = re.compile(r"[.!?](?=\s|$)")
 
+# Full stops that end a name rather than a sentence. Football prose is full
+# of them - J.K. Dobbins, A.J. Brown, D.J. Moore, Brian Robinson Jr. - and
+# reading one as a sentence break leaves the "sentence" containing a player
+# as the two letters of his own initials. Everything judged at sentence
+# scope then judges nothing: the drop cue, the negative cue that suppresses
+# a bad recommendation, and the quote shown on the card.
+_ABBREVIATIONS = {"jr", "sr", "st", "vs", "no", "dr", "mr", "mrs", "inc"}
+
+
+def _ends_a_sentence(text, dot):
+    """Is the full stop at `dot` the end of a sentence, or part of a name?"""
+    before = text[:dot]
+    if before[-1:].isupper() and not before[-2:-1].isalpha():
+        return False  # a lone capital: an initial
+    word = re.search(r"([A-Za-z]+)$", before)
+    if word and word.group(1).lower() in _ABBREVIATIONS:
+        return False
+    return True
+
+
+def _sentence_ends(text, start=0, stop=None):
+    """Positions where a sentence really ends, in order."""
+    stop = len(text) if stop is None else stop
+    for m in _SENTENCE_END.finditer(text, start, stop):
+        if _ends_a_sentence(text, m.start()):
+            yield m
+
 
 def _sentence_bounds(text, index):
     """(start, end) of the sentence containing index.
@@ -322,10 +349,12 @@ def _sentence_bounds(text, index):
     suppress the recommendation before it.
     """
     start = 0
-    for m in _SENTENCE_END.finditer(text, 0, index):
+    for m in _sentence_ends(text, 0, index):
         start = m.end()
-    m = _SENTENCE_END.search(text, index)
-    end = m.end() if m else len(text)
+    end = len(text)
+    for m in _sentence_ends(text, index):
+        end = m.end()
+        break
     # A line break also ends a thought in list-style articles.
     nl = text.find("\n", index)
     if nl != -1:
@@ -518,6 +547,68 @@ def publication(url):
     if host.startswith("www."):
         host = host[4:]
     return host
+
+
+# Cues that mean "let this one go", as opposed to the broader negative list
+# which also covers "avoid" - useful advice about somebody you do not have.
+DROP_VERBS = ("drop", "drop him", "cut", "cut him", "waive", "release",
+              "move on from", "let go", "droppable", "roster clog",
+              "safe to drop", "time to move on")
+_DROP_RE = _cue_pattern(DROP_VERBS)
+
+
+def extract_drops(text, gazetteer):
+    """{player_id: sentence} for players this article says to let go.
+
+    The mirror of the add extractor, and it needs a gazetteer built from
+    your own roster rather than from free agents: the question is not who is
+    worth picking up, it is which of yours somebody thinks is finished.
+
+    A player is only counted when a drop cue sits in his own sentence, not
+    merely somewhere nearby. "Add Kaelon Black; you can drop J.K. Dobbins
+    for him" would otherwise mark both.
+    """
+    found = {}
+    for pid, idx, _end in find_mentions(text, gazetteer):
+        lo, hi = _sentence_bounds(text, idx)
+        sentence = text[lo:hi]
+        if not _DROP_RE.search(sentence):
+            continue
+        # One sentence can hold both halves of a swap - "add Black, you can
+        # drop Pierce for him" - and counting every name near a drop cue
+        # marks the man being added as one to cut. The cue nearest each name
+        # is the one about him.
+        here = idx - lo
+        nearest, verdict = None, None
+        for cue, kind in ((_DROP_RE, "drop"), (_ADD_RE, "add")):
+            for m in cue.finditer(sentence):
+                gap = abs(m.start() - here)
+                if nearest is None or gap < nearest:
+                    nearest, verdict = gap, kind
+        if verdict != "drop":
+            continue
+        found.setdefault(pid, " ".join(sentence.split()))
+    return found
+
+
+def merge_drops(per_source):
+    """{player_id: {sources, count, quote}} across articles.
+
+    Counted by publication, for the same reason adds are: two articles from
+    one site saying to drop a player is one site saying it.
+    """
+    merged = {}
+    for source, drops in per_source.items():
+        for pid, sentence in drops.items():
+            entry = merged.setdefault(pid, {"sources": [], "quote": ""})
+            if source not in entry["sources"]:
+                entry["sources"].append(source)
+            if not entry["quote"] and usable_quote(
+                    sentence, other_names_in(sentence, "")):
+                entry["quote"] = sentence
+    for entry in merged.values():
+        entry["count"] = len({publication(u) for u in entry["sources"]})
+    return merged
 
 
 def merge_sources(per_source):

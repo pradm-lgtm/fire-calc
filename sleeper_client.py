@@ -340,3 +340,51 @@ def main():
 
 if __name__ == "__main__":
     sys.exit(main())
+
+
+def league_drafts(league_id):
+    """Every draft this league has held. The most recent one is first."""
+    return get(f"/league/{league_id}/drafts") or []
+
+
+def draft_picks(draft_id):
+    return get(f"/draft/{draft_id}/picks") or []
+
+
+def draft_cost(league_id):
+    """{player_id: {round, pick, amount}} - what each player cost to acquire.
+
+    Where you took somebody is a signal about him that nothing else here
+    has: a sixth-round pick and a waiver flier look identical to a ranking
+    model, and they are not the same thing to the person who spent the pick.
+    Auction leagues carry the price instead, which is the better signal of
+    the two because it is continuous.
+
+    Only what the draft says. A player traded or claimed since keeps the
+    cost of whoever drafted him, which is the honest answer to "what was he
+    worth in August" even when he is on a different roster now.
+    """
+    drafts = league_drafts(league_id)
+    if not drafts:
+        return {}
+    out = {}
+    for draft in drafts:
+        draft_id = draft.get("draft_id")
+        if not draft_id:
+            continue
+        for pick in draft_picks(draft_id):
+            pid = pick.get("player_id")
+            if not pid:
+                continue
+            meta = pick.get("metadata") or {}
+            amount = meta.get("amount")
+            try:
+                amount = int(amount) if amount not in (None, "") else None
+            except (TypeError, ValueError):
+                amount = None
+            out[str(pid)] = {
+                "round": pick.get("round"),
+                "pick": pick.get("pick_no"),
+                "amount": amount,
+            }
+    return out

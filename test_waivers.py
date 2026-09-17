@@ -14,6 +14,7 @@ import unittest
 from datetime import datetime, timedelta, timezone
 
 import expert_extract as ex
+import expert_waivers as ew
 import run_weekly as rw
 import store as st
 import webapp
@@ -543,6 +544,125 @@ class NoBench(unittest.TestCase):
     def test_and_the_card_still_offers_the_alternatives(self):
         rows, _why = self.run_it()
         self.assertGreaterEqual(len(rows[0]["drop_options"]), 2)
+
+
+class DraftCost(unittest.TestCase):
+    """Where you took somebody, as a reason to think twice about cutting him."""
+
+    def test_an_early_pick_is_stickier_than_a_late_one(self):
+        self.assertGreater(ew.draft_weight({"round": 1}, 1),
+                           ew.draft_weight({"round": 12}, 1))
+
+    def test_a_big_auction_buy_is_stickier_than_a_dollar_flier(self):
+        self.assertGreater(ew.draft_weight({"amount": 45}, 1),
+                           ew.draft_weight({"amount": 1}, 1))
+
+    def test_an_undrafted_player_gets_nothing_either_way(self):
+        self.assertEqual(ew.draft_weight(None, 1), 0.0)
+        self.assertEqual(ew.draft_weight({}, 1), 0.0)
+
+    def test_it_fades_as_the_season_goes_on(self):
+        # By November there are ten games of evidence and the draft is the
+        # sunk cost it always was.
+        early = ew.draft_weight({"round": 2}, 1)
+        late = ew.draft_weight({"round": 2}, 14)
+        self.assertLess(late, early / 2)
+
+    def test_it_never_fades_to_nothing(self):
+        self.assertGreater(ew.draft_weight({"round": 2}, 30), 0)
+
+    def test_it_never_outweighs_being_a_starter(self):
+        # A first-round pick on the bench must still be offered before a
+        # starter, or the ordering stops meaning anything.
+        players = {
+            "bench": {"full_name": "Bench Man", "position": "RB"},
+            "start": {"full_name": "Starting Man", "position": "RB"},
+        }
+        roster = {"starters": ["start"], "players": ["start", "bench"]}
+        depth = {"RB": (2, 1.0, "deep")}
+        ranked = ew.drop_candidates(roster, players, {}, depth,
+                                    cost={"bench": {"round": 1}}, week=1)
+        self.assertEqual(ranked[0][2], "bench")
+
+    def test_the_card_says_what_you_paid(self):
+        self.assertIn("drafted in round 6",
+                      rw.drop_reason({"position": "RB"}, "deep",
+                                     {"RB": (5, 2, "deep")}, False, 2, 5,
+                                     cost={"round": 6}))
+        self.assertIn("you paid $24 for him",
+                      rw.drop_reason({"position": "RB"}, "deep",
+                                     {"RB": (5, 2, "deep")}, False, 2, 5,
+                                     cost={"amount": 24}))
+
+    def test_an_undrafted_player_says_nothing_about_a_draft(self):
+        why = rw.drop_reason({"position": "RB"}, "deep",
+                             {"RB": (5, 2, "deep")}, False, 2, 5)
+        self.assertNotIn("draft", why)
+        self.assertNotIn("paid", why)
+
+
+class SaidToDrop(unittest.TestCase):
+    """Analysts naming one of yours as finished - the counterweight."""
+
+    PLAYERS = {"1": {"full_name": "J.K. Dobbins"},
+               "2": {"full_name": "Kaelon Black"},
+               "3": {"full_name": "Alec Pierce"}}
+
+    def gaz(self):
+        return ex.build_gazetteer(self.PLAYERS, ["1", "2", "3"])
+
+    def test_a_plain_drop_call_is_found(self):
+        got = ex.extract_drops(
+            "J.K. Dobbins is droppable in all formats after losing the job.",
+            self.gaz())
+        self.assertEqual(sorted(got), ["1"])
+
+    def test_initials_do_not_cut_the_sentence_short(self):
+        # The full stop in "J.K." was ending the sentence, leaving the drop
+        # cue outside it and nothing to find.
+        lo, hi = ex._sentence_bounds("J.K. Dobbins is droppable this week.", 0)
+        self.assertIn("droppable", "J.K. Dobbins is droppable this week."[lo:hi])
+
+    def test_a_suffix_does_not_either(self):
+        text = "Brian Robinson Jr. is worth a look this week."
+        lo, hi = ex._sentence_bounds(text, 0)
+        self.assertEqual(text[lo:hi], text)
+
+    def test_the_man_being_added_in_a_swap_is_not_marked(self):
+        got = ex.extract_drops(
+            "Add Kaelon Black this week; you can drop Alec Pierce for him.",
+            self.gaz())
+        self.assertEqual(sorted(got), ["3"])
+
+    def test_merely_being_mentioned_is_not_a_drop_call(self):
+        self.assertEqual(ex.extract_drops(
+            "Alec Pierce had a quiet game but remains a hold.", self.gaz()), {})
+
+    def test_two_articles_from_one_site_are_one_analyst(self):
+        merged = ex.merge_drops({
+            "https://www.rotoballer.com/a": {"1": "Drop him."},
+            "https://rotoballer.com/b": {"1": "Cut him."},
+        })
+        self.assertEqual(merged["1"]["count"], 1)
+
+    def test_the_card_says_who_said_it(self):
+        self.assertIn("2 analysts say to let him go",
+                      rw.drop_reason({"position": "RB"}, "deep",
+                                     {"RB": (5, 2, "deep")}, False, 2, 5,
+                                     advice={"count": 2}))
+        self.assertIn("1 analyst says to let him go",
+                      rw.drop_reason({"position": "RB"}, "deep",
+                                     {"RB": (5, 2, "deep")}, False, 2, 5,
+                                     advice={"count": 1}))
+
+    def test_both_halves_appear_together(self):
+        # The whole point: what you paid, and somebody saying it no longer
+        # matters, in one line you can weigh.
+        why = rw.drop_reason({"position": "RB"}, "deep",
+                             {"RB": (5, 2, "deep")}, False, 2, 5,
+                             cost={"round": 6}, advice={"count": 2})
+        self.assertIn("drafted in round 6", why)
+        self.assertIn("analysts say to let him go", why)
 
 
 class Candidates(unittest.TestCase):
