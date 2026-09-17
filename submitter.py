@@ -734,6 +734,23 @@ def clean_name(label):
     return str(label).split("(")[0].split("[")[0].strip()
 
 
+def note(conn, remote, kind, detail, row):
+    """Write a local event about a claim, wherever that claim lives.
+
+    A claim read from the hosted page carries the host's id, and this
+    database's events table has a foreign key into its own proposals table.
+    Writing the host's id into it is rejected outright - which crashed the
+    whole run on the first blocked claim, before the others were even looked
+    at. When the claim is remote the id goes in the text, where it is still
+    worth having and cannot be mistaken for a local row.
+    """
+    if remote:
+        st.log(conn, kind, f"host proposal {row['id']}: {detail}", None)
+    else:
+        st.log(conn, kind, detail, row["id"])
+    conn.commit()
+
+
 def run(conn, user_id, week, dry_run, limit, mode='auto'):
     _note("")
     remote = cloud.configured()
@@ -769,8 +786,7 @@ def run(conn, user_id, week, dry_run, limit, mode='auto'):
                   f" ({reason})")
         if not ok:
             print(f"        {why}")
-            st.log(conn, "preflight_blocked", why, r["id"])
-            conn.commit()
+            note(conn, remote, "preflight_blocked", why, r)
         else:
             if why != "ok":
                 print(f"        note: {why}")
@@ -833,8 +849,7 @@ def run(conn, user_id, week, dry_run, limit, mode='auto'):
                 elif submitted:
                     st.mark_submitted(conn, _r["id"], succeeded, text)
                 else:
-                    st.log(conn, "attempt_failed", text, _r["id"])
-                    conn.commit()
+                    note(conn, remote, "attempt_failed", text, _r)
 
             if mode == "prepare" and ok:
                 print("  The claim is filled in the browser. Check it, then")
@@ -844,9 +859,7 @@ def run(conn, user_id, week, dry_run, limit, mode='auto'):
                     record(False, False, "left unconfirmed")
                     continue
             elif dry_run:
-                if not remote:
-                    st.log(conn, "dry_run", detail, r["id"])
-                    conn.commit()
+                note(conn, remote, "dry_run", detail, r)
                 continue
             elif not ok:
                 # Nothing was submitted, so the claim stays approved and can

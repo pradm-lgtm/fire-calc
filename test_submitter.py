@@ -14,6 +14,7 @@ import contextlib
 import io
 import unittest
 
+import store as st
 import submitter
 
 
@@ -272,6 +273,53 @@ class ChromeEndpoints(unittest.TestCase):
     def test_a_refusal_to_open_is_reported_not_guessed(self):
         self.answer = None
         self.assertIsNone(submitter.cdp_open("https://sleeper.com"))
+
+
+class LocalEvents(unittest.TestCase):
+    """Recording what happened to a claim that lives somewhere else.
+
+    Claims read from the hosted page carry the host's id. The local events
+    table has a foreign key into the local proposals table, so writing that
+    id into it is rejected - and the rejection took down the whole run on
+    the first blocked claim, before the rest had been looked at.
+    """
+
+    def setUp(self):
+        self.conn = st.connect(":memory:")
+        run = st.start_run(self.conn, "2026", 3, [])
+        self.local_id = st.add_proposal(
+            self.conn, run, league_id="1", league_name="LEHG",
+            add_player_id="a", add_player_name="Add Him (SF RB)",
+            add_position="RB", drop_player_id="d",
+            drop_player_name="Cut Him (GB RB)", drop_position="RB",
+            bid=4, max_bid=100, consensus=1, sources=[], rationale="",
+            quote="", drop_options=[])
+
+    def events(self):
+        return self.conn.execute(
+            "SELECT * FROM events ORDER BY id").fetchall()
+
+    def test_a_remote_id_does_not_go_in_the_foreign_key(self):
+        # 9999 exists on the host and nowhere in this database.
+        submitter.note(self.conn, True, "preflight_blocked", "he is rostered",
+                       {"id": 9999})
+        row = self.events()[-1]
+        self.assertIsNone(row["proposal_id"])
+        self.assertIn("9999", row["detail"])
+        self.assertIn("he is rostered", row["detail"])
+
+    def test_a_local_claim_still_gets_its_foreign_key(self):
+        submitter.note(self.conn, False, "dry_run", "filled the form",
+                       {"id": self.local_id})
+        row = self.events()[-1]
+        self.assertEqual(row["proposal_id"], self.local_id)
+        self.assertEqual(row["detail"], "filled the form")
+
+    def test_blocking_several_remote_claims_does_not_stop_at_the_first(self):
+        for pid in (9001, 9002, 9003):
+            submitter.note(self.conn, True, "preflight_blocked", "stale",
+                           {"id": pid})
+        self.assertEqual(len(self.events()), 3 + 1)  # +1 from add_proposal
 
 
 class WhatThePageIsTold(unittest.TestCase):
