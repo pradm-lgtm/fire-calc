@@ -598,12 +598,68 @@ def do_probe(pw, league_id, player=None, username="YOUR_USERNAME"):
         print("Could not open the claim dialog: %s"
               % str(exc).splitlines()[0][:120])
 
+    check_selectors(page, sel)
+
     shot = HERE / "logs" / "probe-flow.png"
     shot.parent.mkdir(parents=True, exist_ok=True)
     page.screenshot(path=str(shot))
     print("")
     print("Screenshot: " + str(shot))
     print("Paste all of the above and I can write selectors.json.")
+
+
+def first_roster_name(page):
+    """A name from the drop list in the open claim dialog, or None.
+
+    The dialog shows full names where the players table abbreviates, so this
+    is also the only place to confirm which spelling the drop selector needs.
+    """
+    try:
+        found = page.locator("span.name-text")
+        return found.first.inner_text(timeout=3000).strip() if found.count() \
+            else None
+    except Exception:
+        return None
+
+
+def check_selectors(page, sel):
+    """Say which entries in selectors.json still match, and how many times.
+
+    Reading a page dump by eye to answer that took two rounds and I got to
+    guess at the one selector the dump could not show. The page can answer it
+    directly, and will keep answering it every season when Sleeper moves
+    something.
+    """
+    name = first_roster_name(page)
+    print("")
+    print("=" * 66)
+    print("SELECTORS - what selectors.json finds on this page")
+    print("=" * 66)
+    if name:
+        print(f"(drop list spells names in full, e.g. {name!r})")
+    for key in ("search_box", "claim_button", "bid_input", "confirm_button",
+                "drop_option", "player_row"):
+        raw = sel.get(key)
+        if not raw:
+            print(f"  {key:<16} not set")
+            continue
+        query = raw
+        if "{drop_name}" in raw:
+            if not name:
+                print(f"  {key:<16} needs the claim dialog open to check")
+                continue
+            query = raw.replace("{drop_name}", name)
+        if "{abbrev}" in raw:
+            print(f"  {key:<16} only checkable against a named player")
+            continue
+        try:
+            hits = page.locator(query).count()
+        except Exception as exc:
+            print(f"  {key:<16} BAD SELECTOR: {str(exc).splitlines()[0][:60]}")
+            continue
+        verdict = "no match - this one has rotted" if hits == 0 else \
+            f"{hits} match{'es' if hits != 1 else ''}"
+        print(f"  {key:<16} {verdict}")
 
 
 def do_inspect(pw, league_id):
