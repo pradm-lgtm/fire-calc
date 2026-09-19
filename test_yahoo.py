@@ -317,6 +317,69 @@ class Ready(unittest.TestCase):
         self.assertIn("Something else is wrong", said)
 
 
+class TellingYouOnce(unittest.TestCase):
+    """The daily check that announces access and then stops.
+
+    There is no credential to wait for and no email promised, so the only
+    way to know is to ask - and a notification that repeats every morning
+    afterwards is one you stop reading.
+    """
+
+    def setUp(self):
+        import tempfile
+        self.dir = tempfile.mkdtemp()
+        self.real_told = yc.TOLD
+        self.real_get = yc.get
+        self.real_configured = yc.configured
+        self.real_announce = yc.announce
+        yc.TOLD = os.path.join(self.dir, ".yahoo-ready")
+        yc.configured = lambda: True
+        self.said = []
+        yc.announce = self.said.append
+
+    def tearDown(self):
+        yc.TOLD = self.real_told
+        yc.get = self.real_get
+        yc.configured = self.real_configured
+        yc.announce = self.real_announce
+
+    def refused(self):
+        def no(_p):
+            raise yc.YahooError("not authorised for the Fantasy API")
+        yc.get = no
+
+    def granted(self):
+        yc.get = lambda _p: {"fantasy_content": {}}
+
+    def test_it_says_nothing_while_access_is_refused(self):
+        self.refused()
+        self.assertEqual(yc.watch_for_access(), 1)
+        self.assertEqual(self.said, [])
+
+    def test_it_announces_the_day_access_lands(self):
+        self.granted()
+        self.assertEqual(yc.watch_for_access(), 0)
+        self.assertEqual(len(self.said), 1)
+        self.assertIn("live", self.said[0])
+
+    def test_it_does_not_announce_twice(self):
+        self.granted()
+        yc.watch_for_access()
+        yc.watch_for_access()
+        yc.watch_for_access()
+        self.assertEqual(len(self.said), 1)
+
+    def test_a_machine_with_no_credentials_stays_quiet(self):
+        yc.configured = lambda: False
+        self.granted()
+        self.assertEqual(yc.watch_for_access(), 1)
+        self.assertEqual(self.said, [])
+
+    def test_the_marker_is_not_something_to_commit(self):
+        with open("gitignore.fantasy") as fh:
+            self.assertIn(".yahoo-ready", fh.read())
+
+
 class TheAgreement(unittest.TestCase):
     """Terms that are easy to honour today and easy to lose later."""
 

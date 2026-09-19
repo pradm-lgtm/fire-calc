@@ -13,3 +13,6 @@ __pycache__/
 
 # Test output kept when the migration refuses to commit.
 failed-*.log
+
+# The marker that says Yahoo access has been announced.
+.yahoo-ready

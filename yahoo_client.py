@@ -450,6 +450,52 @@ def ready():
     return 0
 
 
+# Written once the grant lands, so a daily check stops announcing it. Kept
+# out of the repository: it is a fact about this machine, not the project.
+TOLD = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                    ".yahoo-ready")
+
+
+def announce(message):
+    """Put a message in front of the person, if this machine can."""
+    print(message)
+    try:
+        import subprocess
+        subprocess.run(
+            ["osascript", "-e",
+             f'display notification "{message}" with title "Spike"'],
+            check=False, capture_output=True, timeout=10)
+    except Exception:
+        pass  # no osascript, or no desktop: the printed line is the fallback
+
+
+def watch_for_access():
+    """Say once, on the day, when Yahoo attaches the Fantasy grant.
+
+    Meant for a daily timer. There is no credential to wait for and no email
+    promised, so the only way to know is to ask - and asking every morning is
+    a thing a computer should do rather than a person. It announces once and
+    then keeps quiet, because a notification that repeats daily is one you
+    stop reading.
+    """
+    if os.path.exists(TOLD):
+        return 0
+    if not configured():
+        return 1
+    try:
+        get("/game/nfl")
+    except YahooError:
+        return 1
+    try:
+        with open(TOLD, "w") as fh:
+            fh.write("Yahoo Fantasy access confirmed\n")
+    except OSError:
+        pass
+    announce("Yahoo Fantasy API access is live. Run yahoo_client.py to see "
+             "your leagues.")
+    return 0
+
+
 def main():
     import argparse
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[1])
@@ -459,7 +505,11 @@ def main():
                     help="who is available in that league right now")
     ap.add_argument("--ready", action="store_true",
                     help="has Yahoo attached Fantasy access to this app yet")
+    ap.add_argument("--watch", action="store_true",
+                    help="for a daily timer: announce once when access lands")
     args = ap.parse_args()
+    if args.watch:
+        return watch_for_access()
     if not configured():
         print("Yahoo is not set up here. YAHOO_CLIENT_ID, YAHOO_CLIENT_SECRET")
         print("and YAHOO_REFRESH_TOKEN need to be in .env - get them with:")

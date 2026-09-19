@@ -46,6 +46,7 @@ WEEKLY_LABEL = "com.fantasyagent.weekly"
 WEB_LABEL = "com.fantasyagent.web"
 SUBMIT_LABEL = "com.fantasyagent.submit"
 WATCH_LABEL = "com.fantasyagent.watch"
+YAHOO_LABEL = "com.fantasyagent.yahoo"
 DAYS = {"sun": 0, "mon": 1, "tue": 2, "wed": 3, "thu": 4, "fri": 5, "sat": 6}
 
 
@@ -82,6 +83,26 @@ def watch_plist(username):
         "RunAtLoad": False,
         "StandardOutPath": str(HERE / "logs" / "submit.log"),
         "StandardErrorPath": str(HERE / "logs" / "submit.err"),
+    }
+
+
+def yahoo_plist():
+    """Ask Yahoo once a morning whether the Fantasy grant has landed.
+
+    Yahoo issues no new credentials on approval and promises no email: the
+    same client id simply stops being refused. So the only way to know is to
+    ask, and asking every morning is a job for a timer. It announces once and
+    then goes quiet on its own.
+    """
+    return {
+        "Label": YAHOO_LABEL,
+        "ProgramArguments": [python_bin(), str(HERE / "yahoo_client.py"),
+                             "--watch"],
+        "WorkingDirectory": str(HERE),
+        "StartCalendarInterval": [{"Hour": 9, "Minute": 15}],
+        "RunAtLoad": True,
+        "StandardOutPath": str(HERE / "logs" / "yahoo.log"),
+        "StandardErrorPath": str(HERE / "logs" / "yahoo.err"),
     }
 
 
@@ -179,7 +200,7 @@ def status():
     out = subprocess.run(["launchctl", "list"], capture_output=True,
                          text=True).stdout
     for label in (WEEKLY_LABEL, WEB_LABEL, SUBMIT_LABEL,
-                  WATCH_LABEL):
+                  WATCH_LABEL, YAHOO_LABEL):
         installed = (LAUNCH_DIR / f"{label}.plist").exists()
         running = label in out
         print(f"  {label}: "
@@ -219,6 +240,9 @@ def main():
     ap.add_argument("--port", type=int, default=8777)
     ap.add_argument("--wake", action="store_true",
                     help="also schedule a system wake before the job")
+    ap.add_argument("--yahoo", action="store_true",
+                    help="check each morning whether Yahoo has granted "
+                         "Fantasy access, and say so once")
     ap.add_argument("--watch", action="store_true",
                     help="act on the page's 'place them now' button, checking "
                          "every minute (recommended over --submit)")
@@ -241,6 +265,7 @@ def main():
         return 0
     if args.uninstall:
         unload(WEEKLY_LABEL)
+        unload(YAHOO_LABEL)
         unload(WEB_LABEL)
         unload(SUBMIT_LABEL)
         unload(WATCH_LABEL)
@@ -257,6 +282,10 @@ def main():
         ok &= write_and_load(WATCH_LABEL, watch_plist(args.user))
     else:
         unload(WATCH_LABEL)
+    if args.yahoo:
+        ok &= write_and_load(YAHOO_LABEL, yahoo_plist())
+    else:
+        unload(YAHOO_LABEL)
     if args.submit:
         ok &= write_and_load(SUBMIT_LABEL, submit_plist(
             DAYS[args.submit_day], args.submit_hour, args.submit_minute))
@@ -281,6 +310,9 @@ def main():
               "from your phone.")
     print(f"Weekly job: {args.day.title()} {args.hour:02d}:{args.minute:02d}, "
           f"logging to logs/weekly.log")
+    if args.yahoo:
+        print("Yahoo: checked each morning at 09:15; you will be told once, "
+              "on the day access lands.")
     if args.watch:
         print("Submitter: waiting for the page's button, checked every "
               "minute, logging to logs/submit.log")
