@@ -398,6 +398,62 @@ class Ready(unittest.TestCase):
             self.assertIn(probe, loud)
 
 
+class NamingTheApp(unittest.TestCase):
+    """Which identifier a message about the app should use.
+
+    A Yahoo client id is an opaque blob with the App ID encoded inside it.
+    The dashboard, the approval email and the confirmation form all speak
+    in App IDs, so a message that says "the app ending <last 8 of the blob>"
+    names something you cannot look up anywhere - while telling you to go
+    and look it up.
+    """
+
+    def setUp(self):
+        self.real = os.environ.get("YAHOO_CLIENT_ID")
+
+    def tearDown(self):
+        if self.real is None:
+            os.environ.pop("YAHOO_CLIENT_ID", None)
+        else:
+            os.environ["YAHOO_CLIENT_ID"] = self.real
+
+    def client_id(self, app="Xq9goioO"):
+        """A client id shaped the way Yahoo actually issues them."""
+        import base64
+
+        def pack(text):
+            return base64.b64encode(text.encode()).decode().rstrip("=")
+        return pack(f"v=2&i=whatever&d={pack('ai=' + app + '&ri=1')}&s=consumer")
+
+    def test_the_app_id_is_dug_out_of_the_client_id(self):
+        os.environ["YAHOO_CLIENT_ID"] = self.client_id()
+        self.assertEqual(yc.app_id(), "Xq9goioO")
+        self.assertEqual(yc.named_app(), "App ID Xq9goioO")
+
+    def test_an_unparsable_client_id_falls_back_rather_than_crashing(self):
+        os.environ["YAHOO_CLIENT_ID"] = "not-a-real-blob-MCZ4PTRh"
+        self.assertIsNone(yc.app_id())
+        self.assertIn("MCZ4PTRh", yc.named_app())
+        self.assertNotIn("App ID", yc.named_app())
+
+    def test_no_client_id_at_all_says_so(self):
+        os.environ.pop("YAHOO_CLIENT_ID", None)
+        self.assertIsNone(yc.app_id())
+        self.assertIn("no client id", yc.named_app())
+
+    def test_the_secret_half_is_never_printed(self):
+        """An App ID is safe to show. The rest of the blob is not."""
+        raw = self.client_id()
+        os.environ["YAHOO_CLIENT_ID"] = raw
+        self.assertNotIn(raw, yc.named_app())
+        self.assertLess(len(yc.named_app()), 40)
+
+    def test_the_refusal_message_names_the_app_id(self):
+        os.environ["YAHOO_CLIENT_ID"] = self.client_id()
+        said = yc.complain(403, "not authorized to perform this action")
+        self.assertIn("App ID Xq9goioO", said)
+
+
 class TellingYouOnce(unittest.TestCase):
     """The daily check that announces access and then stops.
 

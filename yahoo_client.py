@@ -32,8 +32,10 @@ No dependencies beyond the standard library, and every fetch path is
 testable offline by stubbing `_get`.
 """
 
+import base64
 import json
 import os
+import re
 import time
 import urllib.error
 import urllib.parse
@@ -160,6 +162,41 @@ def get(path):
     raise YahooError(f"Yahoo did not answer after {RETRIES} attempts: {last}")
 
 
+def app_id():
+    """The App ID Yahoo shows you, dug out of the opaque client id.
+
+    A client id is base64 of "v=2&i=..&d=<base64 ai=APPID..>&..", and the
+    App ID inside it is what the Developer dashboard lists and what the
+    confirmation form asks for. Printing the last few characters of the
+    client id instead names something that appears nowhere on Yahoo's site,
+    which is no use in a message telling you to go and compare the two.
+    """
+    raw = os.environ.get("YAHOO_CLIENT_ID") or ""
+    if not raw:
+        return None
+
+    def b64(text):
+        return base64.b64decode(
+            text + "=" * (-len(text) % 4)).decode("utf-8", "replace")
+
+    try:
+        inner = re.search(r"d=([^&]+)", b64(raw))
+        return re.search(r"ai=([^&]+)", b64(inner.group(1))).group(1)
+    except Exception:
+        return None
+
+
+def named_app():
+    """How to refer to this app in a message, App ID first."""
+    got = app_id()
+    if got:
+        return f"App ID {got}"
+    raw = os.environ.get("YAHOO_CLIENT_ID") or ""
+    if raw:
+        return f"the app whose client id ends {raw[-8:]}"
+    return "(no client id set)"
+
+
 def complain(code, detail):
     """Turn Yahoo's refusal into something that says what to do about it.
 
@@ -184,8 +221,9 @@ def complain(code, detail):
             "       the permissions already show.\n"
             "    3. The signed agreement has been processed. It is not "
             "instant.\n"
-            "  The client id in use ends "
-            f"{(os.environ.get('YAHOO_CLIENT_ID') or '')[-8:] or '(unset)'}.")
+            f"  The app in use is {named_app()} - the same identifier the "
+            "dashboard\n"
+            "  and the confirmation form use.")
     if code == 401:
         return ("Yahoo rejected the token. Re-authorise with:\n"
                 "    python3 yahoo_auth_check.py --auth-url")
@@ -434,7 +472,7 @@ PROBES = ("/game/nfl", "/users;use_login=1/games")
 
 def ready(verbose=False):
     """Has the Fantasy permission reached this app yet?"""
-    app = (os.environ.get("YAHOO_CLIENT_ID") or "")[-8:] or "(unset)"
+    app = named_app()
     refused = []
     for path in PROBES:
         try:
@@ -442,15 +480,14 @@ def ready(verbose=False):
         except YahooError as exc:
             refused.append((path, str(exc)))
             continue
-        print(f"Yes. App ending {app} can reach the Fantasy API ({path}).")
+        print(f"Yes. {app} can reach the Fantasy API ({path}).")
         print("    python3 yahoo_client.py        your leagues")
         return 0
 
     unauthorised = [why for _p, why in refused
                     if "not authorised for the Fantasy API" in why]
     if len(unauthorised) == len(PROBES):
-        print(f"Not yet. App ending {app} still has no Fantasy Sports "
-              "permission.")
+        print(f"Not yet. {app} still has no Fantasy Sports permission.")
         print("Yahoo is refusing every endpoint, including one that needs no")
         print("league and no user data, so this is the application rather "
               "than")
