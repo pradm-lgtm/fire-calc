@@ -467,8 +467,22 @@ class TellingYouOnce(unittest.TestCase):
         self.assertEqual(self.said, [])
 
     def test_the_marker_is_not_something_to_commit(self):
-        with open("gitignore.fantasy") as fh:
-            self.assertIn(".yahoo-ready", fh.read())
+        """Under either name the file goes by.
+
+        In this repository it is gitignore.fantasy, because the project
+        shares a checkout with other things. The migrate script copies it
+        into the deployed repository as a plain .gitignore, so a test that
+        knows only the first name fails there for a reason that has
+        nothing to do with what it is checking.
+        """
+        here = os.path.dirname(os.path.abspath(__file__))
+        for name in ("gitignore.fantasy", ".gitignore"):
+            path = os.path.join(here, name)
+            if os.path.exists(path):
+                with open(path) as fh:
+                    self.assertIn(".yahoo-ready", fh.read())
+                return
+        self.fail("no gitignore found next to the tests")
 
 
 class TheAgreement(unittest.TestCase):
