@@ -424,30 +424,53 @@ def summary():
     return 0
 
 
-def ready():
-    """Has the Fantasy permission reached this app yet?
+# Two probes rather than one. /game/nfl asks about the application alone,
+# needing no league and no user data; the second needs the signed-in user, so
+# between them a refusal that is really about scope can be told from one that
+# is about the app. Asking a single endpoint means a quirk of that endpoint
+# and a missing grant look identical.
+PROBES = ("/game/nfl", "/users;use_login=1/games")
 
-    /game/nfl needs no user data and no league, so it answers for the
-    application alone. A 403 here means the grant is not attached yet, and no
-    amount of re-authorising will change it - the thing to do is wait, which
-    is worth knowing in one line rather than after a full diagnostic.
-    """
+
+def ready(verbose=False):
+    """Has the Fantasy permission reached this app yet?"""
     app = (os.environ.get("YAHOO_CLIENT_ID") or "")[-8:] or "(unset)"
-    try:
-        get("/game/nfl")
-    except YahooError as exc:
-        if "not authorised for the Fantasy API" in str(exc):
-            print(f"Not yet. App ending {app} still has no Fantasy Sports "
-                  "permission.")
-            print("Nothing to fix here - Yahoo attaches it to the client id "
-                  "when the")
-            print("application is processed. Try again later.")
-            return 1
-        print(f"Something else is wrong: {exc}")
-        return 1
-    print(f"Yes. App ending {app} can reach the Fantasy API.")
-    print("    python3 yahoo_client.py        your leagues")
-    return 0
+    refused = []
+    for path in PROBES:
+        try:
+            get(path)
+        except YahooError as exc:
+            refused.append((path, str(exc)))
+            continue
+        print(f"Yes. App ending {app} can reach the Fantasy API ({path}).")
+        print("    python3 yahoo_client.py        your leagues")
+        return 0
+
+    unauthorised = [why for _p, why in refused
+                    if "not authorised for the Fantasy API" in why]
+    if len(unauthorised) == len(PROBES):
+        print(f"Not yet. App ending {app} still has no Fantasy Sports "
+              "permission.")
+        print("Yahoo is refusing every endpoint, including one that needs no")
+        print("league and no user data, so this is the application rather "
+              "than")
+        print("your tokens or this code.")
+        print()
+        print("When it does land, if this still says no, mint fresh tokens:")
+        print("    python3 yahoo_auth_check.py --auth-url")
+        print("Yahoo fixes a token's scope when you consent, and yours were")
+        print("issued before the grant existed.")
+    else:
+        print("Something else is wrong - this is not the refusal an "
+              "unprovisioned")
+        print("application gives:")
+        for path, why in refused:
+            print(f"  {path}: {why.splitlines()[0]}")
+    if verbose:
+        print()
+        for path, why in refused:
+            print(f"--- {path}\n{why}\n")
+    return 1
 
 
 # Written once the grant lands, so a daily check stops announcing it. Kept
@@ -482,9 +505,13 @@ def watch_for_access():
         return 0
     if not configured():
         return 1
-    try:
-        get("/game/nfl")
-    except YahooError:
+    for path in PROBES:
+        try:
+            get(path)
+            break
+        except YahooError:
+            continue
+    else:
         return 1
     try:
         with open(TOLD, "w") as fh:
@@ -505,6 +532,8 @@ def main():
                     help="who is available in that league right now")
     ap.add_argument("--ready", action="store_true",
                     help="has Yahoo attached Fantasy access to this app yet")
+    ap.add_argument("--diagnose", action="store_true",
+                    help="the same check, printing Yahoo's raw answers")
     ap.add_argument("--watch", action="store_true",
                     help="for a daily timer: announce once when access lands")
     args = ap.parse_args()
@@ -516,8 +545,8 @@ def main():
         print("    python3 yahoo_auth_check.py --auth-url")
         return 1
     try:
-        if args.ready:
-            return ready()
+        if args.ready or args.diagnose:
+            return ready(verbose=args.diagnose)
         if args.wire:
             for player in free_agents(args.wire, count=25):
                 hurt = f"  [{player['status']}]" if player["status"] else ""

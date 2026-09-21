@@ -282,13 +282,29 @@ class Ready(unittest.TestCase):
         yc.get = self.real
         os.environ.pop("YAHOO_CLIENT_ID", None)
 
-    def run_it(self):
+    def run_it(self, verbose=False):
         import contextlib
         import io
         out = io.StringIO()
         with contextlib.redirect_stdout(out):
-            code = yc.ready()
+            code = yc.ready(verbose=verbose)
         return code, out.getvalue()
+
+    def refuse_all(self, why="Yahoo says this application is not authorised "
+                             "for the Fantasy API."):
+        def no(_p):
+            raise yc.YahooError(why)
+        yc.get = no
+
+    def answer_only(self, working):
+        """Yahoo answers `working` and refuses everything else."""
+        def some(path):
+            if path == working:
+                return {"fantasy_content": {}}
+            raise yc.YahooError(
+                "Yahoo says this application is not authorised for the "
+                "Fantasy API.")
+        yc.get = some
 
     def test_a_working_app_says_yes(self):
         yc.get = lambda _p: {"fantasy_content": {}}
@@ -298,23 +314,88 @@ class Ready(unittest.TestCase):
         self.assertIn("Xq9goioO", said)
 
     def test_an_unprovisioned_app_says_wait_not_fix(self):
-        def refused(_p):
-            raise yc.YahooError(
-                "Yahoo says this application is not authorised for the "
-                "Fantasy API.")
-        yc.get = refused
+        self.refuse_all()
         code, said = self.run_it()
         self.assertEqual(code, 1)
         self.assertIn("Not yet.", said)
-        self.assertIn("Nothing to fix here", said)
+        self.assertIn("the application rather than", said)
 
     def test_a_different_failure_is_not_called_provisioning(self):
-        def broken(_p):
-            raise yc.YahooError("could not reach Yahoo: timed out")
-        yc.get = broken
+        self.refuse_all("could not reach Yahoo: timed out")
         code, said = self.run_it()
         self.assertEqual(code, 1)
+        self.assertNotIn("Not yet.", said)
         self.assertIn("Something else is wrong", said)
+
+    def test_it_asks_more_than_one_endpoint(self):
+        """One endpoint's quirk and a missing grant look the same.
+
+        The whole reason this check exists is to tell those apart, so
+        a version that asks once is a version that cannot.
+        """
+        asked = []
+
+        def note(path):
+            asked.append(path)
+            raise yc.YahooError("not authorised for the Fantasy API")
+        yc.get = note
+        self.run_it()
+        self.assertEqual(asked, list(yc.PROBES))
+        self.assertGreater(len(asked), 1)
+
+    def test_one_endpoint_answering_is_enough_to_say_yes(self):
+        """Access is access. If anything answers, stop telling him to wait."""
+        for probe in yc.PROBES:
+            with self.subTest(probe=probe):
+                self.answer_only(probe)
+                code, said = self.run_it()
+                self.assertEqual(code, 0)
+                self.assertIn("Yes.", said)
+                self.assertIn(probe, said)
+
+    def test_it_stops_asking_once_something_answers(self):
+        asked = []
+
+        def first_one_works(path):
+            asked.append(path)
+            return {"fantasy_content": {}}
+        yc.get = first_one_works
+        self.run_it()
+        self.assertEqual(asked, [yc.PROBES[0]])
+
+    def test_a_refusal_that_is_only_partly_about_scope_is_not_not_yet(self):
+        """Half a refusal is a different animal, and saying "wait" hides it."""
+        def mixed(path):
+            if path == yc.PROBES[0]:
+                raise yc.YahooError("not authorised for the Fantasy API")
+            raise yc.YahooError("could not reach Yahoo: timed out")
+        yc.get = mixed
+        code, said = self.run_it()
+        self.assertEqual(code, 1)
+        self.assertNotIn("Not yet.", said)
+        self.assertIn("timed out", said)
+
+    def test_waiting_says_what_to_do_the_day_it_lands(self):
+        """Yahoo fixes scope at consent, and his tokens predate the grant.
+
+        So a token minted today can keep being refused after access is
+        attached, and the answer is to consent again - which is only
+        useful if it is written down where he will be reading.
+        """
+        self.refuse_all()
+        _code, said = self.run_it()
+        self.assertIn("yahoo_auth_check.py --auth-url", said)
+        self.assertIn("scope", said)
+
+    def test_diagnose_prints_yahoo_own_words(self):
+        self.refuse_all("Yahoo says this application is not authorised for "
+                        "the Fantasy API.\nbody: <html>go away</html>")
+        _code, quiet = self.run_it()
+        _code, loud = self.run_it(verbose=True)
+        self.assertNotIn("go away", quiet)
+        self.assertIn("go away", loud)
+        for probe in yc.PROBES:
+            self.assertIn(probe, loud)
 
 
 class TellingYouOnce(unittest.TestCase):
@@ -367,6 +448,16 @@ class TellingYouOnce(unittest.TestCase):
         yc.watch_for_access()
         yc.watch_for_access()
         yc.watch_for_access()
+        self.assertEqual(len(self.said), 1)
+
+    def test_it_announces_when_only_the_second_endpoint_answers(self):
+        """The announcement follows the same rule as the check itself."""
+        def second_only(path):
+            if path == yc.PROBES[0]:
+                raise yc.YahooError("not authorised for the Fantasy API")
+            return {"fantasy_content": {}}
+        yc.get = second_only
+        self.assertEqual(yc.watch_for_access(), 0)
         self.assertEqual(len(self.said), 1)
 
     def test_a_machine_with_no_credentials_stays_quiet(self):
