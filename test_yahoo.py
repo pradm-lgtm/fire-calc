@@ -375,17 +375,29 @@ class Ready(unittest.TestCase):
         self.assertNotIn("Not yet.", said)
         self.assertIn("timed out", said)
 
-    def test_waiting_says_what_to_do_the_day_it_lands(self):
-        """Yahoo fixes scope at consent, and his tokens predate the grant.
+    def test_waiting_says_what_yahoo_says_to_do(self):
+        """An app made before access was switched on cannot be repaired.
 
-        So a token minted today can keep being refused after access is
-        attached, and the answer is to consent again - which is only
-        useful if it is written down where he will be reading.
+        Not by editing it and not by re-authorising - we tried the second
+        one, with tokens minted after the agreement was countersigned, and
+        every endpoint refused exactly as before. Yahoo's instruction is to
+        create a new app, so that is what this has to say.
         """
         self.refuse_all()
         _code, said = self.run_it()
-        self.assertIn("yahoo_auth_check.py --auth-url", said)
-        self.assertIn("scope", said)
+        self.assertIn("create a new one", said)
+        self.assertIn("developer.yahoo.com/apps/", said)
+        self.assertIn("application-confirmation", said)
+
+    def test_it_gives_the_redirect_uri_the_auth_flow_actually_uses(self):
+        """A new app registered against the wrong one 403s the same way."""
+        self.refuse_all()
+        _code, said = self.run_it()
+        self.assertIn(yc.DEFAULT_REDIRECT_URI, said)
+
+    def test_that_redirect_uri_matches_the_one_we_send(self):
+        import yahoo_auth_check as ac
+        self.assertEqual(yc.DEFAULT_REDIRECT_URI, ac.DEFAULT_REDIRECT_URI)
 
     def test_diagnose_prints_yahoo_own_words(self):
         self.refuse_all("Yahoo says this application is not authorised for "

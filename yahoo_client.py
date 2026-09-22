@@ -46,6 +46,12 @@ import localenv
 API_BASE = "https://fantasysports.yahooapis.com/fantasy/v2"
 TOKEN_URL = "https://api.login.yahoo.com/oauth2/get_token"
 
+# The same value yahoo_auth_check.py sends. A new app has to be registered
+# with it: Yahoo mints tokens for the "oob" flow too, but they come back with
+# no API scopes and every endpoint then 403s exactly like an unprovisioned
+# app - the one failure in all of this that does look identical to another.
+DEFAULT_REDIRECT_URI = "https://localhost:8080/"
+
 ATTRIBUTION = "Fantasy data provided by Yahoo Fantasy"
 ATTRIBUTION_URL = "https://football.fantasysports.yahoo.com/"
 
@@ -493,10 +499,17 @@ def ready(verbose=False):
               "than")
         print("your tokens or this code.")
         print()
-        print("When it does land, if this still says no, mint fresh tokens:")
-        print("    python3 yahoo_auth_check.py --auth-url")
-        print("Yahoo fixes a token's scope when you consent, and yours were")
-        print("issued before the grant existed.")
+        print("If Yahoo has told you access is live, the app is the problem.")
+        print("An app created before Fantasy Sports was switched on for your")
+        print("account cannot be fixed by editing it or by re-authorising -")
+        print("Yahoo's own instruction is to create a new one:")
+        print("    1. developer.yahoo.com/apps/ -> Create an App")
+        print("    2. tick Fantasy Sports under API Permissions")
+        print("    3. set the redirect URI to " + DEFAULT_REDIRECT_URI)
+        print("    4. submit the new Client ID at")
+        print("       sports.yahoo.com/developer/application-confirmation/")
+        print("    5. when they enable it, put the new id and secret in .env")
+        print("       and re-authorise: python3 yahoo_auth_check.py --auth-url")
     else:
         print("Something else is wrong - this is not the refusal an "
               "unprovisioned")
