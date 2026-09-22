@@ -140,8 +140,40 @@ def keep_multiplier(player):
     return 1.0
 
 
-def base_value(player, trend_count):
-    """Value before anything about this week's availability is applied."""
+# Weekly projected points, put on the same 0-100ish scale as the rank score:
+# a 15-point week lands near 75 and a 4-point week near 20, which is roughly
+# where Sleeper's rank puts the same two players. The blend therefore does
+# not lurch when one of the two signals is missing.
+PROJECTION_SCALE = 5.0
+
+# How much of the answer the projection is, where there is one. Most of it:
+# search_rank is a popularity ordering - how often a name is looked up - and
+# it was the whole backbone of this. It reads a good second receiver on a
+# good offence as a middling player, because fewer people search for him,
+# and no amount of weighting fixes a signal that is not measuring the thing.
+# Not all of it, because one week's projection is noisy and the rank is at
+# least stable.
+PROJECTION_SHARE = 0.7
+
+
+def projected_score(points):
+    """A week's projected points as a 0-100ish value, or None."""
+    if not isinstance(points, (int, float)) or points <= 0:
+        return None
+    return min(100.0, float(points) * PROJECTION_SCALE)
+
+
+def base_value(player, trend_count, projected=None):
+    """Value before anything about this week's availability is applied.
+
+    Takes the week's projected points where they are known, because that is
+    an estimate of what the player will actually do and the rank is not.
+
+    A projection of zero is not an opinion about him - it is a bye week, or
+    an inactive - so it falls back to the rank rather than reading as
+    worthlessness. That distinction is the whole reason this is a fallback
+    and not a replacement.
+    """
     # Both terms are put on a 0-100ish scale on purpose. Pickup counts are
     # extremely skewed (a hot add can be 100k while a useful one is 500), so
     # both go through a log: raw counts would swamp every other signal and
@@ -164,22 +196,29 @@ def base_value(player, trend_count):
     else:
         depth_mult = 1.0
 
-    return (rank_score + trend_score) * depth_mult
+    raw = (rank_score + trend_score) * depth_mult
+
+    shot = projected_score(projected)
+    if shot is not None:
+        raw = PROJECTION_SHARE * shot + (1 - PROJECTION_SHARE) * raw
+    return raw
 
 
-def score_player(player, trend_count):
+def score_player(player, trend_count, projected=None):
     """What he is worth to you THIS WEEK: use it to decide who to add.
 
     Scaled so a typical waiver add lands in the tens and a genuinely hot
     pickup in the hundreds. The absolute value means nothing; only the
     ordering within a league does.
     """
-    return base_value(player, trend_count) * availability_multiplier(player)
+    return (base_value(player, trend_count, projected)
+            * availability_multiplier(player))
 
 
-def keep_value(player, trend_count):
+def keep_value(player, trend_count, projected=None):
     """What he is worth to you FROM HERE: use it to decide who to drop."""
-    return base_value(player, trend_count) * keep_multiplier(player)
+    return (base_value(player, trend_count, projected)
+            * keep_multiplier(player))
 
 
 def describe_reason(player, trend_count):

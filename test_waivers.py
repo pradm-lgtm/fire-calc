@@ -659,6 +659,109 @@ class BenchIsNotAVerdict(unittest.TestCase):
         self.assertNotIn("paid", why)
 
 
+class ProjectionsBeatPopularity(unittest.TestCase):
+    """search_rank is how often a name is looked up, not what he will score.
+
+    It was the whole backbone of the value model, and it reads a good
+    second receiver on a good offence as a middling player because fewer
+    people search for him. Meanwhile the weekly projections were already
+    being fetched every run for the defense look-ahead and read by nothing
+    else.
+    """
+
+    GOOD = {"full_name": "Second Receiver", "position": "WR",
+            "search_rank": 87, "depth_chart_order": 2}
+    SCRUB = {"full_name": "Deep Bench", "position": "WR",
+             "search_rank": 400, "depth_chart_order": 2}
+
+    def test_a_projection_lifts_a_player_his_rank_undersells(self):
+        self.assertGreater(wa.keep_value(self.GOOD, 0, 12.5),
+                           wa.keep_value(self.GOOD, 0))
+
+    def test_and_sinks_one_his_rank_flatters(self):
+        flattered = dict(self.GOOD, search_rank=20)
+        self.assertLess(wa.keep_value(flattered, 0, 2.0),
+                        wa.keep_value(flattered, 0))
+
+    def test_no_projection_falls_back_to_the_rank(self):
+        self.assertEqual(wa.keep_value(self.GOOD, 0, None),
+                         wa.keep_value(self.GOOD, 0))
+
+    def test_a_zero_projection_is_a_bye_not_a_verdict(self):
+        """The third time this class of mistake would have bitten.
+
+        A player on bye projects zero, and so does one who is inactive.
+        Reading that as worthlessness is how a good player becomes the
+        drop - which is the bug we have now fixed twice by other routes.
+        """
+        self.assertEqual(wa.keep_value(self.GOOD, 0, 0),
+                         wa.keep_value(self.GOOD, 0))
+        self.assertEqual(wa.keep_value(self.GOOD, 0, 0.0),
+                         wa.keep_value(self.GOOD, 0))
+
+    def test_the_projection_carries_the_decision_where_it_exists(self):
+        """Rank says the scrub is far worse; the projection says otherwise."""
+        self.assertGreater(wa.keep_value(self.SCRUB, 0, 14.0),
+                           wa.keep_value(self.GOOD, 0, 4.0))
+
+    def test_it_reaches_the_cut_order(self):
+        players = {"good": self.GOOD, "scrub": self.SCRUB}
+        roster = {"starters": [], "players": ["good", "scrub"]}
+        depth = {"WR": (2, 1.0, "deep")}
+        plain = [r[2] for r in ew.drop_candidates(roster, players, {}, depth)]
+        self.assertEqual(plain[0], "scrub")
+        # Same roster, but the projections disagree with the ranks.
+        flipped = [r[2] for r in ew.drop_candidates(
+            roster, players, {}, depth,
+            projected={"good": 3.0, "scrub": 15.0})]
+        self.assertEqual(flipped[0], "good")
+
+
+class NotEveryFreeAgentIsAnUpgrade(unittest.TestCase):
+    """best_available has to clear a bar, not merely exist.
+
+    With no article naming anyone it only had to beat zero, and every free
+    agent with a pulse cleared that - so a league that should have stayed
+    quiet started proposing a claim.
+    """
+
+    LEAGUE = {"league_id": "L", "name": "L",
+              "roster_positions": ["WR", "BN"]}
+    DEPTH = {"WR": (2, 1.0, "deep"), "DEF": (1, 1.0, "ok")}
+
+    def test_a_free_agent_no_better_than_your_own_man_is_not_offered(self):
+        players = {"mine": {"full_name": "Mine", "position": "WR",
+                            "search_rank": 300},
+                   "free": {"full_name": "Free", "position": "WR",
+                            "search_rank": 290}}
+        mine = {"starters": [], "players": ["mine"]}
+        self.assertIsNone(
+            rw.best_available(self.LEAGUE, mine, players, [], ["free"], {},
+                              self.DEPTH, {}, 3, 89))
+
+    def test_a_clear_upgrade_still_is(self):
+        players = {"mine": {"full_name": "Mine", "position": "WR",
+                            "search_rank": 800},
+                   "free": {"full_name": "Free", "position": "WR",
+                            "search_rank": 40, "depth_chart_order": 1}}
+        mine = {"starters": [], "players": ["mine"]}
+        got = rw.best_available(self.LEAGUE, mine, players, [], ["free"], {},
+                                self.DEPTH, {}, 3, 89)
+        self.assertIsNotNone(got)
+        self.assertEqual(got["add_player_id"], "free")
+
+    def test_a_defense_is_left_to_the_path_that_understands_defenses(self):
+        """Two paths proposing the same streamer on different reasoning."""
+        players = {"mine": {"full_name": "Mine", "position": "WR",
+                            "search_rank": 900},
+                   "SF": {"full_name": "San Francisco", "position": "DEF",
+                          "team": "SF", "search_rank": 30}}
+        mine = {"starters": [], "players": ["mine"]}
+        self.assertIsNone(
+            rw.best_available(self.LEAGUE, mine, players, [], ["SF"], {},
+                              self.DEPTH, {}, 3, 89))
+
+
 class WhenNobodyWroteAboutHim(unittest.TestCase):
     """The add pool used to be whatever the week's articles named.
 

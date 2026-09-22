@@ -196,7 +196,8 @@ def draft_weight(cost, week=1):
     return raw * max(0.2, 1.0 - (age - 1) / 12.0)
 
 
-def drop_candidates(roster, players, trending, depth, cost=None, week=1):
+def drop_candidates(roster, players, trending, depth, cost=None, week=1,
+                    projected=None):
     """Everyone you could cut, weakest first.
 
     The whole roster, not just the bench: dropping a starter is a normal
@@ -213,6 +214,7 @@ def drop_candidates(roster, players, trending, depth, cost=None, week=1):
     starting = {str(p) for p in starters}
     protected = wa.never_drop_names()
     cost = cost or {}
+    projected = projected or {}
 
     ranked = []
     for pid in list(bench) + list(starters):
@@ -222,7 +224,8 @@ def drop_candidates(roster, players, trending, depth, cost=None, week=1):
             continue
         # keep_value, not score_player: this is a question about owning him,
         # and score_player answers a question about starting him this week.
-        score = wa.keep_value(player, trending.get(pid, 0))
+        score = wa.keep_value(player, trending.get(pid, 0),
+                              projected.get(pid))
         label = depth.get(player.get("position"), (0, 0, "ok"))[2]
         penalty = {"thin": 1000, "ok": 100, "deep": 0, "extra": 0}.get(label, 100)
         paid = draft_weight(cost.get(pid), week)
@@ -239,7 +242,8 @@ def drop_candidates(roster, players, trending, depth, cost=None, week=1):
     return ranked
 
 
-def choose_drop(roster, players, trending, depth, protect_ids):
+def choose_drop(roster, players, trending, depth, protect_ids,
+                projected=None):
     """Weakest bench player, preferring positions with surplus depth.
 
     Never proposes dropping from a position labelled thin unless nothing
@@ -258,7 +262,8 @@ def choose_drop(roster, players, trending, depth, protect_ids):
             continue
         if wa.is_protected(p, protected):
             continue  # on the never-drop list; not a candidate at any score
-        score = wa.keep_value(p, trending.get(pid, 0))
+        score = wa.keep_value(p, trending.get(pid, 0),
+                              (projected or {}).get(pid))
         label = depth.get(p.get("position"), (0, 0, "ok"))[2]
         penalty = {"thin": 1000, "ok": 100, "deep": 0, "extra": 0}.get(label, 100)
         ranked.append((score + penalty, score, pid, p, label))

@@ -168,7 +168,7 @@ UNWRITTEN_EDGE = 1.5
 
 
 def best_available(league, mine, players, rosters, available, trending,
-                   depth, cost, week, remaining, beat=0.0):
+                   depth, cost, week, remaining, beat=0.0, projected=None):
     """The best free agent nobody wrote up, if he is clearly better.
 
     The add pool was whatever the week's articles happened to name. That is
@@ -182,9 +182,18 @@ def best_available(league, mine, players, rosters, available, trending,
     because a list of "who is everyone adding today" is what this tool was
     built to be better than.
     """
+    projected = projected or {}
+    # Defenses are not in this pool. defense_proposal already answers that
+    # question, and it answers it properly - on who the defense plays this
+    # week and next - where all this has is an overall rank that barely
+    # means anything for a unit. Two paths proposing the same streamer on
+    # different reasoning is worse than one.
     ranked = sorted(
-        ((wa.score_player(players[pid], trending.get(pid, 0)), pid)
-         for pid in available if pid in players),
+        ((wa.score_player(players[pid], trending.get(pid, 0),
+                          projected.get(pid)), pid)
+         for pid in available
+         if pid in players
+         and (players[pid].get("position") or "").upper() != defense.DEF),
         reverse=True)
     if not ranked:
         return None
@@ -193,11 +202,15 @@ def best_available(league, mine, players, rosters, available, trending,
         return None
 
     candidates = ew.drop_candidates(mine, players, trending, depth,
-                                    cost=cost, week=week)
+                                    cost=cost, week=week, projected=projected)
     if not candidates:
         return None
     _rank, drop_score, drop_pid, drop_player, drop_label, _st = candidates[0]
-    if drop_score > score * 1.5:
+    # He has to be clearly better than the man he costs you, not merely not
+    # much worse. Without this, a week where no article named anyone meant
+    # beating zero, and any free agent with a pulse cleared that - which is
+    # how a league that should have stayed quiet started proposing a claim.
+    if score <= drop_score * UNWRITTEN_EDGE:
         return None
 
     place = standings(candidates)
@@ -294,6 +307,10 @@ def proposals_for_league(league, user_id, players, trending, texts, max_moves,
             per_source_drops[source] = said
     advice = ex.merge_drops(per_source_drops)
     byes = byes or {}
+    # Already fetched for the defense look-ahead every run, and until now
+    # read by nothing else. It is the only signal here that is an estimate
+    # of what a player will actually do.
+    shots = (weeks or {}).get("points") or {}
 
     def resting(pid):
         team = (players.get(pid) or {}).get("team")
@@ -304,7 +321,8 @@ def proposals_for_league(league, user_id, players, trending, texts, max_moves,
         pos = (players.get(pid) or {}).get("position")
         thin = depth.get(pos, (0, 0, "ok"))[2] == "thin"
         return (info["count"], thin,
-                wa.score_player(players.get(pid, {}), trending.get(pid, 0)))
+                wa.score_player(players.get(pid, {}), trending.get(pid, 0),
+                                shots.get(pid)))
 
     ordered = sorted(consensus.items(), key=sort_key, reverse=True) \
         if consensus else []
@@ -317,8 +335,9 @@ def proposals_for_league(league, user_id, players, trending, texts, max_moves,
         # picked. Whether there is anyone worth dropping is half the
         # decision, and it was being made for you out of sight.
         candidates = ew.drop_candidates(mine, players, trending, depth,
-                                        cost=cost, week=week)
-        drops = ew.choose_drop(mine, players, trending, depth, protect)
+                                        cost=cost, week=week, projected=shots)
+        drops = ew.choose_drop(mine, players, trending, depth, protect,
+                               projected=shots)
         if drops:
             _, drop_score, drop_pid, drop_player, drop_label = drops[0]
         else:
@@ -342,7 +361,8 @@ def proposals_for_league(league, user_id, players, trending, texts, max_moves,
                                cost=cost.get(cid), advice=advice.get(cid),
                                on_bye=resting(cid)),
         } for _rank, _score, cid, p, label, starts in candidates]
-        add_score = wa.score_player(players.get(pid, {}), trending.get(pid, 0))
+        add_score = wa.score_player(players.get(pid, {}), trending.get(pid, 0),
+                                    shots.get(pid))
         if drop_score > add_score * 1.5:
             best = strip_label(sc.player_label(players, pid))
             why = (f"the best player available ({best}) is not worth more "
@@ -404,11 +424,12 @@ def proposals_for_league(league, user_id, players, trending, texts, max_moves,
     # they did. With nothing written up he only has to beat zero, which is
     # the point: that is the week you are least well served by silence.
     best_written = max(
-        (wa.score_player(players.get(pid, {}), trending.get(pid, 0))
+        (wa.score_player(players.get(pid, {}), trending.get(pid, 0),
+                         shots.get(pid))
          for pid in consensus), default=0.0)
     unwritten = best_available(league, mine, players, rosters, available,
                                trending, depth, cost, week, remaining,
-                               beat=best_written)
+                               beat=best_written, projected=shots)
     if unwritten and unwritten["add_player_id"] not in consensus:
         unwritten["rank"] = len(out) + 1
         out.append(unwritten)
@@ -598,6 +619,7 @@ def explain(username, name, db_path=None):
         print(f"Nobody called {name} in Sleeper's player list.")
         return 1
     trending = wa.trending_adds()
+    shots = week_outlook(season, week).get("points") or {}
 
     for pid in hits[:5]:
         p = players[pid]
@@ -613,8 +635,13 @@ def explain(username, name, db_path=None):
             season = wa.keep_multiplier(p) < 1.0
             print(f"    counts against keeping him: "
                   f"{'yes, it outlasts this week' if season else 'no'}")
-        print(f"  worth adding this week {wa.score_player(p, trending.get(pid, 0)):.1f}")
-        print(f"  worth keeping          {wa.keep_value(p, trending.get(pid, 0)):.1f}")
+        shot = shots.get(pid)
+        print(f"  projected this week    "
+              f"{shot if shot is not None else '(none - rank used instead)'}")
+        print(f"  worth adding this week "
+              f"{wa.score_player(p, trending.get(pid, 0), shot):.1f}")
+        print(f"  worth keeping          "
+              f"{wa.keep_value(p, trending.get(pid, 0), shot):.1f}")
 
         for league in sc.user_leagues(user["user_id"], season):
             rosters = sc.league_rosters(league["league_id"])
@@ -627,7 +654,7 @@ def explain(username, name, db_path=None):
             except Exception:
                 cost = {}
             ranked = ew.drop_candidates(mine, players, trending, depth,
-                                        cost=cost, week=week)
+                                        cost=cost, week=week, projected=shots)
             order = [row[2] for row in ranked]
             if pid not in order:
                 print(f"  in {league.get('name')}: protected, never offered")
@@ -635,9 +662,26 @@ def explain(username, name, db_path=None):
             spot = order.index(pid) + 1
             print(f"  in {league.get('name')}: offered {ordinal(spot)} of "
                   f"{len(order)} to cut (1st = first to go)")
+            # The cut order is decided by the total, not by the value above
+            # it: a depth penalty of 1000 swamps every other term. Printing
+            # the worth and calling it an explanation left the one number
+            # that actually ordered the list off the screen.
+            place = standings(ranked)
+            print("      keep  depth  draft  lineup  =  total")
+            for row in ranked[max(0, spot - 3):spot + 2]:
+                total, keep, cid, who, _label, starts = row
+                label = depth.get(who.get("position"), (0, 0, "ok"))[2]
+                pen = {"thin": 1000, "ok": 100, "deep": 0,
+                       "extra": 0}.get(label, 100)
+                paid = ew.draft_weight(cost.get(cid), week)
+                here = "<-" if cid == pid else "  "
+                print(f"   {here} {keep:6.1f} {pen:6} {paid:6.1f} "
+                      f"{(ew.STARTER_WEIGHT if starts else 0):7} "
+                      f"= {total:7.1f}  {strip_label(sc.player_label(players, cid))}")
             if spot <= 3:
                 row = ranked[order.index(pid)]
-                print(f"    because: {drop_reason(p, row[4], depth, row[5], *standings(ranked).get(pid, (None, None)), cost=cost.get(pid))}")
+                print(f"    reason offered: "
+                      f"{drop_reason(p, row[4], depth, row[5], *place.get(pid, (None, None)), cost=cost.get(pid))}")
     return 0
 
 
