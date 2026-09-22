@@ -717,6 +717,46 @@ class ProjectionsBeatPopularity(unittest.TestCase):
         self.assertEqual(flipped[0], "good")
 
 
+class KeepingLooksFurtherAheadThanAdding(unittest.TestCase):
+    """A drop is not a decision about one matchup.
+
+    Whether he helps you on Sunday is a question about Sunday. Whether you
+    should still own him is a question about the rest of the season, and
+    one week of projection is a hard defence away from looking like
+    decline. Two weeks is not a season, but it is twice the evidence for
+    nothing extra - both are already fetched every run.
+    """
+
+    def test_it_averages_the_two_weeks(self):
+        got = rw.keeping_points({"points": {"a": 8.0},
+                                 "next_points": {"a": 14.0}})
+        self.assertAlmostEqual(got["a"], 11.0)
+
+    def test_a_bye_next_week_does_not_halve_him(self):
+        """Zero is a bye, not an opinion - the rule the rest of this keeps."""
+        got = rw.keeping_points({"points": {"a": 12.0},
+                                 "next_points": {"a": 0}})
+        self.assertAlmostEqual(got["a"], 12.0)
+
+    def test_a_bye_this_week_still_counts_next_week(self):
+        got = rw.keeping_points({"points": {"a": 0},
+                                 "next_points": {"a": 12.0}})
+        self.assertAlmostEqual(got["a"], 12.0)
+
+    def test_nothing_projected_either_week_is_left_out_entirely(self):
+        """So keep_value falls back to the rank rather than reading zero."""
+        got = rw.keeping_points({"points": {"a": 0}, "next_points": {"a": 0}})
+        self.assertNotIn("a", got)
+
+    def test_a_player_in_only_one_week_still_appears(self):
+        got = rw.keeping_points({"points": {"a": 9.0}, "next_points": {}})
+        self.assertAlmostEqual(got["a"], 9.0)
+
+    def test_missing_weeks_are_not_an_error(self):
+        self.assertEqual(rw.keeping_points({}), {})
+        self.assertEqual(rw.keeping_points(None), {})
+
+
 class NotEveryFreeAgentIsAnUpgrade(unittest.TestCase):
     """best_available has to clear a bar, not merely exist.
 

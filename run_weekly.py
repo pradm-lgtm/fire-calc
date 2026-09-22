@@ -158,6 +158,29 @@ def defense_proposal(league, mine, players, rosters, weeks, remaining,
     )
 
 
+def keeping_points(weeks):
+    """{player_id: points} for judging who to KEEP: this week and next.
+
+    One week is a matchup, and a drop is not a decision about a matchup.
+    Averaging the two weeks we already fetch is not a season projection,
+    but it is twice the evidence at no extra cost, and it stops a single
+    hard defence reading as decline.
+
+    Zero is a bye or an inactive rather than an opinion, so a week that
+    projects nothing is left out of the average instead of halving it -
+    the same rule the rest of this file already follows.
+    """
+    here = (weeks or {}).get("points") or {}
+    ahead = (weeks or {}).get("next_points") or {}
+    out = {}
+    for pid in set(here) | set(ahead):
+        got = [p for p in (here.get(pid), ahead.get(pid))
+               if isinstance(p, (int, float)) and p > 0]
+        if got:
+            out[pid] = sum(got) / len(got)
+    return out
+
+
 # How much better a player nobody wrote about has to be before he is
 # offered anyway. Above 1.0 on purpose: the analysts are the point of this
 # tool, and the signals available here - Sleeper's overall rank and how many
@@ -168,7 +191,8 @@ UNWRITTEN_EDGE = 1.5
 
 
 def best_available(league, mine, players, rosters, available, trending,
-                   depth, cost, week, remaining, beat=0.0, projected=None):
+                   depth, cost, week, remaining, beat=0.0, projected=None,
+                   keeping=None):
     """The best free agent nobody wrote up, if he is clearly better.
 
     The add pool was whatever the week's articles happened to name. That is
@@ -201,8 +225,10 @@ def best_available(league, mine, players, rosters, available, trending,
     if score <= beat * UNWRITTEN_EDGE:
         return None
 
-    candidates = ew.drop_candidates(mine, players, trending, depth,
-                                    cost=cost, week=week, projected=projected)
+    candidates = ew.drop_candidates(mine, players, trending, depth, cost=cost,
+                                    week=week,
+                                    projected=(keeping if keeping is not None
+                                               else projected))
     if not candidates:
         return None
     _rank, drop_score, drop_pid, drop_player, drop_label, _st = candidates[0]
@@ -311,6 +337,10 @@ def proposals_for_league(league, user_id, players, trending, texts, max_moves,
     # read by nothing else. It is the only signal here that is an estimate
     # of what a player will actually do.
     shots = (weeks or {}).get("points") or {}
+    # Two maps, because the two decisions look at different horizons: what
+    # he does on Sunday says whether to add him, and what he does over the
+    # next fortnight says whether to keep him.
+    holds = keeping_points(weeks)
 
     def resting(pid):
         team = (players.get(pid) or {}).get("team")
@@ -335,9 +365,9 @@ def proposals_for_league(league, user_id, players, trending, texts, max_moves,
         # picked. Whether there is anyone worth dropping is half the
         # decision, and it was being made for you out of sight.
         candidates = ew.drop_candidates(mine, players, trending, depth,
-                                        cost=cost, week=week, projected=shots)
+                                        cost=cost, week=week, projected=holds)
         drops = ew.choose_drop(mine, players, trending, depth, protect,
-                               projected=shots)
+                               projected=holds)
         if drops:
             _, drop_score, drop_pid, drop_player, drop_label = drops[0]
         else:
@@ -429,7 +459,8 @@ def proposals_for_league(league, user_id, players, trending, texts, max_moves,
          for pid in consensus), default=0.0)
     unwritten = best_available(league, mine, players, rosters, available,
                                trending, depth, cost, week, remaining,
-                               beat=best_written, projected=shots)
+                               beat=best_written, projected=shots,
+                               keeping=holds)
     if unwritten and unwritten["add_player_id"] not in consensus:
         unwritten["rank"] = len(out) + 1
         out.append(unwritten)
@@ -619,7 +650,9 @@ def explain(username, name, db_path=None):
         print(f"Nobody called {name} in Sleeper's player list.")
         return 1
     trending = wa.trending_adds()
-    shots = week_outlook(season, week).get("points") or {}
+    outlook = week_outlook(season, week)
+    shots = outlook.get("points") or {}
+    holds = keeping_points(outlook)
 
     for pid in hits[:5]:
         p = players[pid]
@@ -635,13 +668,16 @@ def explain(username, name, db_path=None):
             season = wa.keep_multiplier(p) < 1.0
             print(f"    counts against keeping him: "
                   f"{'yes, it outlasts this week' if season else 'no'}")
-        shot = shots.get(pid)
+        shot, hold = shots.get(pid), holds.get(pid)
         print(f"  projected this week    "
               f"{shot if shot is not None else '(none - rank used instead)'}")
+        print(f"  projected next week    "
+              f"{(outlook.get('next_points') or {}).get(pid, '(none)')}")
         print(f"  worth adding this week "
               f"{wa.score_player(p, trending.get(pid, 0), shot):.1f}")
         print(f"  worth keeping          "
-              f"{wa.keep_value(p, trending.get(pid, 0), shot):.1f}")
+              f"{wa.keep_value(p, trending.get(pid, 0), hold):.1f}"
+              "   (over both weeks)")
 
         for league in sc.user_leagues(user["user_id"], season):
             rosters = sc.league_rosters(league["league_id"])
@@ -654,7 +690,7 @@ def explain(username, name, db_path=None):
             except Exception:
                 cost = {}
             ranked = ew.drop_candidates(mine, players, trending, depth,
-                                        cost=cost, week=week, projected=shots)
+                                        cost=cost, week=week, projected=holds)
             order = [row[2] for row in ranked]
             if pid not in order:
                 print(f"  in {league.get('name')}: protected, never offered")
@@ -668,7 +704,7 @@ def explain(username, name, db_path=None):
             # that actually ordered the list off the screen.
             place = standings(ranked)
             print("      keep  depth  draft  lineup  =  total")
-            for row in ranked[max(0, spot - 3):spot + 2]:
+            for row in ranked[max(0, spot - 4):spot + 2]:
                 total, keep, cid, who, _label, starts = row
                 label = depth.get(who.get("position"), (0, 0, "ok"))[2]
                 pen = {"thin": 1000, "ok": 100, "deep": 0,
