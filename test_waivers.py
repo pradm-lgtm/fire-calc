@@ -17,6 +17,7 @@ import expert_extract as ex
 import expert_waivers as ew
 import run_weekly as rw
 import store as st
+import waiver_analyzer as wa
 import webapp
 
 LISTING = ("Below are some popular searches and comparisons from our Who To "
@@ -247,9 +248,14 @@ class Reasons(unittest.TestCase):
     def test_depth_is_not_repeated_for_a_position_of_one(self):
         self.assertEqual(self.reason("TE", 1, 1, "thin"), "your only TE")
 
-    def test_being_hurt_leads(self):
+    def test_being_hurt_leads_when_the_injury_outlasts_the_week(self):
+        why = self.reason("WR", 3, 6, "ok", injury_status="IR")
+        self.assertTrue(why.startswith("ir"), why)
+
+    def test_a_this_week_injury_does_not_lead(self):
+        """It used to. "Questionable" is not an argument for cutting anyone."""
         why = self.reason("WR", 3, 6, "ok", injury_status="Questionable")
-        self.assertTrue(why.startswith("questionable"))
+        self.assertFalse(why.startswith("questionable"), why)
 
     def test_standings_rank_within_a_position_not_across_the_roster(self):
         cands = [
@@ -651,6 +657,72 @@ class BenchIsNotAVerdict(unittest.TestCase):
                              {"RB": (5, 2, "deep")}, False, 2, 5)
         self.assertNotIn("draft", why)
         self.assertNotIn("paid", why)
+
+
+class BeingHurtIsNotBeingBad(unittest.TestCase):
+    """A one-week injury is not a reason to cut somebody.
+
+    The model scored every player once and used that one number for both
+    "who should I pick up" and "who should I let go". Being out multiplies
+    a score by 0.25, which is right for the first question and ruinous for
+    the second: a star receiver out for a single week landed below every
+    healthy bench body on the roster and got offered up as the drop, with
+    "out" as the leading argument for cutting him.
+    """
+
+    STAR = {"full_name": "Star Receiver", "position": "WR",
+            "search_rank": 45, "depth_chart_order": 1,
+            "injury_status": "Out"}
+    SCRUB = {"full_name": "Deep Bench", "position": "WR",
+             "search_rank": 420, "depth_chart_order": 2,
+             "injury_status": ""}
+
+    def test_a_star_out_for_a_week_is_worth_more_than_a_healthy_scrub(self):
+        self.assertGreater(wa.keep_value(self.STAR, 0),
+                           wa.keep_value(self.SCRUB, 0))
+
+    def test_and_the_old_scoring_had_it_the_other_way_round(self):
+        """The regression, stated as such, so it cannot come back quietly."""
+        self.assertLess(wa.score_player(self.STAR, 0),
+                        wa.score_player(self.SCRUB, 0))
+
+    def test_adding_him_this_week_is_still_discounted(self):
+        """Being out matters for whether he helps you on Sunday."""
+        healthy = dict(self.STAR, injury_status="")
+        self.assertLess(wa.score_player(self.STAR, 0),
+                        wa.score_player(healthy, 0))
+
+    def test_a_season_ending_status_still_makes_him_droppable(self):
+        for status in ("IR", "PUP", "Sus", "NFI"):
+            with self.subTest(status=status):
+                gone = dict(self.STAR, injury_status=status)
+                self.assertLess(wa.keep_value(gone, 0),
+                                wa.keep_value(self.SCRUB, 0))
+
+    def test_questionable_and_doubtful_are_this_week_too(self):
+        for status in ("Questionable", "Doubtful"):
+            with self.subTest(status=status):
+                iffy = dict(self.STAR, injury_status=status)
+                self.assertEqual(wa.keep_value(iffy, 0),
+                                 wa.keep_value(dict(self.STAR,
+                                                    injury_status=""), 0))
+
+    def test_the_scrub_is_the_one_offered_for_the_drop(self):
+        players = {"star": self.STAR, "scrub": self.SCRUB}
+        roster = {"starters": [], "players": ["star", "scrub"]}
+        order = [r[2] for r in ew.drop_candidates(
+            roster, players, {}, {"WR": (2, 1.0, "deep")})]
+        self.assertEqual(order[0], "scrub")
+
+    def test_the_card_does_not_argue_from_a_one_week_injury(self):
+        why = rw.drop_reason(self.STAR, "deep", {"WR": (7, 3, "deep")},
+                             False, 2, 7)
+        self.assertNotIn("out", why.lower().split(", ")[0])
+
+    def test_but_it_does_say_so_when_he_is_gone_for_the_season(self):
+        why = rw.drop_reason(dict(self.STAR, injury_status="IR"), "deep",
+                             {"WR": (7, 3, "deep")}, False, 2, 7)
+        self.assertTrue(why.lower().startswith("ir"), why)
 
 
 class SaidToDrop(unittest.TestCase):

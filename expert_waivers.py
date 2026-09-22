@@ -220,7 +220,9 @@ def drop_candidates(roster, players, trending, depth, cost=None, week=1):
         player = players.get(pid)
         if not player or wa.is_protected(player, protected):
             continue
-        score = wa.score_player(player, trending.get(pid, 0))
+        # keep_value, not score_player: this is a question about owning him,
+        # and score_player answers a question about starting him this week.
+        score = wa.keep_value(player, trending.get(pid, 0))
         label = depth.get(player.get("position"), (0, 0, "ok"))[2]
         penalty = {"thin": 1000, "ok": 100, "deep": 0, "extra": 0}.get(label, 100)
         paid = draft_weight(cost.get(pid), week)
@@ -256,7 +258,7 @@ def choose_drop(roster, players, trending, depth, protect_ids):
             continue
         if wa.is_protected(p, protected):
             continue  # on the never-drop list; not a candidate at any score
-        score = wa.score_player(p, trending.get(pid, 0))
+        score = wa.keep_value(p, trending.get(pid, 0))
         label = depth.get(p.get("position"), (0, 0, "ok"))[2]
         penalty = {"thin": 1000, "ok": 100, "deep": 0, "extra": 0}.get(label, 100)
         ranked.append((score + penalty, score, pid, p, label))

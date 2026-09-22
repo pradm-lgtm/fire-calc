@@ -52,6 +52,13 @@ INJURY_PENALTY = {
     "doubtful": 0.4, "questionable": 0.85,
 }
 
+# How long a status keeps a player out, which is the difference between the
+# two questions his injury bears on. "Can he help me on Sunday" and "do I
+# still want him on my roster" are not the same question, and a status that
+# only spans this week answers the first and says nothing about the second.
+# A star out for one week is still a star; a star on IR is a roster spot.
+SEASON_STATUSES = ("ir", "pup", "sus", "susp", "nfi", "dnr")
+
 
 NEVER_DROP_FILE = Path(__file__).resolve().parent / "never_drops.json"
 
@@ -114,13 +121,27 @@ def availability_multiplier(player):
     return 0.9
 
 
-def score_player(player, trend_count):
-    """Blend Sleeper's rank, pickup momentum, and depth chart into one number.
+def keep_multiplier(player):
+    """What a status should do to your view of OWNING him, not starting him.
 
-    Scaled so a typical waiver add lands in the tens and a genuinely hot
-    pickup in the hundreds. The absolute value means nothing; only the
-    ordering within a league does.
+    availability_multiplier takes a player who is out down to a quarter of
+    his value. That is right for whether he helps you this week and badly
+    wrong for whether you should cut him: it demoted a good receiver with a
+    one-week injury below every healthy bench body and offered him up as the
+    drop. Only a status that spans more than this week belongs in that
+    decision, so a week-scoped one costs nothing here.
     """
+    status = (player.get("injury_status") or "").strip().lower()
+    if not status:
+        return 1.0
+    for key in SEASON_STATUSES:
+        if status.startswith(key):
+            return INJURY_PENALTY.get(key, 0.1)
+    return 1.0
+
+
+def base_value(player, trend_count):
+    """Value before anything about this week's availability is applied."""
     # Both terms are put on a 0-100ish scale on purpose. Pickup counts are
     # extremely skewed (a hot add can be 100k while a useful one is 500), so
     # both go through a log: raw counts would swamp every other signal and
@@ -143,8 +164,22 @@ def score_player(player, trend_count):
     else:
         depth_mult = 1.0
 
-    raw = (rank_score + trend_score) * depth_mult
-    return raw * availability_multiplier(player)
+    return (rank_score + trend_score) * depth_mult
+
+
+def score_player(player, trend_count):
+    """What he is worth to you THIS WEEK: use it to decide who to add.
+
+    Scaled so a typical waiver add lands in the tens and a genuinely hot
+    pickup in the hundreds. The absolute value means nothing; only the
+    ordering within a league does.
+    """
+    return base_value(player, trend_count) * availability_multiplier(player)
+
+
+def keep_value(player, trend_count):
+    """What he is worth to you FROM HERE: use it to decide who to drop."""
+    return base_value(player, trend_count) * keep_multiplier(player)
 
 
 def describe_reason(player, trend_count):

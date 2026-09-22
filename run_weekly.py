@@ -460,7 +460,11 @@ def drop_reason(player, label, depth, starting=False, place=None, total=None,
         # a bye it is a judgement about the calendar, and the card should
         # not let the two look the same.
         bits.insert(0, "on bye this week")
-    if hurt:
+    # Only an injury that outlasts this week. Leading the case for cutting a
+    # good receiver with "out" - when he is back next Sunday - is the loudest
+    # possible way to say something that should not weigh on the decision at
+    # all. The card shows his status next to his name regardless.
+    if hurt and wa.keep_multiplier(player) < 1.0:
         bits.insert(0, hurt.lower())
     return ", ".join(b for b in bits if b)
 
