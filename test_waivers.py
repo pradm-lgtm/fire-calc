@@ -659,6 +659,90 @@ class BenchIsNotAVerdict(unittest.TestCase):
         self.assertNotIn("paid", why)
 
 
+class WhenNobodyWroteAboutHim(unittest.TestCase):
+    """The add pool used to be whatever the week's articles named.
+
+    That is the right default and it fails in one direction. When the
+    articles cover positions you are set at, or name only streamers, the
+    best player genuinely free in your league is never considered - and the
+    card offers a deep streaming option as though nothing better existed.
+    """
+
+    LEAGUE = {"league_id": "L", "name": "OTG",
+              "roster_positions": ["WR", "WR", "BN", "BN"]}
+    MINE = {"starters": ["mine1"], "players": ["mine1", "junk"]}
+    PLAYERS = {
+        "mine1": {"full_name": "My Starter", "position": "WR",
+                  "search_rank": 120},
+        "junk": {"full_name": "Roster Filler", "position": "WR",
+                 "search_rank": 700},
+        "streamer": {"full_name": "Deep Streamer", "position": "TE",
+                     "search_rank": 480, "team": "X"},
+        "stud": {"full_name": "Actually Good", "position": "WR",
+                 "search_rank": 38, "depth_chart_order": 1, "team": "Y"},
+    }
+    DEPTH = {"WR": (2, 1.0, "deep"), "TE": (0, 0, "thin")}
+
+    def ask(self, available, beat_id=None, remaining=89):
+        beat = (wa.score_player(self.PLAYERS[beat_id], 0) if beat_id else 0.0)
+        return rw.best_available(self.LEAGUE, self.MINE, self.PLAYERS, [],
+                                 available, {}, self.DEPTH, {}, 3,
+                                 remaining, beat=beat)
+
+    def test_a_clearly_better_free_agent_is_offered(self):
+        got = self.ask(["streamer", "stud"], beat_id="streamer")
+        self.assertIsNotNone(got)
+        self.assertEqual(got["add_player_id"], "stud")
+
+    def test_it_stays_quiet_when_the_articles_had_the_best_man(self):
+        self.assertIsNone(self.ask(["streamer"], beat_id="streamer"))
+
+    def test_a_marginal_edge_is_not_enough(self):
+        """The analysts are the point of this tool; ties go to them."""
+        near = dict(self.PLAYERS["streamer"], search_rank=460)
+        players = dict(self.PLAYERS, near=near)
+        got = rw.best_available(self.LEAGUE, self.MINE, players, [],
+                                ["near"], {}, self.DEPTH, {}, 3, 89,
+                                beat=wa.score_player(self.PLAYERS["streamer"], 0))
+        self.assertIsNone(got)
+
+    def test_it_says_nobody_wrote_about_him_rather_than_faking_a_source(self):
+        got = self.ask(["streamer", "stud"], beat_id="streamer")
+        self.assertEqual(got["consensus"], 0)
+        self.assertEqual(got["sources"], [])
+        self.assertEqual(got["quote"], "")
+
+    def test_it_still_names_somebody_to_drop(self):
+        got = self.ask(["streamer", "stud"], beat_id="streamer")
+        self.assertEqual(got["drop_player_id"], "junk")
+        self.assertTrue(got["drop_options"])
+
+    def test_it_will_not_cut_someone_better_than_the_man_it_adds(self):
+        lean = {"stud": self.PLAYERS["stud"],
+                "mine1": {"full_name": "Better Than Him", "position": "WR",
+                          "search_rank": 5, "depth_chart_order": 1}}
+        mine = {"starters": [], "players": ["mine1"]}
+        self.assertIsNone(
+            rw.best_available(self.LEAGUE, mine, lean, [], ["stud"], {},
+                              self.DEPTH, {}, 3, 89))
+
+    def test_with_no_roster_left_to_cut_it_offers_nothing(self):
+        mine = {"starters": [], "players": []}
+        self.assertIsNone(
+            rw.best_available(self.LEAGUE, mine, self.PLAYERS, [], ["stud"],
+                              {}, self.DEPTH, {}, 3, 89))
+
+    def test_the_bid_stays_a_single_dollar(self):
+        """Nobody wrote him up, so there is no analyst FAAB to anchor to."""
+        got = self.ask(["streamer", "stud"], beat_id="streamer")
+        self.assertEqual(got["bid"], 1)
+        self.assertIsNone(got["bid_low"])
+
+    def test_a_league_with_no_budget_bids_nothing(self):
+        got = self.ask(["streamer", "stud"], beat_id="streamer", remaining=0)
+        self.assertIsNone(got["bid"])
+
+
 class BeingHurtIsNotBeingBad(unittest.TestCase):
     """A one-week injury is not a reason to cut somebody.
 

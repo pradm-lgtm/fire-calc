@@ -158,6 +158,81 @@ def defense_proposal(league, mine, players, rosters, weeks, remaining,
     )
 
 
+# How much better a player nobody wrote about has to be before he is
+# offered anyway. Above 1.0 on purpose: the analysts are the point of this
+# tool, and the signals available here - Sleeper's overall rank and how many
+# leagues added him today - are cruder than somebody who watched the game.
+# A free agent who merely ties the written-up pick is noise. One who is half
+# again better is a hole in the reading, not a hole in the waiver wire.
+UNWRITTEN_EDGE = 1.5
+
+
+def best_available(league, mine, players, rosters, available, trending,
+                   depth, cost, week, remaining, beat=0.0):
+    """The best free agent nobody wrote up, if he is clearly better.
+
+    The add pool was whatever the week's articles happened to name. That is
+    the right default - a person who watched the game knows things Sleeper's
+    rank does not - but it fails in one direction: when the articles cover a
+    position you are set at, or name only streamers, the best player actually
+    free in your league is never mentioned, and the card offers a deep
+    streaming option as though nothing better existed.
+
+    So this asks the other question. It is deliberately hard to trigger,
+    because a list of "who is everyone adding today" is what this tool was
+    built to be better than.
+    """
+    ranked = sorted(
+        ((wa.score_player(players[pid], trending.get(pid, 0)), pid)
+         for pid in available if pid in players),
+        reverse=True)
+    if not ranked:
+        return None
+    score, pid = ranked[0]
+    if score <= beat * UNWRITTEN_EDGE:
+        return None
+
+    candidates = ew.drop_candidates(mine, players, trending, depth,
+                                    cost=cost, week=week)
+    if not candidates:
+        return None
+    _rank, drop_score, drop_pid, drop_player, drop_label, _st = candidates[0]
+    if drop_score > score * 1.5:
+        return None
+
+    place = standings(candidates)
+    options = [{
+        "id": cid,
+        "name": sc.player_label(players, cid),
+        "position": p.get("position"),
+        "starter": starts,
+        "why": drop_reason(p, label, depth, starts,
+                           *place.get(cid, (None, None)),
+                           cost=cost.get(cid)),
+    } for _r, _s, cid, p, label, starts in candidates]
+
+    add = players.get(pid) or {}
+    return dict(
+        platform="sleeper",
+        league_id=league["league_id"],
+        league_name=league.get("name"),
+        league_note=league_note(league, rosters),
+        add_player_id=pid,
+        add_player_name=sc.player_label(players, pid),
+        add_position=add.get("position"),
+        drop_player_id=drop_pid,
+        drop_player_name=sc.player_label(players, drop_pid),
+        drop_position=drop_player.get("position"),
+        bid=(1 if remaining else None), max_bid=remaining,
+        bid_low=None, bid_high=None,
+        drop_options=options,
+        consensus=0, sources=[],
+        rationale=depth_sentence(drop_player, drop_label, depth,
+                                 sc.player_label(players, drop_pid)),
+        quote="", rank=98,
+    )
+
+
 def proposals_for_league(league, user_id, players, trending, texts, max_moves,
                          week=1, byes=None, weeks=None):
     """(proposals, why none) - the reasoning, returned as data not text.
@@ -197,12 +272,10 @@ def proposals_for_league(league, user_id, players, trending, texts, max_moves,
                                 remaining, week)
 
     consensus = ex.merge_sources(per_source)
-    if not consensus:
-        if streamed:
-            return [streamed], None
-        return [], ("no article recommended anyone who is actually available "
-                    "here")
-
+    # Not an early return any more. A week where no article named an
+    # available player is exactly the week best_available() exists for, and
+    # returning here meant the one path that does not need the articles was
+    # only ever reached when the articles had already worked.
     depth = ew.positional_depth(league, mine, players)
 
     # What each player cost in the draft, and whether anyone has written that
@@ -233,7 +306,8 @@ def proposals_for_league(league, user_id, players, trending, texts, max_moves,
         return (info["count"], thin,
                 wa.score_player(players.get(pid, {}), trending.get(pid, 0)))
 
-    ordered = sorted(consensus.items(), key=sort_key, reverse=True)
+    ordered = sorted(consensus.items(), key=sort_key, reverse=True) \
+        if consensus else []
 
     out, protect, budget_left, why = [], set(), remaining, None
     for pid, info in ordered:
@@ -326,6 +400,23 @@ def proposals_for_league(league, user_id, players, trending, texts, max_moves,
         out.append(streamed)
         why = None
 
+    # The best free agent nobody wrote about, measured against the best one
+    # they did. With nothing written up he only has to beat zero, which is
+    # the point: that is the week you are least well served by silence.
+    best_written = max(
+        (wa.score_player(players.get(pid, {}), trending.get(pid, 0))
+         for pid in consensus), default=0.0)
+    unwritten = best_available(league, mine, players, rosters, available,
+                               trending, depth, cost, week, remaining,
+                               beat=best_written)
+    if unwritten and unwritten["add_player_id"] not in consensus:
+        unwritten["rank"] = len(out) + 1
+        out.append(unwritten)
+        why = None
+
+    if not out and not consensus:
+        why = ("no article recommended anyone who is actually available "
+               "here, and nobody free is clearly better than your roster")
     return out, (why if not out else None)
 
 
@@ -484,6 +575,72 @@ def strip_label(name):
     return str(name or "").split("(")[0].strip() or str(name or "")
 
 
+def explain(username, name, db_path=None):
+    """Print every signal behind where one player sits, for one argument.
+
+    Written because "he is too good to drop" and "the model says he is your
+    weakest" are both checkable claims, and settling which is right meant
+    reading four files and guessing at the numbers in between. If the model
+    is wrong this shows why in one screen; if it is right this shows what it
+    knows that you did not.
+    """
+    state = sc.current_state()
+    season, week = state.get("season"), sc.current_week(state)
+    user = sc.resolve_user(username)
+    if not user:
+        print(f"No Sleeper user called {username}.")
+        return 1
+    players = sc.all_players()
+    wanted = name.strip().lower()
+    hits = [pid for pid, p in players.items()
+            if wanted in (p.get("full_name") or "").lower()]
+    if not hits:
+        print(f"Nobody called {name} in Sleeper's player list.")
+        return 1
+    trending = wa.trending_adds()
+
+    for pid in hits[:5]:
+        p = players[pid]
+        hurt = (p.get("injury_status") or "").strip()
+        print()
+        print(f"{p.get('full_name')}  ({p.get('team') or 'FA'} "
+              f"{p.get('position') or '?'})")
+        print(f"  Sleeper overall rank   {p.get('search_rank')}")
+        print(f"  depth chart            {p.get('depth_chart_order')}")
+        print(f"  added in 24h           {trending.get(pid, 0):,}")
+        print(f"  injury status          {hurt or '(none)'}")
+        if hurt:
+            season = wa.keep_multiplier(p) < 1.0
+            print(f"    counts against keeping him: "
+                  f"{'yes, it outlasts this week' if season else 'no'}")
+        print(f"  worth adding this week {wa.score_player(p, trending.get(pid, 0)):.1f}")
+        print(f"  worth keeping          {wa.keep_value(p, trending.get(pid, 0)):.1f}")
+
+        for league in sc.user_leagues(user["user_id"], season):
+            rosters = sc.league_rosters(league["league_id"])
+            mine = sc.my_roster(rosters, user["user_id"])
+            if not mine or pid not in [str(x) for x in (mine.get("players") or [])]:
+                continue
+            depth = ew.positional_depth(league, mine, players)
+            try:
+                cost = sc.draft_cost(league["league_id"])
+            except Exception:
+                cost = {}
+            ranked = ew.drop_candidates(mine, players, trending, depth,
+                                        cost=cost, week=week)
+            order = [row[2] for row in ranked]
+            if pid not in order:
+                print(f"  in {league.get('name')}: protected, never offered")
+                continue
+            spot = order.index(pid) + 1
+            print(f"  in {league.get('name')}: offered {ordinal(spot)} of "
+                  f"{len(order)} to cut (1st = first to go)")
+            if spot <= 3:
+                row = ranked[order.index(pid)]
+                print(f"    because: {drop_reason(p, row[4], depth, row[5], *standings(ranked).get(pid, (None, None)), cost=cost.get(pid))}")
+    return 0
+
+
 def main_for(username, db_path, moves=3, force=False):
     """Run the job programmatically, for the host's own scheduler."""
     return _run(username, [], moves, False, db_path, force)
@@ -498,6 +655,8 @@ def main():
     ap.add_argument("--moves", type=int, default=3)
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--db", default=str(st.DB_PATH))
+    ap.add_argument("--why", metavar="PLAYER",
+                    help="show every signal behind where one player ranks")
     ap.add_argument("--status", action="store_true",
                     help="say what is on the approval page now, and stop")
     ap.add_argument("--force", action="store_true",
@@ -509,6 +668,13 @@ def main():
 
     if args.status:
         return say_status()
+
+    if args.why:
+        if not args.username:
+            print("Give a Sleeper username: "
+                  "python3 run_weekly.py YOUR_USERNAME --why 'Player Name'")
+            return 1
+        return explain(args.username, args.why, args.db)
 
     username = args.username
     if not username:

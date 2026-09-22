@@ -795,6 +795,21 @@ def evidence(r):
             seen.add(name)
             names.append(name)
     src_txt = ", ".join(names)
+    # Nobody wrote about him, and "Named by 0 analysts" is a worse way of
+    # saying that than saying it. Two ways to get here: a defense, picked on
+    # who it plays, and the best free agent in the league when the articles
+    # named nobody better. Neither is a write-up, and both are worth being
+    # straight about, because the absence of a quote is the main thing you
+    # would want to know when weighing the claim.
+    if not (r["consensus"] or 0):
+        if (r["add_position"] or "").upper() == "DEF":
+            how = ("Picked on this week's matchup and next week's, not on "
+                   "anybody's write-up.")
+        else:
+            how = ("No analyst named him. He is here because he is the best "
+                   "player actually free in this league, on Sleeper's "
+                   "overall rank and how many leagues are adding him.")
+        return f"<p class='why'>{e(how)}</p>"
     named = e(f"Named by {r['consensus']} analyst"
               f"{'s' if (r['consensus'] or 0) != 1 else ''}")
     if src_txt:
