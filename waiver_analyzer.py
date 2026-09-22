@@ -215,10 +215,23 @@ def score_player(player, trend_count, projected=None):
             * availability_multiplier(player))
 
 
-def keep_value(player, trend_count, projected=None):
-    """What he is worth to you FROM HERE: use it to decide who to drop."""
-    return (base_value(player, trend_count, projected)
-            * keep_multiplier(player))
+def keep_value(player, trend_count=0, projected=None):
+    """What he is worth to you FROM HERE: use it to decide who to drop.
+
+    Momentum is discarded, which is why trend_count is accepted and then
+    ignored rather than dropped from the signature: how many leagues added
+    a man in the last 24 hours is an argument for acquiring him and says
+    nothing about whether to keep one you already own. It is also the most
+    hype-driven number here - a log of pickup counts, which run to tens of
+    thousands for whoever had a good Sunday.
+
+    It was worth up to ~90 points inside keep_value, enough on its own to
+    outrank a real starter's whole valuation, so a player who happened to
+    be this week's hot add was protected from the drop while a steadier and
+    better player was offered instead. Whatever is genuinely behind the
+    momentum shows up in the projection, which this does read.
+    """
+    return base_value(player, 0, projected) * keep_multiplier(player)
 
 
 def describe_reason(player, trend_count):

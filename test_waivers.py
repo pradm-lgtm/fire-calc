@@ -717,6 +717,47 @@ class ProjectionsBeatPopularity(unittest.TestCase):
         self.assertEqual(flipped[0], "good")
 
 
+class MomentumIsAnArgumentForAddingOnly(unittest.TestCase):
+    """How many leagues added him today does not bear on keeping him.
+
+    trend_score is a log of pickup counts, which run to tens of thousands
+    for whoever had a good Sunday - worth up to about 90 points, enough on
+    its own to outrank a real starter's entire valuation. Inside keep_value
+    it meant this week's hot add was protected from the drop while a
+    steadier and better player was offered in his place.
+    """
+
+    HOT = {"full_name": "This Week's Add", "position": "WR",
+           "search_rank": 250, "depth_chart_order": 1}
+    SOLID = {"full_name": "Steady Starter", "position": "WR",
+             "search_rank": 87, "depth_chart_order": 2}
+
+    def test_pickups_do_not_change_what_he_is_worth_keeping(self):
+        self.assertEqual(wa.keep_value(self.HOT, 0, 8.0),
+                         wa.keep_value(self.HOT, 40000, 8.0))
+
+    def test_they_still_count_towards_adding_him(self):
+        self.assertGreater(wa.score_player(self.HOT, 40000, 8.0),
+                           wa.score_player(self.HOT, 0, 8.0))
+
+    def test_the_hot_add_no_longer_outranks_the_steadier_player(self):
+        self.assertLess(wa.keep_value(self.HOT, 4000, 8.0),
+                        wa.keep_value(self.SOLID, 0, 8.4))
+
+    def test_and_it_did_before(self):
+        """The regression, stated plainly so it cannot creep back."""
+        self.assertGreater(wa.base_value(self.HOT, 4000, 8.0),
+                           wa.base_value(self.SOLID, 0, 8.4))
+
+    def test_the_cut_order_follows(self):
+        players = {"hot": self.HOT, "solid": self.SOLID}
+        roster = {"starters": [], "players": ["hot", "solid"]}
+        order = [r[2] for r in ew.drop_candidates(
+            roster, players, {"hot": 4000}, {"WR": (2, 1.0, "deep")},
+            projected={"hot": 8.0, "solid": 8.4})]
+        self.assertEqual(order[0], "hot")
+
+
 class KeepingLooksFurtherAheadThanAdding(unittest.TestCase):
     """A drop is not a decision about one matchup.
 

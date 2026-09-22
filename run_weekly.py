@@ -704,6 +704,8 @@ def explain(username, name, db_path=None):
             # that actually ordered the list off the screen.
             place = standings(ranked)
             print("      keep  depth  draft  lineup  =  total")
+            print("      (keep = projected points over two weeks, and his "
+                  "rank; not pickups)")
             for row in ranked[max(0, spot - 4):spot + 2]:
                 total, keep, cid, who, _label, starts = row
                 label = depth.get(who.get("position"), (0, 0, "ok"))[2]
