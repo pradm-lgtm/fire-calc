@@ -63,18 +63,48 @@ class SleeperError(RuntimeError):
     pass
 
 
+# A name that will not resolve for a second, a wifi drop, a 503 - none of
+# them mean anything about the request, and one of them used to end the
+# whole weekly run. That run is unattended, fires once a week from launchd,
+# and produces the week's proposals; losing it to a blip means no proposals
+# until somebody notices, which is the wrong way round for a transient fault.
+TRIES = 4
+RETRY_CODES = (429, 500, 502, 503, 504)
+
+
+def _wait(attempt):
+    time.sleep(2 ** attempt)
+
+
 def get(path):
-    """GET an API path, returning parsed JSON (None for Sleeper's null 404s)."""
+    """GET an API path, returning parsed JSON (None for Sleeper's null 404s).
+
+    Retries what is worth retrying and nothing else: a 404 is an answer and
+    a 400 will be a 400 next time too.
+    """
     url = f"{API_BASE}{path}"
     req = urllib.request.Request(url, headers={"Accept": "application/json"})
-    try:
-        with urllib.request.urlopen(req, timeout=30) as resp:
-            body = resp.read().decode("utf-8", "replace")
-    except urllib.error.HTTPError as e:
-        detail = e.read().decode("utf-8", "replace")[:400]
-        raise SleeperError(f"HTTP {e.code} for {url}\n{detail}") from None
-    except urllib.error.URLError as e:
-        raise SleeperError(f"Could not reach {url}: {e.reason}") from None
+    for attempt in range(TRIES):
+        last = attempt == TRIES - 1
+        try:
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                body = resp.read().decode("utf-8", "replace")
+            break
+        except urllib.error.HTTPError as e:
+            if e.code in RETRY_CODES and not last:
+                _wait(attempt)
+                continue
+            detail = e.read().decode("utf-8", "replace")[:400]
+            raise SleeperError(f"HTTP {e.code} for {url}\n{detail}") from None
+        except urllib.error.URLError as e:
+            if not last:
+                _wait(attempt)
+                continue
+            raise SleeperError(
+                f"Could not reach {url} after {TRIES} tries: {e.reason}\n"
+                "  That is this machine's network or DNS, not the API - "
+                "check the\n"
+                "  connection and run it again.") from None
     if not body.strip():
         return None
     try:
