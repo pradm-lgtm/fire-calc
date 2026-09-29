@@ -528,6 +528,12 @@ def ready(verbose=False):
 TOLD = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                     ".yahoo-ready")
 
+# Said once when the app is set up but nobody has consented to it yet. A
+# separate marker from TOLD because they are separate facts: one is "access
+# landed", this is "there is a step waiting on you".
+ASKED = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                     ".yahoo-asked")
+
 
 def announce(message):
     """Put a message in front of the person, if this machine can."""
@@ -542,6 +548,14 @@ def announce(message):
         pass  # no osascript, or no desktop: the printed line is the fallback
 
 
+def waiting_to_be_authorised():
+    """An app is set up here, but no one has consented to it yet."""
+    localenv.load()
+    return bool(os.environ.get("YAHOO_CLIENT_ID")
+                and os.environ.get("YAHOO_CLIENT_SECRET")
+                and not os.environ.get("YAHOO_REFRESH_TOKEN"))
+
+
 def watch_for_access():
     """Say once, on the day, when Yahoo attaches the Fantasy grant.
 
@@ -554,7 +568,28 @@ def watch_for_access():
     if os.path.exists(TOLD):
         return 0
     if not configured():
+        # Credentials but no refresh token is not "no Yahoo here" - it is a
+        # new app nobody has consented to, and the watcher used to treat the
+        # two the same and go quiet. That is exactly backwards: the state
+        # where something is waiting on you is the state it should speak in.
+        # It ran for five days like this after the app was replaced.
+        if waiting_to_be_authorised() and not os.path.exists(ASKED):
+            announce("Yahoo: the new app is not authorised yet, so nothing "
+                     "is being checked. Run: python3 yahoo_auth_check.py "
+                     "--auth-url")
+            try:
+                with open(ASKED, "w") as fh:
+                    fh.write(time.strftime("%Y-%m-%d %H:%M:%S") + "\n")
+            except OSError:
+                pass
         return 1
+    # Consent has happened, so a stale "go and authorise" note should not
+    # outlive it and tell you to do it again next time the app changes.
+    if os.path.exists(ASKED):
+        try:
+            os.remove(ASKED)
+        except OSError:
+            pass
     for path in PROBES:
         try:
             get(path)

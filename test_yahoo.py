@@ -482,12 +482,18 @@ class TellingYouOnce(unittest.TestCase):
         self.real_configured = yc.configured
         self.real_announce = yc.announce
         yc.TOLD = os.path.join(self.dir, ".yahoo-ready")
+        self.real_asked = yc.ASKED
+        self.real_waiting = yc.waiting_to_be_authorised
+        yc.ASKED = os.path.join(self.dir, ".yahoo-asked")
+        yc.waiting_to_be_authorised = lambda: False
         yc.configured = lambda: True
         self.said = []
         yc.announce = self.said.append
 
     def tearDown(self):
         yc.TOLD = self.real_told
+        yc.ASKED = self.real_asked
+        yc.waiting_to_be_authorised = self.real_waiting
         yc.get = self.real_get
         yc.configured = self.real_configured
         yc.announce = self.real_announce
@@ -530,9 +536,52 @@ class TellingYouOnce(unittest.TestCase):
 
     def test_a_machine_with_no_credentials_stays_quiet(self):
         yc.configured = lambda: False
+        yc.waiting_to_be_authorised = lambda: False
         self.granted()
         self.assertEqual(yc.watch_for_access(), 1)
         self.assertEqual(self.said, [])
+
+    def test_an_app_nobody_has_consented_to_says_so(self):
+        """The state where something is waiting on YOU is not a quiet one.
+
+        Replacing the app cleared the refresh token, so configured() went
+        false and the daily check returned without asking Yahoo anything -
+        for five days, saying nothing, looking exactly like a machine with
+        no Yahoo set up on it at all.
+        """
+        yc.configured = lambda: False
+        yc.waiting_to_be_authorised = lambda: True
+        self.assertEqual(yc.watch_for_access(), 1)
+        self.assertEqual(len(self.said), 1)
+        self.assertIn("--auth-url", self.said[0])
+
+    def test_but_it_only_says_it_once(self):
+        yc.configured = lambda: False
+        yc.waiting_to_be_authorised = lambda: True
+        for _ in range(4):
+            yc.watch_for_access()
+        self.assertEqual(len(self.said), 1)
+
+    def test_consenting_clears_the_note(self):
+        """So the next app change can raise it again."""
+        yc.configured = lambda: False
+        yc.waiting_to_be_authorised = lambda: True
+        yc.watch_for_access()
+        self.assertTrue(os.path.exists(yc.ASKED))
+        yc.configured = lambda: True
+        self.granted()
+        yc.watch_for_access()
+        self.assertFalse(os.path.exists(yc.ASKED))
+
+    def test_the_new_marker_is_not_something_to_commit(self):
+        here = os.path.dirname(os.path.abspath(yc.__file__))
+        for name in ("gitignore.fantasy", ".gitignore"):
+            path = os.path.join(here, name)
+            if os.path.exists(path):
+                with open(path) as fh:
+                    self.assertIn(".yahoo-asked", fh.read())
+                return
+        self.fail("no gitignore found")
 
     def test_the_marker_is_not_something_to_commit(self):
         """Under either name the file goes by.
