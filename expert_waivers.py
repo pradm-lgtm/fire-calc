@@ -117,6 +117,24 @@ def starting_requirements(league):
     return required, flex
 
 
+def uses_position(league, pos):
+    """Does this league start anybody at that position?
+
+    LEHG has no defense slot and was proposed the Steelers defense,
+    because the check for that lived only in the defense streamer. A
+    defense named in an article went through the ordinary add path, where
+    nothing asked. Neither does positional_depth help: a position the
+    league does not use and nobody rosters never appears in it at all, so
+    it defaults to "ok" - the label meaning nothing is wrong.
+    """
+    if not pos:
+        return True
+    required, flex = starting_requirements(league)
+    if pos in required:
+        return True
+    return bool(flex) and pos in FLEX_ELIGIBLE
+
+
 def roster_by_position(roster, players):
     counts = {}
     for pid in (roster.get("players") or []):

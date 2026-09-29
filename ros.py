@@ -42,8 +42,11 @@ FLOOR = 300
 def fetch(players, verbose=False):
     """{player_id: rest-of-season rank}. Empty if the page will not read."""
     try:
-        per_source = lineup.gather_rankings(
-            [entry["url"] for entry in SOURCES], players, verbose=verbose)
+        # The whole entries, not their addresses: the flags are what say
+        # to read this as one overall list rather than a pile of
+        # per-position ones.
+        per_source = lineup.gather_rankings(SOURCES, players,
+                                            verbose=verbose)
     except Exception:
         return {}
     merged = rk.merge(per_source).get(rk.OVERALL) or {}

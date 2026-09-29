@@ -70,11 +70,19 @@ SIT_STATUSES = {"out", "ir", "doubtful", "suspended", "pup"}
 
 
 def gather_rankings(urls, players, verbose=True):
-    """{source: {position: {player_id: rank}}} from ranking pages."""
+    """{source: {position: {player_id: rank}}} from ranking pages.
+
+    `urls` may be plain addresses or whole source entries. It used to wrap
+    every address in a bare {name, url}, which silently dropped the flags
+    that decide how a page is read - so a caller asking for an overall
+    list got one filed by position instead, and the overall bucket it then
+    looked in was empty. The page had parsed perfectly; 370 rows went into
+    a drawer nobody opened.
+    """
     gazetteer = ex.build_gazetteer(
         players, [pid for pid, p in players.items() if wa.is_rosterable(p)])
-    sources = ([{"name": u, "url": u} for u in urls] if urls
-               else rk.load_sources())
+    sources = ([u if isinstance(u, dict) else {"name": u, "url": u}
+                for u in urls] if urls else rk.load_sources())
     per_source = {}
     for entry in sources:
         want = entry.get("positions")

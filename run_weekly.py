@@ -304,7 +304,8 @@ def best_available(league, mine, players, rosters, available, trending,
                           projected.get(pid)), pid)
          for pid in available
          if pid in players
-         and (players[pid].get("position") or "").upper() != defense.DEF),
+         and (players[pid].get("position") or "").upper() != defense.DEF
+         and ew.uses_position(league, players[pid].get("position"))),
         reverse=True)
     if not ranked:
         return None
@@ -455,6 +456,10 @@ def proposals_for_league(league, user_id, players, trending, texts, max_moves,
         if len(out) >= max_moves:
             break
         add_pos = (players.get(pid) or {}).get("position") or ""
+        if not ew.uses_position(league, add_pos):
+            why = why or (f"the names left are {add_pos}s and this league "
+                          f"has no {add_pos} slot")
+            continue
         thin_here = depth.get(add_pos, (0, 0, "ok"))[2] == "thin"
         if add_pos in spoken_for and not thin_here:
             why = why or (f"the best remaining names are all {add_pos}s and "

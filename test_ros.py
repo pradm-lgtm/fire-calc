@@ -121,6 +121,54 @@ class FetchingIsNotFatal(unittest.TestCase):
         finally:
             lineup.gather_rankings = real
 
+    def test_the_flags_reach_the_parser(self):
+        """The bug that made a perfect parse useless.
+
+        gather_rankings wrapped every address in a bare {name, url}, which
+        dropped overall and overall_only - so a page read as 370 rows was
+        filed by position, the overall bucket stayed empty, and the run
+        reported "rest-of-season ranks: 0 players" having read all of them.
+        """
+        import lineup
+        seen = {}
+        real = lineup.rk.ranks_from_rows
+
+        def spy(rows, pl, gaz, positions=None, overall=False,
+                overall_only=False):
+            seen["overall"] = overall
+            seen["overall_only"] = overall_only
+            return real(rows, pl, gaz, positions, overall, overall_only)
+
+        real_rows = lineup.rk.ranked_rows_from_html
+        real_fetch = lineup.ew.fetch_raw
+        players = {str(i): {"full_name": f"Player {i}", "position": "WR",
+                            "team": "X", "fantasy_positions": ["WR"]}
+                   for i in range(1, 13)}
+        lineup.rk.ranks_from_rows = spy
+        lineup.rk.ranked_rows_from_html = lambda h: [
+            (p["full_name"], i) for i, p in enumerate(players.values(), 1)]
+        lineup.ew.fetch_raw = lambda url, quiet=True: "<table></table>"
+        try:
+            lineup.gather_rankings(ros.SOURCES, players, verbose=False)
+        finally:
+            lineup.rk.ranks_from_rows = real
+            lineup.rk.ranked_rows_from_html = real_rows
+            lineup.ew.fetch_raw = real_fetch
+        self.assertTrue(seen.get("overall"))
+        self.assertTrue(seen.get("overall_only"))
+
+    def test_a_plain_address_still_works(self):
+        """Every other caller passes strings and must keep working."""
+        import lineup
+        real_fetch = lineup.ew.fetch_raw
+        lineup.ew.fetch_raw = lambda url, quiet=True: ""
+        try:
+            got = lineup.gather_rankings(["https://example.test/x"], {},
+                                         verbose=False)
+        finally:
+            lineup.ew.fetch_raw = real_fetch
+        self.assertIsInstance(got, dict)
+
     def test_it_asks_for_the_rest_of_season_list(self):
         url = ros.SOURCES[0]["url"]
         self.assertIn("ros-", url)

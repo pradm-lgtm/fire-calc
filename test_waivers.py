@@ -659,6 +659,57 @@ class BenchIsNotAVerdict(unittest.TestCase):
         self.assertNotIn("paid", why)
 
 
+class APositionTheLeagueDoesNotUse(unittest.TestCase):
+    """LEHG has no defense slot and was proposed the Steelers defense.
+
+    The check for that lived only inside the defense streamer, so a
+    defense named in an article went through the ordinary add path where
+    nothing asked. positional_depth is no help either: a position the
+    league does not use and nobody rosters never appears in it, so it
+    falls back to "ok" - the label that means nothing is wrong.
+    """
+
+    LEHG = {"roster_positions": ["QB", "RB", "RB", "WR", "WR", "TE",
+                                 "FLEX", "BN", "BN"]}
+    OTG = {"roster_positions": ["QB", "RB", "WR", "TE", "DEF", "K", "BN"]}
+
+    def test_a_league_with_no_defense_slot_does_not_use_defenses(self):
+        self.assertFalse(ew.uses_position(self.LEHG, "DEF"))
+
+    def test_nor_kickers(self):
+        self.assertFalse(ew.uses_position(self.LEHG, "K"))
+
+    def test_a_league_that_starts_one_does(self):
+        self.assertTrue(ew.uses_position(self.OTG, "DEF"))
+        self.assertTrue(ew.uses_position(self.OTG, "K"))
+
+    def test_the_ordinary_positions_are_always_fine(self):
+        for pos in ("QB", "RB", "WR", "TE"):
+            with self.subTest(pos=pos):
+                self.assertTrue(ew.uses_position(self.LEHG, pos))
+
+    def test_a_flex_slot_covers_its_eligible_positions(self):
+        flexed = {"roster_positions": ["QB", "FLEX", "BN"]}
+        self.assertTrue(ew.uses_position(flexed, "RB"))
+        self.assertTrue(ew.uses_position(flexed, "WR"))
+        self.assertFalse(ew.uses_position(flexed, "DEF"))
+
+    def test_an_unknown_position_is_not_refused(self):
+        """Better to propose something odd than to drop a real player for
+        a position name we do not recognise."""
+        self.assertTrue(ew.uses_position(self.LEHG, ""))
+        self.assertTrue(ew.uses_position(self.LEHG, None))
+
+    def test_the_add_loop_asks(self):
+        source = open("run_weekly.py").read()
+        self.assertIn("uses_position(league, add_pos)", source)
+
+    def test_and_so_does_the_unwritten_pick(self):
+        source = open("run_weekly.py").read()
+        spot = source.index("def best_available(")
+        self.assertIn("uses_position", source[spot:spot + 2500])
+
+
 class ComparingLikeWithLike(unittest.TestCase):
     """The positional gate was weighing two different scales.
 
