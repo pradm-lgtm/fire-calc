@@ -7,9 +7,24 @@ What cannot is deliberately thin, and is a probe that clicks nothing until
 its output has been read by a person.
 """
 
+import contextlib
+import io
 import unittest
 
 import yahoo_submitter as ys
+
+
+@contextlib.contextmanager
+def quietly():
+    """Swallow a probe's printing.
+
+    These tests drive functions whose job is to print, so without this
+    their output lands in the middle of the run and buries the summary -
+    which is how a migrate came to show three stray lines where
+    "Ran 31 tests ... OK" should have been.
+    """
+    with contextlib.redirect_stdout(io.StringIO()):
+        yield
 
 
 class KeysIntoAddresses(unittest.TestCase):
@@ -259,7 +274,8 @@ class ItWillNotLaunchABrowserOfItsOwn(unittest.TestCase):
         ys.submitter.browser_context = explode
         ys.submitter.attach = explode
         try:
-            self.assertEqual(ys.do_probe(None, "470.l.715420", "stroud"),
+            with quietly():
+                self.assertEqual(ys.do_probe(None, "470.l.715420", "stroud"),
                              ys.submitter.NEEDS_LOGIN)
         finally:
             self.tearDownWire()
@@ -275,7 +291,7 @@ class ItWillNotLaunchABrowserOfItsOwn(unittest.TestCase):
         ys.submitter.attach = lambda pw: (_ for _ in ()).throw(
             RuntimeError("attach reached, which is correct"))
         try:
-            with self.assertRaises(RuntimeError):
+            with quietly(), self.assertRaises(RuntimeError):
                 ys.do_probe(None, "470.l.715420", "stroud")
         finally:
             self.tearDownWire()
@@ -288,7 +304,8 @@ class ItWillNotLaunchABrowserOfItsOwn(unittest.TestCase):
             raise AssertionError("opened a browser for a player not free")
         ys.submitter.attach = explode
         try:
-            self.assertEqual(ys.do_probe(None, "470.l.715420", "stroud"), 1)
+            with quietly():
+                self.assertEqual(ys.do_probe(None, "470.l.715420", "stroud"), 1)
         finally:
             self.tearDownWire()
 
@@ -302,7 +319,8 @@ class TheProbeRefusesBeforeItOpensAnything(unittest.TestCase):
         real = ys.submitter.browser_context
         ys.submitter.browser_context = explode
         try:
-            self.assertEqual(ys.do_probe(None, "not-a-key", "x"), 1)
+            with quietly():
+                self.assertEqual(ys.do_probe(None, "not-a-key", "x"), 1)
         finally:
             ys.submitter.browser_context = real
 

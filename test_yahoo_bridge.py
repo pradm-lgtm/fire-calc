@@ -202,5 +202,71 @@ class SayingHowWellItDid(unittest.TestCase):
         self.assertIn("nobody to match", self.said({}, []))
 
 
+class TheCheckItself(unittest.TestCase):
+    """Driven with stubs, because the calls it makes are the thing that broke.
+
+    my_teams() takes no arguments and answers for every league at once;
+    it was being called with a league key. Nothing caught that - the
+    entrypoint import check cannot see a bad call inside a function, and
+    every other test here exercised the matching rather than the command.
+    """
+
+    def setUp(self):
+        import sleeper_client as sc
+        import yahoo_client as yc
+        self.yc, self.sc = yc, sc
+        self.real = (yc.my_leagues, yc.my_teams, yc.roster, yc.free_agents,
+                     sc.all_players)
+        yc.my_leagues = lambda: [
+            {"key": "470.l.715420", "name": "The Minor League", "week": 3}]
+        yc.my_teams = lambda: [
+            {"key": "470.l.715420.t.2", "name": "Slim Pickens",
+             "league": "470.l.715420"},
+            {"key": "470.l.1533743.t.1", "name": "Team Ruhi",
+             "league": "470.l.1533743"}]
+        yc.roster = lambda key, week=None: [
+            {"name": "C.J. Stroud", "position": "QB", "team": "Hou",
+             "key": "470.p.40030"}]
+        yc.free_agents = lambda key, count=50: [
+            {"name": "Nobody At All", "position": "RB", "team": "GB",
+             "key": "470.p.9"}]
+        sc.all_players = lambda refresh=False: PLAYERS
+
+    def tearDown(self):
+        (self.yc.my_leagues, self.yc.my_teams, self.yc.roster,
+         self.yc.free_agents, self.sc.all_players) = self.real
+
+    def said(self, league_key):
+        import contextlib
+        import io
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            code = yb.check(league_key)
+        return code, out.getvalue()
+
+    def test_it_runs_end_to_end(self):
+        code, said = self.said("470.l.715420")
+        self.assertEqual(code, 0)
+        self.assertIn("The Minor League", said)
+
+    def test_it_picks_your_team_in_that_league_not_the_other_one(self):
+        _code, said = self.said("470.l.715420")
+        self.assertIn("your roster", said)
+
+    def test_it_reports_both_the_roster_and_the_wire(self):
+        _code, said = self.said("470.l.715420")
+        self.assertIn("your roster: 1 of 1", said)
+        self.assertIn("the wire: 0 of 1", said)
+
+    def test_a_league_that_is_not_yours_is_refused(self):
+        code, said = self.said("470.l.999999")
+        self.assertEqual(code, 1)
+        self.assertIn("not one of your leagues", said)
+
+    def test_the_attribution_yahoo_asked_for_is_printed(self):
+        _code, said = self.said("470.l.715420")
+        self.assertIn("Yahoo", said)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

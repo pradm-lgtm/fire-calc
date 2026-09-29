@@ -190,7 +190,11 @@ def check(league_key):
         return 1
     print(f"{league['name']}  ({league_key})")
 
-    mine = next((t for t in yc.my_teams(league_key)), None)
+    # my_teams() answers for every league at once and tags each with the
+    # league it belongs to, so the filtering happens here rather than in
+    # the request.
+    mine = next((t for t in yc.my_teams()
+                 if t.get("league") == league_key), None)
     if mine:
         squad = yc.roster(mine["key"], league.get("week"))
         report(*bridge(squad, players), what="your roster")
