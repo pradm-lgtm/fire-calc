@@ -934,7 +934,12 @@ def _run(username, urls, moves, dry_run, db_path, force=False,
                 note=json.dumps(quiet) if quiet else "")
             if result.get("skipped"):
                 print(f"\nHost says: {result['skipped']}")
-                return 0
+                # A refusal is not a success. Exiting 0 here meant --force
+                # could no-op and still look like it had worked.
+                print("Nothing on the site changed. --force overrides the")
+                print("once-a-week guard; if it said this anyway, the host")
+                print("refused for some other reason.")
+                return 1
             print(f"\nSent {result.get('written', 0)} new proposal(s) to "
                   f"{cloud_client.base_url()}, "
                   f"{result.get('mode', 'filed as')} run {result.get('run')}.")
@@ -946,8 +951,20 @@ def _run(username, urls, moves, dry_run, db_path, force=False,
         written = sum(1 for p in all_proposals
                       if st.add_proposal(conn, run_id, **p) is not None)
         conn.close()
-        print(f"\nFiled {written} proposal(s) for approval as run {run_id}.")
-        print("Review them at:  python3 webapp.py")
+        print(f"\nFiled {written} proposal(s) as run {run_id} in {db_path}.")
+        print()
+        # This used to say "filed for approval" and stop, which reads like
+        # the job is done. It is not: the hosted page reads a different
+        # database entirely, so a run that lands here leaves the site
+        # showing last week's proposals no matter how often it is forced.
+        print("*** This did NOT reach the website. ***")
+        print("FANTASY_API_URL is not set, so the proposals went into the")
+        print("local database only. The site reads the hosted one, and will")
+        print("keep showing whatever was last pushed to it.")
+        print()
+        print("To see these locally:      python3 webapp.py")
+        print("To send them to the site:  put FANTASY_API_URL in .env and")
+        print("                           run this again")
         return 0
     except sc.SleeperError as e:
         print(f"ERROR: {e}")
