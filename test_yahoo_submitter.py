@@ -97,6 +97,67 @@ class TheReport(unittest.TestCase):
         self.assertNotIn("may not need one", said)
 
 
+class TheProbeNeverPlacesAClaim(unittest.TestCase):
+    """Opening the form is reversible. Placing a claim is not.
+
+    A tool whose whole job is to find out what the page does has no
+    business changing anything while it does so, and "it only clicked Add"
+    is the sort of thing that is true right up until the markup moves.
+    """
+
+    def test_no_committing_word_is_ever_clicked(self):
+        source = open("yahoo_submitter.py").read()
+        for line in source.splitlines():
+            if ".click(" not in line or line.strip().startswith("#"):
+                continue
+            for word in ys.COMMITTING:
+                self.assertNotIn(word, line.lower(), line)
+
+    def test_the_only_click_is_the_add_control(self):
+        source = open("yahoo_submitter.py").read()
+        clicks = [l.strip() for l in source.splitlines()
+                  if ".click(" in l and not l.strip().startswith("#")]
+        self.assertEqual(len(clicks), 1, clicks)
+        self.assertTrue(clicks[0].startswith("control.click("), clicks[0])
+
+    def test_it_says_so_before_it_clicks(self):
+        """So a person reading the output knows what was done on their
+        account, which is the whole basis for trusting the next step."""
+        source = open("yahoo_submitter.py").read()
+        self.assertIn("it does not", source)
+        self.assertIn("No claim was placed", source)
+
+
+class ReadingTheClaimForm(unittest.TestCase):
+    """The question the Sleeper version answered only after two rewrites."""
+
+    def test_a_drop_control_means_yahoo_wants_it_here(self):
+        said = ys.describe_claim({"drop_controls": 2, "shape": "a new page"})
+        self.assertIn("wants the drop chosen here", said)
+
+    def test_none_means_a_claim_can_stand_alone(self):
+        said = ys.describe_claim({"drop_controls": 0})
+        self.assertIn("on its own", said)
+
+    def test_a_bid_field_is_flagged_as_surprising(self):
+        """These leagues are waiver priority. A FAAB box would mean the
+        settings were read wrong, which is worth being told loudly."""
+        said = ys.describe_claim({"drop_controls": 0, "bid_inputs": 1})
+        self.assertIn("unexpected", said)
+
+    def test_no_bid_field_is_not_flagged(self):
+        said = ys.describe_claim({"drop_controls": 0, "bid_inputs": 0})
+        self.assertNotIn("unexpected", said)
+
+    def test_the_buttons_are_named_so_the_next_step_can_find_them(self):
+        said = ys.describe_claim({"buttons": ["Submit", "Cancel"]})
+        self.assertIn("Submit", said)
+        self.assertIn("Cancel", said)
+
+    def test_no_buttons_says_so_rather_than_printing_an_empty_list(self):
+        self.assertIn("none found", ys.describe_claim({"buttons": []}))
+
+
 class ItWillNotLaunchABrowserOfItsOwn(unittest.TestCase):
     """The throwaway profile is signed into nothing, which is the point.
 

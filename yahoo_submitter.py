@@ -121,7 +121,104 @@ def look(page):
     }
 
 
-def do_probe(pw, league_key):
+# Words that commit a claim. The probe must never click one: opening the
+# form is reversible and placing a claim is not, and a tool whose job is to
+# find out what the page does has no business changing anything while it
+# does so. Kept as data so a test can check nothing here clicks them.
+COMMITTING = ("submit", "place claim", "confirm", "add player")
+
+
+def add_control(page, name=None):
+    """The Add link for one player, or the first one on the page.
+
+    Scoped to the row carrying the name, because the page holds fifty-odd
+    of these and the one next to the player you asked about is the only one
+    worth clicking.
+    """
+    links = "a[href*='addplayer'], button:has-text('Add')"
+    if not name:
+        return page.locator(links).first
+    row = page.locator("tr", has_text=name).first
+    found = row.locator(links).first
+    return found if found.count() else None
+
+
+def describe_claim(found):
+    """What the form after Add turns out to want."""
+    lines = [f"  opened as           {found.get('shape') or 'unknown'}"]
+    if found.get("url"):
+        lines.append(f"  address             {found['url'][:90]}")
+    drop = found.get("drop_controls") or 0
+    lines.append(f"  drop controls       {drop}")
+    lines.append("      Yahoo wants the drop chosen here, like Sleeper"
+                 if drop else
+                 "      no drop control, so a claim can be filed on its own")
+    bids = found.get("bid_inputs") or 0
+    lines.append(f"  bid or FAAB fields  {bids}")
+    if bids:
+        lines.append("      unexpected in a waiver-priority league - worth"
+                     " a look")
+    buttons = found.get("buttons") or []
+    lines.append(f"  buttons             {', '.join(buttons) or 'none found'}")
+    return "\n".join(lines)
+
+
+def look_at_claim(page):
+    """Read the claim form. Clicks nothing."""
+    def count(selector):
+        try:
+            return page.locator(selector).count()
+        except Exception:
+            return 0
+
+    labels = []
+    try:
+        for i in range(min(count("button, input[type=submit]"), 12)):
+            text = (page.locator("button, input[type=submit]").nth(i)
+                    .inner_text(timeout=1000) or "").strip()
+            if text and text not in labels:
+                labels.append(text[:30])
+    except Exception:
+        pass
+    dialog = count("[role='dialog'], .Modal, #modal")
+    return {
+        "shape": "a dialog on the same page" if dialog else "a new page",
+        "url": page.url,
+        "drop_controls": count(
+            "select[name*='drop'], input[name*='drop'], "
+            "tr:has-text('Drop') input[type=radio]"),
+        "bid_inputs": count(
+            "input[name*='faab'], input[name*='bid'], input[type='number']"),
+        "buttons": labels,
+    }
+
+
+def do_claim_probe(pw, page, name):
+    """Open the claim form for one player and report it. Submits nothing."""
+    control = add_control(page, name)
+    if control is None or not control.count():
+        print()
+        print(f"No Add control next to {name!r} on this page.")
+        print("He may be rostered, or on waivers already, or the name may")
+        print("not match Yahoo's spelling. Try --player with a surname.")
+        return 1
+    print()
+    print(f"Clicking Add next to {name!r}. This opens the form; it does not")
+    print("place a claim - nothing that says submit or confirm is touched.")
+    try:
+        control.click(timeout=10000)
+        page.wait_for_timeout(3000)
+    except Exception as exc:
+        print(f"  the click did not land: {type(exc).__name__}: {exc}")
+        return 1
+    print()
+    print(describe_claim(look_at_claim(page)))
+    print()
+    print("No claim was placed. Close the tab or navigate away.")
+    return 0
+
+
+def do_probe(pw, league_key, player=None):
     """Open the real page and say what is on it. Clicks nothing."""
     url = players_url(league_key)
     if not url:
@@ -172,9 +269,12 @@ def do_probe(pw, league_key):
 
     print(f"  page                {title[:70]}")
     print(describe(look(page)))
+    if player:
+        return do_claim_probe(pw, page, player)
     print()
-    print("Nothing was clicked. Send this output and the selectors get")
-    print("written from it rather than from memory.")
+    print("Nothing was clicked. To see what the claim form wants, name a")
+    print("free agent from that list:")
+    print("    python3 yahoo_submitter.py --probe LEAGUE_KEY --player SURNAME")
     return 0
 
 
@@ -182,6 +282,8 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--probe", metavar="LEAGUE_KEY",
                     help="open the waiver page and report what is on it")
+    ap.add_argument("--player", metavar="NAME",
+                    help="also open that player's claim form and report it")
     args = ap.parse_args()
     if not args.probe:
         ap.print_help()
@@ -193,7 +295,7 @@ def main():
         print("    python3 -m pip install playwright")
         return 1
     with sync_playwright() as pw:
-        return do_probe(pw, args.probe)
+        return do_probe(pw, args.probe, args.player)
 
 
 if __name__ == "__main__":
