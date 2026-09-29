@@ -228,15 +228,23 @@ def worth_the_spot(pid, players, mine, depth, trending, projected,
     mine_here = held_at(mine, players, pos, trending, projected, ros)
     if not mine_here:
         return True, None
-    weakest, _weak_pid = mine_here[0]
+    # The man he has to beat is the one holding your worst STARTING slot
+    # at that position, not the worst body you happen to carry there.
+    # Against the weakest, a third quarterback only had to beat your
+    # backup - which is a bar almost any startable quarterback clears,
+    # and is why Matthew Stafford was proposed to somebody who already
+    # had two. Adding a third only helps if he is better than the one
+    # you actually start.
+    slots = max(1, int(round(need or 1)))
+    bar, _bar_pid = mine_here[max(0, len(mine_here) - slots)]
     import ros as rs
     worth = wa.keep_value(players.get(pid) or {}, trending.get(pid, 0),
                           projected.get(pid), rs.worth(ros, pid))
-    if worth > weakest * UPGRADE_EDGE:
+    if worth > bar * UPGRADE_EDGE:
         return True, None
     return False, (f"you already carry {have} {pos}s for {need:g} "
                    f"starting spots, and he is not clearly better than "
-                   f"the weakest of them")
+                   f"the one you start")
 
 
 def keeping_points(weeks):
@@ -557,7 +565,15 @@ def proposals_for_league(league, user_id, players, trending, texts, max_moves,
             rationale=why,
             quote=quote, rank=len(out) + 1,
         ))
-        protect.add(drop_pid)
+        # Deliberately not protecting drop_pid. Each proposal used to
+        # consume a drop, so the second claim offered your second-worst
+        # player and the third your third-worst - which is how a receiver
+        # ranked fourth in the cut order kept appearing on a card while
+        # three worse men sat above him. Every claim now defaults to the
+        # same worst player, because that is who you should cut whichever
+        # claim you make, and claim_order already turns two claims sharing
+        # a drop into a chain where the second only runs if the first
+        # fails. The card offers the whole roster anyway.
         if add_pos:
             spoken_for.add(add_pos)
 

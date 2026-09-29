@@ -663,6 +663,75 @@ class BenchIsNotAVerdict(unittest.TestCase):
         self.assertNotIn("paid", why)
 
 
+class BeatingTheStarterNotTheBackup(unittest.TestCase):
+    """A third quarterback only had to be better than your backup.
+
+    worth_the_spot compared a candidate against the weakest man held at
+    his position. With two quarterbacks that is your backup, a bar almost
+    any startable quarterback clears - which is how Matthew Stafford came
+    to be proposed to somebody who already had two. Adding a third only
+    helps if he beats the one you actually start.
+    """
+
+    PLAYERS = {
+        "qb1": {"full_name": "My Starter", "position": "QB",
+                "search_rank": 30, "depth_chart_order": 1},
+        "qb2": {"full_name": "My Backup", "position": "QB",
+                "search_rank": 200, "depth_chart_order": 1},
+        "free": {"full_name": "Stafford", "position": "QB",
+                 "search_rank": 95, "depth_chart_order": 1},
+    }
+    MINE = {"starters": ["qb1"], "players": ["qb1", "qb2"]}
+    DEPTH = {"QB": (2, 1.0, "ok")}
+
+    def ask(self, players=None):
+        return rw.worth_the_spot("free", players or self.PLAYERS, self.MINE,
+                                 self.DEPTH, {}, {})
+
+    def test_better_than_the_backup_is_not_enough(self):
+        ok, why = self.ask()
+        self.assertFalse(ok)
+        self.assertIn("the one you start", why)
+
+    def test_better_than_the_starter_is(self):
+        players = dict(self.PLAYERS)
+        players["free"] = dict(players["free"], search_rank=5)
+        ok, _why = self.ask(players)
+        self.assertTrue(ok)
+
+    def test_two_starting_slots_means_beating_your_second(self):
+        """In a two-flex league the bar is the second man, not the first."""
+        players = dict(self.PLAYERS)
+        players = {k: dict(v, position="RB") for k, v in players.items()}
+        mine = {"starters": ["qb1", "qb2"], "players": ["qb1", "qb2"]}
+        ok, _why = rw.worth_the_spot("free", players, mine,
+                                     {"RB": (2, 2.0, "ok")}, {}, {})
+        self.assertTrue(ok)
+
+
+class EveryClaimOffersTheSameWorstPlayer(unittest.TestCase):
+    """Each proposal used to consume a drop.
+
+    So the second claim offered your second-worst player and the third
+    your third-worst, and a receiver ranked fourth in the cut order kept
+    turning up on a card with three worse men sitting above him. Who you
+    should cut does not depend on which claim you happen to make.
+    """
+
+    def test_the_drop_is_not_consumed_between_proposals(self):
+        source = open("run_weekly.py").read()
+        self.assertNotIn("protect.add(drop_pid)", source)
+
+    def test_and_the_reason_is_written_down(self):
+        source = open("run_weekly.py").read()
+        self.assertIn("Deliberately not protecting drop_pid", source)
+
+    def test_two_claims_sharing_a_drop_become_a_chain(self):
+        """Which is what claim_order was built for."""
+        import claim_order as co
+        self.assertTrue(hasattr(co, "blockers"))
+
+
 class HavingEnoughIsNotBeingShort(unittest.TestCase):
     """The bug that switched off every quarterback gate.
 
