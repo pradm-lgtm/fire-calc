@@ -659,6 +659,83 @@ class BenchIsNotAVerdict(unittest.TestCase):
         self.assertNotIn("paid", why)
 
 
+class ThreeQuarterbacksIsNeverTheAnswer(unittest.TestCase):
+    """The add side never asked whether you needed the position.
+
+    sort_key nudged thin positions up, and that was the whole of it.
+    Nothing stopped three claims at one position, and nothing asked
+    whether a man was better than what you already have where he plays -
+    so with the drop chosen independently of the add, the model would take
+    a third quarterback and cut a receiver for him.
+    """
+
+    PLAYERS = {
+        "qb1": {"full_name": "My Starter QB", "position": "QB",
+                "search_rank": 40, "depth_chart_order": 1},
+        "qb2": {"full_name": "My Backup QB", "position": "QB",
+                "search_rank": 90, "depth_chart_order": 1},
+        "free_qb": {"full_name": "Another QB", "position": "QB",
+                    "search_rank": 95, "depth_chart_order": 1},
+        "great_qb": {"full_name": "Much Better QB", "position": "QB",
+                     "search_rank": 8, "depth_chart_order": 1},
+        "wr1": {"full_name": "My Only WR", "position": "WR",
+                "search_rank": 200},
+    }
+    MINE = {"starters": ["qb1", "wr1"],
+            "players": ["qb1", "qb2", "wr1"]}
+    DEPTH = {"QB": (2, 1.0, "ok"), "WR": (1, 2.0, "thin")}
+
+    def ask(self, pid, depth=None):
+        score = wa.score_player(self.PLAYERS[pid], 0)
+        return rw.worth_the_spot(pid, self.PLAYERS, self.MINE,
+                                 depth or self.DEPTH, {}, {}, score)
+
+    def test_a_third_quarterback_no_better_than_yours_is_refused(self):
+        ok, why = self.ask("free_qb")
+        self.assertFalse(ok)
+        self.assertIn("QB", why)
+
+    def test_the_refusal_says_what_you_already_have(self):
+        _ok, why = self.ask("free_qb")
+        self.assertIn("2 QBs", why)
+        self.assertIn("1 starting", why)
+
+    def test_a_clearly_better_quarterback_still_gets_through(self):
+        """Positional need is a question, not a wall."""
+        ok, _why = self.ask("great_qb")
+        self.assertTrue(ok)
+
+    def test_a_position_you_are_short_at_is_never_refused(self):
+        """Even a mediocre one, because you have nobody."""
+        players = dict(self.PLAYERS, free_wr={
+            "full_name": "Any WR", "position": "WR", "search_rank": 900})
+        ok, _why = rw.worth_the_spot(
+            "free_wr", players, self.MINE, self.DEPTH, {}, {},
+            wa.score_player(players["free_wr"], 0))
+        self.assertTrue(ok)
+
+    def test_a_position_you_hold_nobody_at_is_never_refused(self):
+        players = dict(self.PLAYERS, free_te={
+            "full_name": "Any TE", "position": "TE", "search_rank": 900})
+        depth = dict(self.DEPTH, TE=(0, 1.0, "thin"))
+        ok, _why = rw.worth_the_spot("free_te", players, self.MINE, depth,
+                                     {}, {}, 5.0)
+        self.assertTrue(ok)
+
+    def test_the_comparison_is_against_that_position_not_the_roster(self):
+        """His weakest player overall is a receiver; that is irrelevant to
+        whether he needs another quarterback."""
+        held = rw.held_at(self.MINE, self.PLAYERS, "QB", {}, {})
+        self.assertEqual([pid for _s, pid in held], ["qb2", "qb1"])
+        self.assertNotIn("wr1", [pid for _s, pid in held])
+
+    def test_projections_reach_the_comparison(self):
+        """So a backup having a good stretch is harder to replace."""
+        lean = rw.held_at(self.MINE, self.PLAYERS, "QB", {}, {})
+        fat = rw.held_at(self.MINE, self.PLAYERS, "QB", {}, {"qb2": 22.0})
+        self.assertGreater(fat[0][0], lean[0][0])
+
+
 class ProjectionsBeatPopularity(unittest.TestCase):
     """search_rank is how often a name is looked up, not what he will score.
 

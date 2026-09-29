@@ -158,6 +158,56 @@ def defense_proposal(league, mine, players, rosters, weeks, remaining,
     )
 
 
+def held_at(mine, players, pos, trending, projected):
+    """What you already have at one position, worst first.
+
+    The comparison that was never being made. A claim is not "is this man
+    good", it is "is he better than what I already have where he plays" -
+    and with the drop chosen independently of the add, the model would
+    happily take a third quarterback and cut a receiver for him.
+    """
+    out = []
+    for pid in (mine.get("players") or []):
+        pid = str(pid)
+        player = players.get(pid)
+        if not player or (player.get("position") or "") != pos:
+            continue
+        out.append((wa.keep_value(player, trending.get(pid, 0),
+                                  projected.get(pid)), pid))
+    return sorted(out)
+
+
+# How much better an add has to be than your own weakest man at his
+# position, when you are not short there. Well above 1.0: replacing like
+# with like costs a roster spot and a waiver claim to move sideways, and
+# the whole complaint that prompted this was three quarterbacks proposed to
+# somebody who starts one.
+UPGRADE_EDGE = 1.25
+
+
+def worth_the_spot(pid, players, mine, depth, trending, projected, add_score):
+    """(yes/no, why not) - should this position take another player at all?
+
+    Returns the reason rather than printing it, so a league that produces
+    nothing can say which of these it was.
+    """
+    pos = (players.get(pid) or {}).get("position") or ""
+    if not pos:
+        return True, None
+    have, need, label = depth.get(pos, (0, 0, "ok"))
+    if label == "thin":
+        return True, None
+    mine_here = held_at(mine, players, pos, trending, projected)
+    if not mine_here:
+        return True, None
+    weakest, _weak_pid = mine_here[0]
+    if add_score > weakest * UPGRADE_EDGE:
+        return True, None
+    return False, (f"you already carry {have} {pos}s for {need:g} "
+                   f"starting spots, and he is not clearly better than "
+                   f"the weakest of them")
+
+
 def keeping_points(weeks):
     """{player_id: points} for judging who to KEEP: this week and next.
 
@@ -358,9 +408,18 @@ def proposals_for_league(league, user_id, players, trending, texts, max_moves,
         if consensus else []
 
     out, protect, budget_left, why = [], set(), remaining, None
+    # Positions already spoken for this week. Three quarterbacks is never
+    # the answer, however many analysts wrote about quarterbacks.
+    spoken_for = set()
     for pid, info in ordered:
         if len(out) >= max_moves:
             break
+        add_pos = (players.get(pid) or {}).get("position") or ""
+        thin_here = depth.get(add_pos, (0, 0, "ok"))[2] == "thin"
+        if add_pos in spoken_for and not thin_here:
+            why = why or (f"the best remaining names are all {add_pos}s and "
+                          "one claim there is enough")
+            continue
         # Everyone you could cut, not only the bench and not only the one it
         # picked. Whether there is anyone worth dropping is half the
         # decision, and it was being made for you out of sight.
@@ -393,6 +452,12 @@ def proposals_for_league(league, user_id, players, trending, texts, max_moves,
         } for _rank, _score, cid, p, label, starts in candidates]
         add_score = wa.score_player(players.get(pid, {}), trending.get(pid, 0),
                                     shots.get(pid))
+        # Before anything about who to drop: do you need another one of him?
+        needed, no_thanks = worth_the_spot(pid, players, mine, depth,
+                                           trending, holds, add_score)
+        if not needed:
+            why = why or no_thanks
+            continue
         if drop_score > add_score * 1.5:
             best = strip_label(sc.player_label(players, pid))
             why = (f"the best player available ({best}) is not worth more "
@@ -443,6 +508,8 @@ def proposals_for_league(league, user_id, players, trending, texts, max_moves,
             quote=quote, rank=len(out) + 1,
         ))
         protect.add(drop_pid)
+        if add_pos:
+            spoken_for.add(add_pos)
 
     # Appended outside the loop: a defense is not competing with the skill
     # players for a roster spot, because it replaces itself.
