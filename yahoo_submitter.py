@@ -130,7 +130,22 @@ def do_probe(pw, league_key):
               "prints yours.")
         return 1
 
-    ctx = submitter.browser_context(pw, headed=True)
+    # Attach only. browser_context() falls back to launching a throwaway
+    # profile when nothing is listening, and that profile is signed into
+    # nothing - so it reports "not signed in to Yahoo" about a browser you
+    # have never seen, while your actual Chrome sits there logged in. That
+    # is exactly the confusion the Sleeper side was fixed for, and reusing
+    # the helper brought it straight back.
+    alive, saw = submitter.cdp_probe()
+    if not alive:
+        print("No Chrome is listening on the debugging port, so there is no")
+        print(f"signed-in browser to attach to ({saw}).")
+        print()
+        print("Start one, sign in to Yahoo there, leave it open, and re-run:")
+        print("    python3 submitter.py --login")
+        return submitter.NEEDS_LOGIN
+    print(f"Attached to {saw}")
+    ctx = submitter.attach(pw)
     page = ctx.pages[0] if ctx.pages else ctx.new_page()
     print(f"Opening {url}")
     page.goto(url, wait_until="domcontentloaded", timeout=45000)
@@ -142,6 +157,12 @@ def do_probe(pw, league_key):
     except Exception:
         pass
     if signed_out(page.url, title):
+        print()
+        # Say where it actually ended up. "You are not signed in" about a
+        # page whose address you cannot see is unarguable-with, and the
+        # address is the whole evidence for the claim.
+        print(f"Landed on {page.url[:100]}")
+        print(f"Title: {title[:70]}")
         print()
         print("That is the Yahoo login page, so the attached Chrome is not")
         print("signed in to Yahoo. Sign in in that window and run this again.")

@@ -97,6 +97,49 @@ class TheReport(unittest.TestCase):
         self.assertNotIn("may not need one", said)
 
 
+class ItWillNotLaunchABrowserOfItsOwn(unittest.TestCase):
+    """The throwaway profile is signed into nothing, which is the point.
+
+    browser_context() launches one when nothing is listening. A probe that
+    does that reports "not signed in to Yahoo" about a browser the person
+    has never seen, while their real Chrome sits there logged in - and no
+    amount of signing in again will change what it says. The Sleeper side
+    was fixed for this; reusing the helper brought it back.
+    """
+
+    def setUp(self):
+        self.real_probe = ys.submitter.cdp_probe
+        self.real_attach = ys.submitter.attach
+        self.real_ctx = ys.submitter.browser_context
+
+    def tearDown(self):
+        ys.submitter.cdp_probe = self.real_probe
+        ys.submitter.attach = self.real_attach
+        ys.submitter.browser_context = self.real_ctx
+
+    def test_with_nothing_listening_it_says_so_and_stops(self):
+        ys.submitter.cdp_probe = lambda *a, **k: (False, "ConnectionRefused")
+
+        def explode(*a, **k):
+            raise AssertionError("launched a browser of its own")
+        ys.submitter.browser_context = explode
+        ys.submitter.attach = explode
+        self.assertEqual(ys.do_probe(None, "470.l.715420"),
+                         ys.submitter.NEEDS_LOGIN)
+
+    def test_it_never_calls_browser_context_at_all(self):
+        """Not even when Chrome IS listening - attach is the only path."""
+        ys.submitter.cdp_probe = lambda *a, **k: (True, "Chrome/152")
+
+        def explode(*a, **k):
+            raise AssertionError("used browser_context instead of attach")
+        ys.submitter.browser_context = explode
+        ys.submitter.attach = lambda pw: (_ for _ in ()).throw(
+            RuntimeError("attach reached, which is correct"))
+        with self.assertRaises(RuntimeError):
+            ys.do_probe(None, "470.l.715420")
+
+
 class TheProbeRefusesBeforeItOpensAnything(unittest.TestCase):
 
     def test_a_bad_key_never_reaches_a_browser(self):
