@@ -602,6 +602,50 @@ class TellingYouOnce(unittest.TestCase):
         self.fail("no gitignore found next to the tests")
 
 
+class LookingAtWhatActuallyArrived(unittest.TestCase):
+    """The settings dump exists to be wrong out loud.
+
+    settings() reads the handful of fields it was written for. When one of
+    them comes back false, there is no way from the parsed answer to tell a
+    league that really is not FAAB from a key Yahoo spells differently this
+    season - and guessing between those two has been the expensive mistake
+    of this whole build.
+    """
+
+    def setUp(self):
+        self.real = yc.get
+
+    def tearDown(self):
+        yc.get = self.real
+
+    def payload(self, fields):
+        frags = [{k: v} for k, v in fields.items()]
+        yc.get = lambda _p: {"fantasy_content": {
+            "league": [{}, {"settings": [frags]}]}}
+
+    def test_it_returns_every_field_not_the_chosen_few(self):
+        self.payload({"waiver_type": "R", "uses_faab": "0",
+                      "some_new_key": "17"})
+        got = yc.raw_settings("470.l.715420")
+        self.assertEqual(got.get("waiver_type"), "R")
+        self.assertIn("some_new_key", got)
+
+    def test_the_parsed_view_still_only_promises_what_it_knows(self):
+        self.payload({"waiver_type": "R", "uses_faab": "0"})
+        self.assertFalse(yc.settings("470.l.715420")["uses_faab"])
+
+    def test_a_faab_league_is_read_as_one(self):
+        self.payload({"waiver_type": "FR", "uses_faab": "1",
+                      "faab_balance": "100"})
+        rules = yc.settings("470.l.715420")
+        self.assertTrue(rules["uses_faab"])
+        self.assertEqual(rules["faab_budget"], 100)
+
+    def test_nothing_back_is_empty_rather_than_an_exception(self):
+        yc.get = lambda _p: {}
+        self.assertEqual(yc.raw_settings("470.l.715420"), {})
+
+
 class TheAgreement(unittest.TestCase):
     """Terms that are easy to honour today and easy to lose later."""
 

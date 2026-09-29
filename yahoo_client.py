@@ -414,6 +414,18 @@ def free_agents(league_key, count=50, position=None):
     return player_rows(_content(get(path)))
 
 
+def raw_settings(league_key):
+    """Every settings field Yahoo returns, flattened, as strings.
+
+    For the questions the parsed settings() cannot answer yet. Its job is
+    to be wrong out loud: if uses_faab reads false because the key is
+    spelled differently this season, the only way to see that is to look
+    at what actually arrived rather than at what we hoped for.
+    """
+    return fields(fields_of(_content(get(f"/league/{league_key}/settings")),
+                            "settings") or {})
+
+
 def settings(league_key):
     """What the league's rules are, for pricing a claim against them."""
     got = fields(fields_of(_content(get(f"/league/{league_key}/settings")),
@@ -615,6 +627,8 @@ def main():
                     help="list your leagues, teams and rules (the default)")
     ap.add_argument("--wire", metavar="LEAGUE_KEY",
                     help="who is available in that league right now")
+    ap.add_argument("--rules", metavar="LEAGUE_KEY",
+                    help="every settings field Yahoo returns for one league")
     ap.add_argument("--ready", action="store_true",
                     help="has Yahoo attached Fantasy access to this app yet")
     ap.add_argument("--diagnose", action="store_true",
@@ -632,6 +646,20 @@ def main():
     try:
         if args.ready or args.diagnose:
             return ready(verbose=args.diagnose)
+        if args.rules:
+            got = raw_settings(args.rules)
+            if not got:
+                print("Nothing came back. Check the league key.")
+                return 1
+            width = max(len(k) for k in got)
+            for key in sorted(got):
+                value = got[key]
+                if isinstance(value, (dict, list)):
+                    value = json.dumps(value)[:200]
+                print(f"  {key:<{width}}  {value}")
+            print()
+            print(ATTRIBUTION)
+            return 0
         if args.wire:
             for player in free_agents(args.wire, count=25):
                 hurt = f"  [{player['status']}]" if player["status"] else ""
