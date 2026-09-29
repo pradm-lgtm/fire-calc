@@ -17,6 +17,14 @@ set -euo pipefail
 
 SRC="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DEST="${1:-$HOME/waiver-agent}"
+case "$DEST" in
+  \#*|"")
+    echo "Refusing to build into '$DEST'."
+    echo "That is almost certainly a comment that came along with a pasted"
+    echo "command - zsh does not strip # the way bash does. Run the script"
+    echo "with no arguments, or give it a real directory."
+    exit 1 ;;
+esac
 REMOTE="${2:-https://github.com/pradm-lgtm/waiver-agent.git}"
 
 # Everything the agent is written in. Listing the Python files by hand has
@@ -55,9 +63,16 @@ cp "$SRC/gitignore.fantasy" "$DEST/.gitignore" 2>/dev/null \
   || cp "$SRC/.gitignore.fantasy" "$DEST/.gitignore"
 
 # Carry over live state so nothing needs redoing. Neither is committed.
+# Never over an existing one. These are credentials and live data: the
+# destination's copy is the one in use, and the source's is whatever was
+# lying around. Copying source over destination reverted a Yahoo client id
+# to a dead app's every time this ran, silently, and the restore-from-backup
+# dance invented to work around it reverted it again.
 for state in .env fantasy.db; do
-  if [ -e "$SRC/$state" ]; then
-    cp -R "$SRC/$state" "$DEST/" && echo "    $state (kept local, not committed)"
+  if [ -e "$DEST/$state" ]; then
+    echo "    $state (kept the one already there - not overwritten)"
+  elif [ -e "$SRC/$state" ]; then
+    cp -R "$SRC/$state" "$DEST/" && echo "    $state (copied; kept local, not committed)"
   fi
 done
 
