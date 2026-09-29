@@ -460,8 +460,12 @@ def proposals_for_league(league, user_id, players, trending, texts, max_moves,
             why = why or (f"the names left are {add_pos}s and this league "
                           f"has no {add_pos} slot")
             continue
-        thin_here = depth.get(add_pos, (0, 0, "ok"))[2] == "thin"
-        if add_pos in spoken_for and not thin_here:
+        # One claim per position, with no exception for being short there.
+        # Thin used to buy a bypass, and thin is what a position you start
+        # one of and roster one of was called - so the cap was off in the
+        # only case anyone complained about. Being short is an argument for
+        # making a claim, never for making three.
+        if add_pos in spoken_for:
             why = why or (f"the best remaining names are all {add_pos}s and "
                           "one claim there is enough")
             continue
@@ -940,6 +944,38 @@ def say_status():
     return 0
 
 
+def show(proposals, quiet=None):
+    """Print the week's proposals, so the page is not the only way to see them.
+
+    Judging the output meant loading the site, which put a deploy, a push
+    and a browser cache between a change and the thing it changed - and
+    made "is this stale?" a real question every single time. It is not a
+    question about what this prints.
+    """
+    if not proposals:
+        print("  (nothing proposed)")
+    by_league = {}
+    for p in proposals:
+        by_league.setdefault(p.get("league_name") or "?", []).append(p)
+    for name, rows in by_league.items():
+        print()
+        print(f"  {name}")
+        for i, p in enumerate(rows, start=1):
+            bid = p.get("bid")
+            cost = f"  ${bid}" if bid else ""
+            print(f"    {i}. ADD  {strip_label(p['add_player_name'])}"
+                  f" ({p.get('add_position') or '?'}){cost}")
+            print(f"       DROP {strip_label(p.get('drop_player_name') or '-')}"
+                  f" ({p.get('drop_position') or '?'})")
+            said = p.get("consensus")
+            print(f"       {p.get('rationale') or ''}"
+                  + (f"  [{said} analyst{'s' if said != 1 else ''}]"
+                     if said else "  [nobody wrote him up]"))
+    for name, reason in (quiet or {}).items():
+        print()
+        print(f"  {name}: nothing, because {reason}")
+
+
 def _run(username, urls, moves, dry_run, db_path, force=False,
          update=False):
     try:
@@ -991,12 +1027,15 @@ def _run(username, urls, moves, dry_run, db_path, force=False,
                 print("run. Use --force to replace it with this result.")
                 return 0
 
+        print()
+        print("=" * 66)
+        print("WHAT IT IS PROPOSING")
+        print("=" * 66)
+        show(all_proposals, quiet)
+        print()
+
         if dry_run:
-            print("\n--- dry run, nothing written ---")
-            for p in all_proposals:
-                print(f"  [{p['league_name']}] ADD {p['add_player_name']}"
-                      f" / DROP {p['drop_player_name']}  bid {p['bid']}"
-                      f"  ({p['consensus']} src)")
+            print("--- dry run, nothing written ---")
             return 0
 
         push_to = os.environ.get("FANTASY_API_URL")

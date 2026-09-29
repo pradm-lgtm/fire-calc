@@ -153,6 +153,13 @@ def positional_depth(league, roster, players):
     Flex slots are spread across RB/WR/TE rather than assigned, which is
     imprecise but enough to tell a position with no backup from one with
     three.
+
+    "thin" means fewer than you start, not as many as you start. It used
+    to mean the second, so a one-quarterback league with one quarterback
+    on the roster was thin at quarterback - and thin is the label every
+    positional gate steps aside for. Three quarterbacks were being
+    proposed to a man who starts one, and both gates written to stop that
+    were switched off for precisely that case.
     """
     required, flex = starting_requirements(league)
     have = roster_by_position(roster, players)
@@ -166,7 +173,7 @@ def positional_depth(league, roster, players):
         count = len(have.get(pos, []))
         if need <= 0:
             label = "extra"
-        elif count <= need:
+        elif count < need:
             label = "thin"
         elif count >= need + 2:
             label = "deep"

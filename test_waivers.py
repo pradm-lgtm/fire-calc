@@ -513,9 +513,13 @@ class NoBench(unittest.TestCase):
                "active": True, "status": "Active", "fantasy_positions": ["RB"]},
         "s2": {"full_name": "Second Starter", "position": "WR", "team": "NYJ",
                "active": True, "status": "Active", "fantasy_positions": ["WR"]},
+        # Clearly better than the back already rostered. He has to be:
+        # the position holds as many as he starts, so an add that is no
+        # improvement is correctly refused, and this class is about the
+        # bench being empty rather than about whether he is worth having.
         "free": {"full_name": "Kaelon Black", "position": "RB", "team": "SF",
-                 "active": True, "status": "Active",
-                 "fantasy_positions": ["RB"]},
+                 "active": True, "status": "Active", "search_rank": 15,
+                 "depth_chart_order": 1, "fantasy_positions": ["RB"]},
     }
     ROSTER = {"roster_id": 1, "owner_id": "me", "starters": ["s1", "s2"],
               "players": ["s1", "s2"], "settings": {"waiver_budget_used": 0}}
@@ -657,6 +661,106 @@ class BenchIsNotAVerdict(unittest.TestCase):
                              {"RB": (5, 2, "deep")}, False, 2, 5)
         self.assertNotIn("draft", why)
         self.assertNotIn("paid", why)
+
+
+class HavingEnoughIsNotBeingShort(unittest.TestCase):
+    """The bug that switched off every quarterback gate.
+
+    "thin" meant count <= need, so a one-quarterback league with one
+    quarterback on the roster was thin at quarterback. Both gates written
+    to stop three quarterbacks being proposed step aside for thin - the
+    cap skipped it and worth_the_spot returned yes immediately - so they
+    were off in exactly the case that prompted them.
+    """
+
+    LEAGUE = {"roster_positions": ["QB", "RB", "RB", "WR", "WR", "TE",
+                                   "FLEX", "BN", "BN", "BN"]}
+    ROSTER = {"players": ["q1", "r1", "r2", "w1", "w2", "w3", "t1"]}
+    PLAYERS = {"q1": {"position": "QB"}, "r1": {"position": "RB"},
+               "r2": {"position": "RB"}, "w1": {"position": "WR"},
+               "w2": {"position": "WR"}, "w3": {"position": "WR"},
+               "t1": {"position": "TE"}}
+
+    def depth(self):
+        return ew.positional_depth(self.LEAGUE, self.ROSTER, self.PLAYERS)
+
+    def test_one_quarterback_for_one_slot_is_not_thin(self):
+        self.assertEqual(self.depth()["QB"][2], "ok")
+
+    def test_fewer_than_you_start_still_is(self):
+        roster = {"players": ["q1", "r1", "w1", "w2", "t1"]}
+        got = ew.positional_depth(self.LEAGUE, roster, self.PLAYERS)
+        self.assertEqual(got["RB"][2], "thin")
+
+    def test_a_surplus_is_still_deep(self):
+        roster = {"players": ["w1", "w2", "w3", "w4", "w5"]}
+        players = dict(self.PLAYERS, w4={"position": "WR"},
+                       w5={"position": "WR"})
+        got = ew.positional_depth(self.LEAGUE, roster, players)
+        self.assertEqual(got["WR"][2], "deep")
+
+    def test_the_cap_no_longer_has_an_exception(self):
+        """Being short is an argument for a claim, never for three."""
+        source = open("run_weekly.py").read()
+        spot = source.index("if add_pos in spoken_for")
+        self.assertNotIn("thin_here", source[spot:spot + 200])
+
+
+class SeeingItWithoutTheWebsite(unittest.TestCase):
+    """Judging the output meant loading the site.
+
+    That put a deploy, a push and a browser cache between a change and
+    the thing it changed, and made "are these stale?" a real question
+    every time. It is not a question about what the run prints.
+    """
+
+    ROWS = [dict(league_name="LEHG", add_player_name="Some Back (GB RB)",
+                 add_position="RB", bid=5,
+                 drop_player_name="Alec Pierce (IND WR)", drop_position="WR",
+                 rationale="Dropping Alec Pierce.", consensus=3)]
+
+    def said(self, rows, quiet=None):
+        import contextlib
+        import io
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            rw.show(rows, quiet)
+        return out.getvalue()
+
+    def test_it_names_the_add_and_the_drop(self):
+        said = self.said(self.ROWS)
+        self.assertIn("Some Back", said)
+        self.assertIn("Alec Pierce", said)
+
+    def test_it_gives_the_position_of_each(self):
+        """The quarterback complaint is unreadable without them."""
+        said = self.said(self.ROWS)
+        self.assertIn("(RB)", said)
+        self.assertIn("(WR)", said)
+
+    def test_it_shows_the_bid(self):
+        self.assertIn("$5", self.said(self.ROWS))
+
+    def test_a_league_with_no_bidding_shows_no_price(self):
+        rows = [dict(self.ROWS[0], bid=None)]
+        self.assertNotIn("$", self.said(rows))
+
+    def test_it_says_when_nobody_wrote_him_up(self):
+        rows = [dict(self.ROWS[0], consensus=0)]
+        self.assertIn("nobody wrote him up", self.said(rows))
+
+    def test_a_quiet_league_says_why(self):
+        said = self.said(self.ROWS, {"OTG": "nobody free is better"})
+        self.assertIn("OTG", said)
+        self.assertIn("nobody free is better", said)
+
+    def test_nothing_at_all_says_so(self):
+        self.assertIn("nothing proposed", self.said([]))
+
+    def test_the_run_prints_them_whether_or_not_it_is_a_dry_run(self):
+        source = open("run_weekly.py").read()
+        spot = source.index("WHAT IT IS PROPOSING")
+        self.assertLess(spot, source.index("if dry_run:"))
 
 
 class DepthProtectedTooMuch(unittest.TestCase):
