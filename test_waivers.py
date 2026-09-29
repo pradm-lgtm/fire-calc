@@ -659,6 +659,52 @@ class BenchIsNotAVerdict(unittest.TestCase):
         self.assertNotIn("paid", why)
 
 
+class DepthProtectedTooMuch(unittest.TestCase):
+    """A running back worth 16.1 was safer than a receiver worth 32.7.
+
+    The depth penalty only matters across positions - within one it
+    cancels - so its whole job is answering "would you rather cut a spare
+    receiver than your last running back". At 100, against keep values
+    topping out near 60, it answered everything else as well: a back was
+    never cut before a receiver, whatever either of them was worth.
+    """
+
+    def test_it_is_smaller_than_the_worth_it_is_weighed_against(self):
+        self.assertLess(ew.depth_penalty("ok"), 60)
+        self.assertLess(ew.depth_penalty("thin"), 60)
+
+    def test_being_short_still_protects_more_than_being_stocked(self):
+        self.assertGreater(ew.depth_penalty("thin"), ew.depth_penalty("ok"))
+        self.assertGreater(ew.depth_penalty("ok"), ew.depth_penalty("deep"))
+
+    def test_a_surplus_position_gets_no_protection(self):
+        self.assertEqual(ew.depth_penalty("deep"), 0)
+        self.assertEqual(ew.depth_penalty("extra"), 0)
+
+    def test_an_unknown_label_is_treated_as_ordinary(self):
+        self.assertEqual(ew.depth_penalty("nonsense"), ew.depth_penalty("ok"))
+
+    def test_a_worse_player_at_a_stocked_position_goes_first(self):
+        """The rows that prompted this, with the real numbers."""
+        wilson = 16.1 + ew.depth_penalty("ok")
+        burden = 32.7 + ew.depth_penalty("deep") + 9.2
+        self.assertLess(wilson, burden)
+
+    def test_but_your_last_back_still_beats_a_spare_receiver(self):
+        """The rule is worth keeping, just not worth everything."""
+        last_back = 20.0 + ew.depth_penalty("thin")
+        spare_wr = 30.0 + ew.depth_penalty("deep")
+        self.assertGreater(last_back, spare_wr)
+
+    def test_there_is_one_table_not_three(self):
+        """A diagnostic with its own idea of the arithmetic is worse than
+        no diagnostic - it was printing a cut order the run never used."""
+        for path in ("expert_waivers.py", "run_weekly.py"):
+            with self.subTest(path=path):
+                self.assertNotIn('"thin": 1000', open(path).read())
+        self.assertIn("ew.depth_penalty(label)", open("run_weekly.py").read())
+
+
 class TheNudgesWereNotNudges(unittest.TestCase):
     """Being in this week's lineup, and what you paid in August.
 

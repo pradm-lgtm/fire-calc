@@ -760,8 +760,20 @@ def explain(username, name, db_path=None):
     hits = [pid for pid, p in players.items()
             if wanted in (p.get("full_name") or "").lower()]
     if not hits:
-        print(f"Nobody called {name} in Sleeper's player list.")
-        return 1
+        # "Emmanuel Wilson" is spelt Emanuel, and being told nobody by that
+        # name exists is a poor answer when he is on the roster. Fall back
+        # to the surname before giving up.
+        surname = wanted.split()[-1] if wanted.split() else ""
+        near = [pid for pid, p in players.items()
+                if surname and surname in (p.get("full_name") or "").lower()]
+        if not near:
+            print(f"Nobody called {name} in Sleeper's player list.")
+            return 1
+        found = ", ".join(sorted(
+            (players[pid].get("full_name") or "") for pid in near[:6]))
+        print(f"Nobody spelt exactly {name!r}. Closest: {found}")
+        print()
+        hits = near
     trending = wa.trending_adds()
     import ros as rs
     outlook = week_outlook(season, week, players)
@@ -830,8 +842,9 @@ def explain(username, name, db_path=None):
             for row in ranked[max(0, spot - 4):spot + 2]:
                 total, keep, cid, who, _label, starts = row
                 label = depth.get(who.get("position"), (0, 0, "ok"))[2]
-                pen = {"thin": 1000, "ok": 100, "deep": 0,
-                       "extra": 0}.get(label, 100)
+                # The shared table, not a third copy of it. A diagnostic
+                # with its own idea of the arithmetic is worse than none.
+                pen = ew.depth_penalty(label)
                 paid = ew.draft_weight(cost.get(cid), week)
                 here = "<-" if cid == pid else "  "
                 print(f"   {here} {keep:6.1f} {pen:6} {paid:6.1f} "

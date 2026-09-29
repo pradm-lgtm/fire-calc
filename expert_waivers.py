@@ -190,6 +190,23 @@ def positional_depth(league, roster, players):
 STARTER_WEIGHT = 8
 
 
+# How much a position's depth protects the men in it. This only ever
+# matters across positions - within one it cancels - so it is answering
+# "would you rather cut a spare receiver than your last running back",
+# and it should answer that without answering everything else too.
+#
+# It was 1000 and 100, against keep values that top out near 60. A back
+# worth 16.1 came out three times safer than a receiver worth 32.7, which
+# is not a preference for running backs but a rule that a running back is
+# never cut before a receiver. Now thin genuinely protects, ok is a nudge,
+# and the man himself decides the rest.
+DEPTH_PENALTY = {"thin": 45, "ok": 10, "deep": 0, "extra": 0}
+
+
+def depth_penalty(label):
+    return DEPTH_PENALTY.get(label, DEPTH_PENALTY["ok"])
+
+
 def draft_weight(cost, week=1):
     """How much what you paid for somebody should protect him, this week.
 
@@ -258,7 +275,7 @@ def drop_candidates(roster, players, trending, depth, cost=None, week=1,
         score = wa.keep_value(player, trending.get(pid, 0),
                               projected.get(pid), rs.worth(ros, pid))
         label = depth.get(player.get("position"), (0, 0, "ok"))[2]
-        penalty = {"thin": 1000, "ok": 100, "deep": 0, "extra": 0}.get(label, 100)
+        penalty = depth_penalty(label)
         paid = draft_weight(cost.get(pid), week)
         # Starting is a nudge, not a wall. It used to be worth more than
         # every other signal combined, which meant a bench player was always
@@ -297,7 +314,7 @@ def choose_drop(roster, players, trending, depth, protect_ids,
                               (projected or {}).get(pid),
                               rs.worth(ros, pid))
         label = depth.get(p.get("position"), (0, 0, "ok"))[2]
-        penalty = {"thin": 1000, "ok": 100, "deep": 0, "extra": 0}.get(label, 100)
+        penalty = depth_penalty(label)
         ranked.append((score + penalty, score, pid, p, label))
     ranked.sort(key=lambda row: row[0])
     return ranked
