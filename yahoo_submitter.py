@@ -63,6 +63,33 @@ def players_url(league_key):
     return f"{SITE}/f1/{number}/players?status=A" if number else None
 
 
+def player_id(player_key):
+    """'470.p.12345' -> '12345', the id the claim form wants."""
+    match = re.match(r"^\d+\.p\.(\d+)$", str(player_key or "").strip())
+    return match.group(1) if match else None
+
+
+def claim_url(league_key, player_key):
+    """Straight to the claim form for one player.
+
+    No players page in between. The API says who is available and what
+    their ids are, so walking a fifty-row table to find a link is scraping
+    for something an endpoint already answered - and it is the page Yahoo
+    blocked when it was asked for twice in a row.
+    """
+    league = league_number(league_key)
+    who = player_id(player_key)
+    return f"{SITE}/f1/{league}/addplayer?apid={who}" if league and who else None
+
+
+def matching(players, name):
+    """The free agents whose name contains what you typed, case-blind."""
+    wanted = str(name or "").strip().lower()
+    if not wanted:
+        return []
+    return [p for p in players if wanted in (p.get("name") or "").lower()]
+
+
 def team_url(team_key):
     """'470.l.715420.t.2' -> that team's page."""
     match = re.match(r"^\d+\.l\.(\d+)\.t\.(\d+)$", str(team_key or "").strip())
@@ -80,71 +107,8 @@ def signed_out(url, title):
                ("login.yahoo", "/login", "sign in to yahoo"))
 
 
-def describe(found):
-    """Turn what the probe saw into something worth reading.
-
-    Kept apart from the page so the reporting can be tested without a
-    browser, and so the interesting judgement - what these counts mean for
-    the submitter - lives somewhere it can be argued with.
-    """
-    lines = []
-    add = found.get("add_controls") or 0
-    lines.append(f"  add controls        {add}")
-    if not add:
-        lines.append("      none found, so either the page did not load as")
-        lines.append("      expected or the markup has moved")
-    lines.append(f"  player rows         {found.get('rows') or 0}")
-    lines.append(f"  a dialog is open    {'yes' if found.get('dialog') else 'no'}")
-    drop = found.get("drop_controls")
-    if drop is None:
-        lines.append("  drop required       not reached")
-    else:
-        lines.append(f"  drop controls       {drop}")
-        lines.append("      Yahoo asks for the drop in the same step"
-                     if drop else
-                     "      no drop control here, so a claim may not need one")
-    return "\n".join(lines)
-
-
-def look(page):
-    """Count the controls a claim would need, without clicking anything."""
-    def count(selector):
-        try:
-            return page.locator(selector).count()
-        except Exception:
-            return 0
-    return {
-        "rows": count("table tbody tr"),
-        "add_controls": count("a[href*='addplayer'], button:has-text('Add')"),
-        "dialog": bool(count("[role='dialog'], .Modal, #modal")),
-        "drop_controls": None,
-    }
-
-
-# Words that commit a claim. The probe must never click one: opening the
-# form is reversible and placing a claim is not, and a tool whose job is to
-# find out what the page does has no business changing anything while it
-# does so. Kept as data so a test can check nothing here clicks them.
-COMMITTING = ("submit", "place claim", "confirm", "add player")
-
-
-def add_control(page, name=None):
-    """The Add link for one player, or the first one on the page.
-
-    Scoped to the row carrying the name, because the page holds fifty-odd
-    of these and the one next to the player you asked about is the only one
-    worth clicking.
-    """
-    links = "a[href*='addplayer'], button:has-text('Add')"
-    if not name:
-        return page.locator(links).first
-    row = page.locator("tr", has_text=name).first
-    found = row.locator(links).first
-    return found if found.count() else None
-
-
 def describe_claim(found):
-    """What the form after Add turns out to want."""
+    """What the form behind Add turns out to want."""
     lines = [f"  opened as           {found.get('shape') or 'unknown'}"]
     if found.get("url"):
         lines.append(f"  address             {found['url'][:90]}")
@@ -193,60 +157,80 @@ def look_at_claim(page):
     }
 
 
-def do_claim_probe(pw, page, name):
-    """Open the claim form for one player and report it. Submits nothing."""
-    control = add_control(page, name)
-    if control is None or not control.count():
-        print()
-        print(f"No Add control next to {name!r} on this page.")
-        print("He may be rostered, or on waivers already, or the name may")
-        print("not match Yahoo's spelling. Try --player with a surname.")
-        return 1
-    print()
-    print(f"Clicking Add next to {name!r}. This opens the form; it does not")
-    print("place a claim - nothing that says submit or confirm is touched.")
-    try:
-        control.click(timeout=10000)
-        page.wait_for_timeout(3000)
-    except Exception as exc:
-        print(f"  the click did not land: {type(exc).__name__}: {exc}")
-        return 1
-    print()
-    print(describe_claim(look_at_claim(page)))
-    print()
-    print("No claim was placed. Close the tab or navigate away.")
-    return 0
-
-
 def do_probe(pw, league_key, player=None):
-    """Open the real page and say what is on it. Clicks nothing."""
-    url = players_url(league_key)
-    if not url:
+    """Open the claim form for one player and report what it wants.
+
+    The lookup is the API's job and the form is the browser's. Nothing here
+    reads league data off a page: yahoo_client already answers who is
+    available, and asking the website the same question was both redundant
+    and the thing Yahoo blocked on a second visit.
+    """
+    if not league_number(league_key):
         print(f"{league_key!r} is not a Yahoo league key.")
         print("They look like 470.l.715420 - python3 yahoo_client.py "
               "prints yours.")
         return 1
+    if not player:
+        print("Name a free agent to look at the claim form for:")
+        print("    python3 yahoo_submitter.py --probe LEAGUE_KEY "
+              "--player SURNAME")
+        print("python3 yahoo_client.py --wire LEAGUE_KEY lists who is free.")
+        return 1
 
-    # Attach only. browser_context() falls back to launching a throwaway
-    # profile when nothing is listening, and that profile is signed into
-    # nothing - so it reports "not signed in to Yahoo" about a browser you
-    # have never seen, while your actual Chrome sits there logged in. That
-    # is exactly the confusion the Sleeper side was fixed for, and reusing
-    # the helper brought it straight back.
+    import yahoo_client as yc
+    try:
+        wire = yc.free_agents(league_key, count=100)
+    except yc.YahooError as exc:
+        print(f"Could not ask Yahoo who is available: {exc}")
+        return 1
+    hits = matching(wire, player)
+    if not hits:
+        print(f"Nobody matching {player!r} is a free agent in that league.")
+        print("python3 yahoo_client.py --wire LEAGUE_KEY lists who is.")
+        return 1
+    if len(hits) > 1:
+        print(f"{player!r} matches more than one free agent:")
+        for p in hits[:8]:
+            print(f"    {p['name']}  ({p.get('team')} {p.get('position')})")
+        print("Use enough of the name to pick one.")
+        return 1
+
+    who = hits[0]
+    url = claim_url(league_key, who["key"])
+    if not url:
+        print(f"Could not build a claim address from {who['key']!r}.")
+        return 1
+
     alive, saw = submitter.cdp_probe()
     if not alive:
         print("No Chrome is listening on the debugging port, so there is no")
         print(f"signed-in browser to attach to ({saw}).")
         print()
         print("Start one, sign in to Yahoo there, leave it open, and re-run:")
-        print("    python3 submitter.py --login")
+        print("    python3 submitter.py pradm7 --start-chrome")
         return submitter.NEEDS_LOGIN
     print(f"Attached to {saw}")
+
     ctx = submitter.attach(pw)
-    page = ctx.pages[0] if ctx.pages else ctx.new_page()
+    # A tab of its own. Reusing whatever was open meant re-navigating a page
+    # already sitting on that address, which is where ERR_BLOCKED_BY_RESPONSE
+    # came from - and it leaves whatever you were looking at alone.
+    page = ctx.new_page()
+    print(f"{who['name']} ({who.get('team')} {who.get('position')})"
+          f"  {who['key']}")
     print(f"Opening {url}")
-    page.goto(url, wait_until="domcontentloaded", timeout=45000)
-    page.wait_for_timeout(3000)
+    print("This opens the claim form. It does not place a claim - nothing")
+    print("reading submit or confirm is touched.")
+    try:
+        page.goto(url, wait_until="domcontentloaded", timeout=45000)
+        page.wait_for_timeout(3000)
+    except Exception as exc:
+        print()
+        print(f"The page would not open: {type(exc).__name__}: {exc}")
+        print("If that says ERR_BLOCKED_BY_RESPONSE, Yahoo refused the")
+        print("navigation rather than the tab failing - try it by hand in")
+        print("that same Chrome window and see what it shows you.")
+        return 1
 
     title = ""
     try:
@@ -255,26 +239,17 @@ def do_probe(pw, league_key, player=None):
         pass
     if signed_out(page.url, title):
         print()
-        # Say where it actually ended up. "You are not signed in" about a
-        # page whose address you cannot see is unarguable-with, and the
-        # address is the whole evidence for the claim.
         print(f"Landed on {page.url[:100]}")
-        print(f"Title: {title[:70]}")
-        print()
-        print("That is the Yahoo login page, so the attached Chrome is not")
-        print("signed in to Yahoo. Sign in in that window and run this again.")
-        print("Nothing here will try to log in for you - Yahoo challenges")
-        print("automated logins, and it is right to.")
+        print("That is the Yahoo login page, so that Chrome is not signed in")
+        print("to Yahoo. Sign in in that window and run this again.")
         return submitter.NEEDS_LOGIN
 
-    print(f"  page                {title[:70]}")
-    print(describe(look(page)))
-    if player:
-        return do_claim_probe(pw, page, player)
     print()
-    print("Nothing was clicked. To see what the claim form wants, name a")
-    print("free agent from that list:")
-    print("    python3 yahoo_submitter.py --probe LEAGUE_KEY --player SURNAME")
+    print(f"  page                {title[:70]}")
+    print(describe_claim(look_at_claim(page)))
+    print()
+    print("No claim was placed. Send this and the claim flow gets written")
+    print("from it.")
     return 0
 
 

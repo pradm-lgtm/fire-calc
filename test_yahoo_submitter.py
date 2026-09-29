@@ -35,17 +35,50 @@ class KeysIntoAddresses(unittest.TestCase):
                 self.assertIsNone(ys.league_number(bad))
                 self.assertIsNone(ys.players_url(bad))
 
-    def test_the_players_url_is_the_free_agents_list(self):
-        url = ys.players_url("470.l.715420")
-        self.assertIn("/f1/715420/players", url)
-        self.assertIn("status=A", url)
-
     def test_a_team_key_becomes_that_team_page(self):
         self.assertEqual(ys.team_url("470.l.715420.t.2"),
                          f"{ys.SITE}/f1/715420/2")
 
     def test_a_league_key_is_not_a_team(self):
         self.assertIsNone(ys.team_url("470.l.715420"))
+
+
+class StraightToTheForm(unittest.TestCase):
+    """The API says who is available; the browser only places the claim.
+
+    Walking the fifty-row players page to find an Add link was scraping
+    for something an endpoint already answers - and it was the page Yahoo
+    refused with ERR_BLOCKED_BY_RESPONSE the second time it was asked.
+    """
+
+    def test_a_player_key_gives_up_its_id(self):
+        self.assertEqual(ys.player_id("470.p.12345"), "12345")
+
+    def test_a_league_key_is_not_a_player(self):
+        self.assertIsNone(ys.player_id("470.l.715420"))
+
+    def test_the_claim_address_carries_both_ids(self):
+        url = ys.claim_url("470.l.715420", "470.p.12345")
+        self.assertIn("/f1/715420/addplayer", url)
+        self.assertIn("apid=12345", url)
+
+    def test_a_bad_id_gives_no_address_rather_than_a_broken_one(self):
+        self.assertIsNone(ys.claim_url("470.l.715420", "junk"))
+        self.assertIsNone(ys.claim_url("junk", "470.p.12345"))
+
+    def test_matching_is_case_blind_and_partial(self):
+        wire = [{"name": "C.J. Stroud"}, {"name": "Ashton Jeanty"}]
+        self.assertEqual([p["name"] for p in ys.matching(wire, "STROUD")],
+                         ["C.J. Stroud"])
+
+    def test_an_ambiguous_name_returns_all_of_them(self):
+        """So the probe can refuse rather than pick one for you."""
+        wire = [{"name": "Josh Allen"}, {"name": "Josh Jacobs"}]
+        self.assertEqual(len(ys.matching(wire, "josh")), 2)
+
+    def test_an_empty_name_matches_nobody(self):
+        self.assertEqual(ys.matching([{"name": "Anyone"}], ""), [])
+        self.assertEqual(ys.matching([{"name": "Anyone"}], None), [])
 
 
 class KnowingYouAreSignedOut(unittest.TestCase):
@@ -70,33 +103,6 @@ class KnowingYouAreSignedOut(unittest.TestCase):
             "Slim Pickens - The Minor League"))
 
 
-class TheReport(unittest.TestCase):
-    """What the probe found, said plainly enough to act on."""
-
-    def test_it_says_when_it_found_nothing(self):
-        said = ys.describe({"add_controls": 0, "rows": 0})
-        self.assertIn("none found", said)
-
-    def test_it_counts_what_it_saw(self):
-        said = ys.describe({"add_controls": 25, "rows": 25, "dialog": False})
-        self.assertIn("25", said)
-        self.assertNotIn("none found", said)
-
-    def test_a_drop_control_is_reported_as_yahoo_asking_for_one(self):
-        said = ys.describe({"add_controls": 1, "drop_controls": 3})
-        self.assertIn("asks for the drop", said)
-
-    def test_no_drop_control_is_reported_as_maybe_not_needing_one(self):
-        said = ys.describe({"add_controls": 1, "drop_controls": 0})
-        self.assertIn("may not need one", said)
-
-    def test_not_having_looked_is_not_the_same_as_having_found_none(self):
-        """The distinction the Sleeper version got wrong for two rounds."""
-        said = ys.describe({"add_controls": 1, "drop_controls": None})
-        self.assertIn("not reached", said)
-        self.assertNotIn("may not need one", said)
-
-
 class TheProbeNeverPlacesAClaim(unittest.TestCase):
     """Opening the form is reversible. Placing a claim is not.
 
@@ -105,26 +111,26 @@ class TheProbeNeverPlacesAClaim(unittest.TestCase):
     is the sort of thing that is true right up until the markup moves.
     """
 
-    def test_no_committing_word_is_ever_clicked(self):
-        source = open("yahoo_submitter.py").read()
-        for line in source.splitlines():
-            if ".click(" not in line or line.strip().startswith("#"):
-                continue
-            for word in ys.COMMITTING:
-                self.assertNotIn(word, line.lower(), line)
+    def test_it_clicks_nothing_at_all(self):
+        """Once the lookup moved to the API there was nothing left to click.
 
-    def test_the_only_click_is_the_add_control(self):
+        The probe opens an address and reads the form. No control is
+        touched, which is a stronger promise than clicking only safe ones
+        and does not rely on a word list staying accurate.
+        """
         source = open("yahoo_submitter.py").read()
         clicks = [l.strip() for l in source.splitlines()
                   if ".click(" in l and not l.strip().startswith("#")]
-        self.assertEqual(len(clicks), 1, clicks)
-        self.assertTrue(clicks[0].startswith("control.click("), clicks[0])
+        self.assertEqual(clicks, [])
 
-    def test_it_says_so_before_it_clicks(self):
-        """So a person reading the output knows what was done on their
-        account, which is the whole basis for trusting the next step."""
+    def test_nor_does_it_fill_anything_in(self):
         source = open("yahoo_submitter.py").read()
-        self.assertIn("it does not", source)
+        for verb in (".fill(", ".select_option(", ".check(", ".press("):
+            self.assertNotIn(verb, source)
+
+    def test_it_says_what_it_is_about_to_do(self):
+        source = open("yahoo_submitter.py").read()
+        self.assertIn("It does not place a claim", source)
         self.assertIn("No claim was placed", source)
 
 
@@ -178,18 +184,33 @@ class ItWillNotLaunchABrowserOfItsOwn(unittest.TestCase):
         ys.submitter.attach = self.real_attach
         ys.submitter.browser_context = self.real_ctx
 
+    def wire_says(self, players):
+        import yahoo_client as yc
+        self.real_wire = yc.free_agents
+        yc.free_agents = lambda *a, **k: players
+
+    def tearDownWire(self):
+        import yahoo_client as yc
+        if hasattr(self, "real_wire"):
+            yc.free_agents = self.real_wire
+
     def test_with_nothing_listening_it_says_so_and_stops(self):
+        self.wire_says([{"name": "C.J. Stroud", "key": "470.p.12345"}])
         ys.submitter.cdp_probe = lambda *a, **k: (False, "ConnectionRefused")
 
         def explode(*a, **k):
             raise AssertionError("launched a browser of its own")
         ys.submitter.browser_context = explode
         ys.submitter.attach = explode
-        self.assertEqual(ys.do_probe(None, "470.l.715420"),
-                         ys.submitter.NEEDS_LOGIN)
+        try:
+            self.assertEqual(ys.do_probe(None, "470.l.715420", "stroud"),
+                             ys.submitter.NEEDS_LOGIN)
+        finally:
+            self.tearDownWire()
 
     def test_it_never_calls_browser_context_at_all(self):
         """Not even when Chrome IS listening - attach is the only path."""
+        self.wire_says([{"name": "C.J. Stroud", "key": "470.p.12345"}])
         ys.submitter.cdp_probe = lambda *a, **k: (True, "Chrome/152")
 
         def explode(*a, **k):
@@ -197,20 +218,35 @@ class ItWillNotLaunchABrowserOfItsOwn(unittest.TestCase):
         ys.submitter.browser_context = explode
         ys.submitter.attach = lambda pw: (_ for _ in ()).throw(
             RuntimeError("attach reached, which is correct"))
-        with self.assertRaises(RuntimeError):
-            ys.do_probe(None, "470.l.715420")
+        try:
+            with self.assertRaises(RuntimeError):
+                ys.do_probe(None, "470.l.715420", "stroud")
+        finally:
+            self.tearDownWire()
+
+    def test_an_unknown_player_never_reaches_a_browser_either(self):
+        self.wire_says([{"name": "Someone Else", "key": "470.p.1"}])
+        ys.submitter.cdp_probe = lambda *a, **k: (True, "Chrome/152")
+
+        def explode(*a, **k):
+            raise AssertionError("opened a browser for a player not free")
+        ys.submitter.attach = explode
+        try:
+            self.assertEqual(ys.do_probe(None, "470.l.715420", "stroud"), 1)
+        finally:
+            self.tearDownWire()
 
 
 class TheProbeRefusesBeforeItOpensAnything(unittest.TestCase):
 
-    def test_a_bad_key_never_reaches_a_browser(self):
+    def test_a_bad_league_key_never_reaches_a_browser(self):
         def explode(*a, **k):
             raise AssertionError("opened a browser for a key it should "
                                  "have refused")
         real = ys.submitter.browser_context
         ys.submitter.browser_context = explode
         try:
-            self.assertEqual(ys.do_probe(None, "not-a-key"), 1)
+            self.assertEqual(ys.do_probe(None, "not-a-key", "x"), 1)
         finally:
             ys.submitter.browser_context = real
 
