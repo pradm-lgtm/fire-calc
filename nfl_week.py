@@ -268,6 +268,22 @@ def _first(row, keys):
     return None
 
 
+STATS = PROJECTIONS.replace("/projections/", "/stats/")
+
+
+def stat_rows(season, week):
+    """What players actually scored in a week. [] if unavailable.
+
+    The model had never seen a point anyone really scored. It ran on
+    projections alone, so a man who put up sixteen on Sunday was worth
+    exactly what somebody had guessed about him on Saturday - and being
+    offered as the drop on Monday was the natural consequence.
+    """
+    data = _get(STATS.format(season=season, week=week))
+    rows = data if isinstance(data, list) else (data or {}).get("data")
+    return [r for r in rows if isinstance(r, dict)] if isinstance(rows, list) else []
+
+
 def projection_rows(season, week):
     """The week's projection records, as served. [] if unavailable."""
     data = _get(PROJECTIONS.format(season=season, week=week))

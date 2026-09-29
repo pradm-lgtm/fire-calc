@@ -94,7 +94,8 @@ def week_outlook(season, week, players=None, verbose=False):
     says who anyone plays next week.
     """
     import nfl_week
-    out = {"points": {}, "next_points": {}, "next_games": {}, "dst_ranks": {}}
+    out = {"points": {}, "next_points": {}, "next_games": {},
+           "last_points": {}, "dst_ranks": {}}
     try:
         out["points"] = nfl_week.points_from(
             nfl_week.projection_rows(season, week))
@@ -104,6 +105,14 @@ def week_outlook(season, week, players=None, verbose=False):
         ahead = nfl_week.projection_rows(season, int(week) + 1)
         out["next_points"] = nfl_week.points_from(ahead)
         out["next_games"] = nfl_week.matchups_from(ahead)
+    except Exception:
+        pass
+    # What actually happened last week, which is the only hard evidence in
+    # any of this. Everything else here is somebody's forecast.
+    try:
+        if int(week) > 1:
+            out["last_points"] = nfl_week.points_from(
+                nfl_week.stat_rows(season, int(week) - 1))
     except Exception:
         pass
     if players:
@@ -185,8 +194,21 @@ def held_at(mine, players, pos, trending, projected):
 UPGRADE_EDGE = 1.25
 
 
-def worth_the_spot(pid, players, mine, depth, trending, projected, add_score):
+def worth_the_spot(pid, players, mine, depth, trending, projected,
+                   add_score=None):
     """(yes/no, why not) - should this position take another player at all?
+
+    Both sides are measured with keep_value, and that is the whole point.
+    This gate was handed score_player for the candidate and compared it
+    against keep_value for the incumbent - two different scales, because
+    score_player counts pickup momentum and keep_value deliberately does
+    not. A free agent everybody was adding that morning arrived with a
+    thirty-point head start in a comparison meant to ask whether he is
+    better, and quarterbacks worse than the ones already on the roster
+    cleared a bar set at 25% better while being 8% better.
+
+    add_score is still accepted and ignored, so that any caller still
+    passing it gets the right answer rather than a TypeError.
 
     Returns the reason rather than printing it, so a league that produces
     nothing can say which of these it was.
@@ -201,7 +223,9 @@ def worth_the_spot(pid, players, mine, depth, trending, projected, add_score):
     if not mine_here:
         return True, None
     weakest, _weak_pid = mine_here[0]
-    if add_score > weakest * UPGRADE_EDGE:
+    worth = wa.keep_value(players.get(pid) or {}, trending.get(pid, 0),
+                          projected.get(pid))
+    if worth > weakest * UPGRADE_EDGE:
         return True, None
     return False, (f"you already carry {have} {pos}s for {need:g} "
                    f"starting spots, and he is not clearly better than "
@@ -209,22 +233,28 @@ def worth_the_spot(pid, players, mine, depth, trending, projected, add_score):
 
 
 def keeping_points(weeks):
-    """{player_id: points} for judging who to KEEP: this week and next.
+    """{player_id: points} for judging who to KEEP.
+
+    Three numbers, averaged: what he is projected for this week, what he
+    is projected for next week, and what he actually scored last week.
 
     One week is a matchup, and a drop is not a decision about a matchup.
-    Averaging the two weeks we already fetch is not a season projection,
-    but it is twice the evidence at no extra cost, and it stops a single
-    hard defence reading as decline.
+    But the bigger hole was that none of this had ever seen a point
+    anybody really scored - a projection is a guess made before the game,
+    and a man who put up sixteen on Sunday is evidence that guess was low.
+    Throwing that away is how he came to be offered as the drop on Monday.
 
-    Zero is a bye or an inactive rather than an opinion, so a week that
-    projects nothing is left out of the average instead of halving it -
-    the same rule the rest of this file already follows.
+    Zero is a bye, an inactive, or a game not yet played, rather than an
+    opinion - so a number that is nothing is left out of the average
+    instead of dragging it down. The same rule this file already follows
+    three times over, and it keeps being the one that matters.
     """
     here = (weeks or {}).get("points") or {}
     ahead = (weeks or {}).get("next_points") or {}
+    was = (weeks or {}).get("last_points") or {}
     out = {}
-    for pid in set(here) | set(ahead):
-        got = [p for p in (here.get(pid), ahead.get(pid))
+    for pid in set(here) | set(ahead) | set(was):
+        got = [p for p in (here.get(pid), ahead.get(pid), was.get(pid))
                if isinstance(p, (int, float)) and p > 0]
         if got:
             out[pid] = sum(got) / len(got)
@@ -454,7 +484,7 @@ def proposals_for_league(league, user_id, players, trending, texts, max_moves,
                                     shots.get(pid))
         # Before anything about who to drop: do you need another one of him?
         needed, no_thanks = worth_the_spot(pid, players, mine, depth,
-                                           trending, holds, add_score)
+                                           trending, holds)
         if not needed:
             why = why or no_thanks
             continue

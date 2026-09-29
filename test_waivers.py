@@ -659,6 +659,95 @@ class BenchIsNotAVerdict(unittest.TestCase):
         self.assertNotIn("paid", why)
 
 
+class ComparingLikeWithLike(unittest.TestCase):
+    """The positional gate was weighing two different scales.
+
+    The candidate arrived measured by score_player, which counts pickup
+    momentum; the incumbent by keep_value, which deliberately does not. So
+    a free agent everybody was adding that morning came with a thirty-point
+    head start in a comparison meant to ask whether he is any better - and
+    quarterbacks 8% better than the man already rostered cleared a bar set
+    at 25%.
+    """
+
+    PLAYERS = {
+        "free": {"full_name": "Hyped QB", "position": "QB",
+                 "search_rank": 150, "depth_chart_order": 1},
+        "mine": {"full_name": "My QB", "position": "QB",
+                 "search_rank": 90, "depth_chart_order": 1},
+    }
+    MINE = {"starters": ["mine"], "players": ["mine"]}
+    DEPTH = {"QB": (1, 1.0, "ok")}
+
+    def ask(self, trending):
+        return rw.worth_the_spot("free", self.PLAYERS, self.MINE, self.DEPTH,
+                                 trending,
+                                 {"free": 14.0, "mine": 12.0})
+
+    def test_a_hyped_pickup_no_better_than_yours_is_refused(self):
+        ok, _why = self.ask({"free": 20000})
+        self.assertFalse(ok)
+
+    def test_the_hype_changes_nothing_either_way(self):
+        """Momentum must not decide whether somebody is an upgrade."""
+        self.assertEqual(self.ask({"free": 20000}), self.ask({"free": 0}))
+
+    def test_a_genuinely_better_player_still_gets_through(self):
+        players = dict(self.PLAYERS)
+        players["free"] = dict(players["free"], search_rank=10)
+        ok, _why = rw.worth_the_spot("free", players, self.MINE, self.DEPTH,
+                                     {}, {"free": 22.0, "mine": 8.0})
+        self.assertTrue(ok)
+
+    def test_it_tolerates_a_caller_still_passing_add_score(self):
+        ok, _why = rw.worth_the_spot("free", self.PLAYERS, self.MINE,
+                                     self.DEPTH, {}, {"free": 14.0},
+                                     add_score=999.0)
+        self.assertFalse(ok)
+
+
+class WhatHeActuallyDid(unittest.TestCase):
+    """The model had never seen a point anybody really scored.
+
+    It ran on projections alone, so a man who put up sixteen on Sunday was
+    worth whatever had been guessed about him on Saturday - and was offered
+    as the drop on Monday. A projection is a forecast made before the game;
+    the score is what happened.
+    """
+
+    def test_last_week_counts_towards_keeping_him(self):
+        got = rw.keeping_points({"points": {"a": 6.0},
+                                 "next_points": {"a": 7.0},
+                                 "last_points": {"a": 16.0}})
+        self.assertAlmostEqual(got["a"], 29.0 / 3)
+
+    def test_and_it_lifts_a_man_the_projections_undersell(self):
+        with_it = rw.keeping_points({"points": {"a": 6.0},
+                                     "next_points": {"a": 7.0},
+                                     "last_points": {"a": 16.0}})["a"]
+        without = rw.keeping_points({"points": {"a": 6.0},
+                                     "next_points": {"a": 7.0}})["a"]
+        self.assertGreater(with_it, without)
+
+    def test_a_week_he_did_not_play_is_not_held_against_him(self):
+        """Zero is a bye, an inactive, or a game not yet played."""
+        got = rw.keeping_points({"points": {"a": 12.0},
+                                 "last_points": {"a": 0}})
+        self.assertAlmostEqual(got["a"], 12.0)
+
+    def test_a_man_only_last_week_knows_about_still_appears(self):
+        got = rw.keeping_points({"last_points": {"a": 16.0}})
+        self.assertAlmostEqual(got["a"], 16.0)
+
+    def test_week_one_has_no_last_week_and_does_not_fail(self):
+        self.assertEqual(rw.keeping_points({"last_points": {}}), {})
+
+    def test_the_outlook_asks_for_it(self):
+        source = open("run_weekly.py").read()
+        self.assertIn("last_points", source)
+        self.assertIn("stat_rows", source)
+
+
 class SilenceHasToReplaceWhatCameBefore(unittest.TestCase):
     """A week with nothing to propose is a result, not an absence.
 
