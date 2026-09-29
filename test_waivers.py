@@ -659,6 +659,38 @@ class BenchIsNotAVerdict(unittest.TestCase):
         self.assertNotIn("paid", why)
 
 
+class SilenceHasToReplaceWhatCameBefore(unittest.TestCase):
+    """A week with nothing to propose is a result, not an absence.
+
+    The run returned early when it produced nothing, so the previous run
+    stayed on the page. That made three different things look the same: a
+    job that never ran, a job that failed, and a model that correctly
+    decided against every move - and meanwhile the page went on
+    recommending what the old model had said.
+    """
+
+    def test_a_forced_empty_run_still_pushes(self):
+        source = open("run_weekly.py").read()
+        start = source.index("if not all_proposals:")
+        block = source[start:start + 700]
+        self.assertIn("force or update", block)
+
+    def test_an_unforced_empty_run_says_the_site_is_unchanged(self):
+        source = open("run_weekly.py").read()
+        self.assertIn("still shows the last", source)
+
+    def test_a_local_run_says_it_reached_no_website(self):
+        """FANTASY_API_URL unset wrote locally and said "Filed 3 proposals",
+        which reads like the job is done."""
+        source = open("run_weekly.py").read()
+        self.assertIn("did NOT reach the website", source)
+
+    def test_a_refused_push_is_a_failure_not_a_success(self):
+        source = open("run_weekly.py").read()
+        spot = source.index('result.get("skipped")')
+        self.assertIn("return 1", source[spot:spot + 500])
+
+
 class ThreeQuarterbacksIsNeverTheAnswer(unittest.TestCase):
     """The add side never asked whether you needed the position.
 

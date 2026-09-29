@@ -913,7 +913,14 @@ def _run(username, urls, moves, dry_run, db_path, force=False,
 
         if not all_proposals:
             print("No moves worth proposing this week.")
-            if not quiet:
+            # Forced runs push even when empty. Returning here left the
+            # previous run standing, so a week the model correctly decided
+            # against looked exactly like a week the job never ran - and
+            # the page went on recommending what the old model had said,
+            # which is the worst of the three outcomes.
+            if not quiet and not (force or update):
+                print("Nothing was sent, so the site still shows the last")
+                print("run. Use --force to replace it with this result.")
                 return 0
 
         if dry_run:
