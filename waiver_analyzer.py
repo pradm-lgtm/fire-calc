@@ -215,7 +215,15 @@ def score_player(player, trend_count, projected=None):
             * availability_multiplier(player))
 
 
-def keep_value(player, trend_count=0, projected=None):
+# How much of a keep decision a rest-of-season rank is, when somebody has
+# published one. Most of it: it is the only number here produced by a
+# person answering the actual question - is he worth holding from here -
+# rather than a forecast of one Sunday or a count of how often a name is
+# searched for.
+ROS_SHARE = 0.65
+
+
+def keep_value(player, trend_count=0, projected=None, ros=None):
     """What he is worth to you FROM HERE: use it to decide who to drop.
 
     Momentum is discarded, which is why trend_count is accepted and then
@@ -231,7 +239,10 @@ def keep_value(player, trend_count=0, projected=None):
     better player was offered instead. Whatever is genuinely behind the
     momentum shows up in the projection, which this does read.
     """
-    return base_value(player, 0, projected) * keep_multiplier(player)
+    worth = base_value(player, 0, projected)
+    if isinstance(ros, (int, float)):
+        worth = ROS_SHARE * float(ros) + (1 - ROS_SHARE) * worth
+    return worth * keep_multiplier(player)
 
 
 def describe_reason(player, trend_count):

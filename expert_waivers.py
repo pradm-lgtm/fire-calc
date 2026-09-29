@@ -39,6 +39,7 @@ from pathlib import Path
 import expert_extract as ex
 import localenv
 import sleeper_client as sc
+import ros as rs
 import waiver_analyzer as wa
 
 FLEX_SLOTS = {"FLEX", "WRRB_FLEX", "REC_FLEX", "SUPER_FLEX", "IDP_FLEX"}
@@ -197,7 +198,7 @@ def draft_weight(cost, week=1):
 
 
 def drop_candidates(roster, players, trending, depth, cost=None, week=1,
-                    projected=None):
+                    projected=None, ros=None):
     """Everyone you could cut, weakest first.
 
     The whole roster, not just the bench: dropping a starter is a normal
@@ -215,6 +216,7 @@ def drop_candidates(roster, players, trending, depth, cost=None, week=1,
     protected = wa.never_drop_names()
     cost = cost or {}
     projected = projected or {}
+    ros = ros or {}
 
     ranked = []
     for pid in list(bench) + list(starters):
@@ -225,7 +227,7 @@ def drop_candidates(roster, players, trending, depth, cost=None, week=1,
         # keep_value, not score_player: this is a question about owning him,
         # and score_player answers a question about starting him this week.
         score = wa.keep_value(player, trending.get(pid, 0),
-                              projected.get(pid))
+                              projected.get(pid), rs.worth(ros, pid))
         label = depth.get(player.get("position"), (0, 0, "ok"))[2]
         penalty = {"thin": 1000, "ok": 100, "deep": 0, "extra": 0}.get(label, 100)
         paid = draft_weight(cost.get(pid), week)
@@ -243,7 +245,7 @@ def drop_candidates(roster, players, trending, depth, cost=None, week=1,
 
 
 def choose_drop(roster, players, trending, depth, protect_ids,
-                projected=None):
+                projected=None, ros=None):
     """Weakest bench player, preferring positions with surplus depth.
 
     Never proposes dropping from a position labelled thin unless nothing
@@ -263,7 +265,8 @@ def choose_drop(roster, players, trending, depth, protect_ids,
         if wa.is_protected(p, protected):
             continue  # on the never-drop list; not a candidate at any score
         score = wa.keep_value(p, trending.get(pid, 0),
-                              (projected or {}).get(pid))
+                              (projected or {}).get(pid),
+                              rs.worth(ros, pid))
         label = depth.get(p.get("position"), (0, 0, "ok"))[2]
         penalty = {"thin": 1000, "ok": 100, "deep": 0, "extra": 0}.get(label, 100)
         ranked.append((score + penalty, score, pid, p, label))

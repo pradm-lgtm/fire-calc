@@ -95,7 +95,7 @@ def week_outlook(season, week, players=None, verbose=False):
     """
     import nfl_week
     out = {"points": {}, "next_points": {}, "next_games": {},
-           "last_points": {}, "dst_ranks": {}}
+           "last_points": {}, "dst_ranks": {}, "ros": {}}
     try:
         out["points"] = nfl_week.points_from(
             nfl_week.projection_rows(season, week))
@@ -117,6 +117,10 @@ def week_outlook(season, week, players=None, verbose=False):
         pass
     if players:
         out["dst_ranks"] = defense_ranks(players, verbose)
+        import ros as ros_ranks
+        out["ros"] = ros_ranks.fetch(players, verbose)
+        if verbose:
+            print(f"  rest-of-season ranks: {len(out['ros'])} players")
     return out
 
 
@@ -167,7 +171,8 @@ def defense_proposal(league, mine, players, rosters, weeks, remaining,
     )
 
 
-def held_at(mine, players, pos, trending, projected):
+def held_at(mine, players, pos, trending, projected, ros=None):
+    import ros as rs
     """What you already have at one position, worst first.
 
     The comparison that was never being made. A claim is not "is this man
@@ -182,7 +187,8 @@ def held_at(mine, players, pos, trending, projected):
         if not player or (player.get("position") or "") != pos:
             continue
         out.append((wa.keep_value(player, trending.get(pid, 0),
-                                  projected.get(pid)), pid))
+                                  projected.get(pid),
+                                  rs.worth(ros, pid)), pid))
     return sorted(out)
 
 
@@ -195,7 +201,7 @@ UPGRADE_EDGE = 1.25
 
 
 def worth_the_spot(pid, players, mine, depth, trending, projected,
-                   add_score=None):
+                   add_score=None, ros=None):
     """(yes/no, why not) - should this position take another player at all?
 
     Both sides are measured with keep_value, and that is the whole point.
@@ -219,12 +225,13 @@ def worth_the_spot(pid, players, mine, depth, trending, projected,
     have, need, label = depth.get(pos, (0, 0, "ok"))
     if label == "thin":
         return True, None
-    mine_here = held_at(mine, players, pos, trending, projected)
+    mine_here = held_at(mine, players, pos, trending, projected, ros)
     if not mine_here:
         return True, None
     weakest, _weak_pid = mine_here[0]
+    import ros as rs
     worth = wa.keep_value(players.get(pid) or {}, trending.get(pid, 0),
-                          projected.get(pid))
+                          projected.get(pid), rs.worth(ros, pid))
     if worth > weakest * UPGRADE_EDGE:
         return True, None
     return False, (f"you already carry {have} {pos}s for {need:g} "
@@ -421,6 +428,9 @@ def proposals_for_league(league, user_id, players, trending, texts, max_moves,
     # he does on Sunday says whether to add him, and what he does over the
     # next fortnight says whether to keep him.
     holds = keeping_points(weeks)
+    # What analysts say he is worth for the rest of the year, which is the
+    # question a drop actually asks and the one nothing here was answering.
+    season_ranks = (weeks or {}).get("ros") or {}
 
     def resting(pid):
         team = (players.get(pid) or {}).get("team")
@@ -454,9 +464,10 @@ def proposals_for_league(league, user_id, players, trending, texts, max_moves,
         # picked. Whether there is anyone worth dropping is half the
         # decision, and it was being made for you out of sight.
         candidates = ew.drop_candidates(mine, players, trending, depth,
-                                        cost=cost, week=week, projected=holds)
+                                        cost=cost, week=week,
+                                        projected=holds, ros=season_ranks)
         drops = ew.choose_drop(mine, players, trending, depth, protect,
-                               projected=holds)
+                               projected=holds, ros=season_ranks)
         if drops:
             _, drop_score, drop_pid, drop_player, drop_label = drops[0]
         else:
@@ -484,7 +495,7 @@ def proposals_for_league(league, user_id, players, trending, texts, max_moves,
                                     shots.get(pid))
         # Before anything about who to drop: do you need another one of him?
         needed, no_thanks = worth_the_spot(pid, players, mine, depth,
-                                           trending, holds)
+                                           trending, holds, ros=season_ranks)
         if not needed:
             why = why or no_thanks
             continue
@@ -820,7 +831,7 @@ def explain(username, name, db_path=None):
     return 0
 
 
-def main_for(username, db_path, moves=3, force=False):
+def main_for(username, db_path, moves=6, force=False):
     """Run the job programmatically, for the host's own scheduler."""
     return _run(username, [], moves, False, db_path, force)
 
@@ -831,7 +842,8 @@ def main():
     ap.add_argument("username", nargs="?", default=None,
                     help="Sleeper username (or set it in sources.json)")
     ap.add_argument("--url", action="append", default=[])
-    ap.add_argument("--moves", type=int, default=3)
+    ap.add_argument("--moves", type=int, default=6,
+                    help="proposals per league (default 6)")
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--db", default=str(st.DB_PATH))
     ap.add_argument("--why", metavar="PLAYER",
