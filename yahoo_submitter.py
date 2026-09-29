@@ -18,6 +18,25 @@ before anything is automated against it: the probe opens the real waiver
 page in your signed-in Chrome and describes the controls it finds, and the
 selectors are written afterwards, from that.
 
+WHAT THE REAL PAGE TURNED OUT TO BE
+
+Recorded from a screenshot of it, because the probe's own selectors found
+nothing on a page that plainly has plenty - which is a fault in the probe,
+not an answer about the page. When this work resumes, start here:
+
+  * The address /f1/<league>/addplayer?apid=<id> is right, and opens a page
+    headed "Claim Player From Waivers".
+  * A "Player to Add" table holds the man being claimed, with a + control.
+  * A "Select a player to drop" table lists the whole roster, each row
+    carrying a round - button. So Yahoo DOES want the drop chosen in the
+    same step, as Sleeper does, and the drop button is very likely what
+    commits the claim - there is no Submit, only Cancel.
+  * No bid or FAAB field anywhere, which confirms waiver priority from the
+    page as well as from the settings.
+
+The probe counted zero buttons here, so its selectors want rewriting
+against the saved HTML rather than trusted.
+
 WHAT IS DIFFERENT FROM SLEEPER
 
 These leagues run waiver priority, not FAAB. There is no bid to type and
@@ -38,6 +57,10 @@ import sys
 import submitter
 
 SITE = "https://football.fantasysports.yahoo.com"
+
+# Where the probe leaves the page it read, for when the summary of it
+# is not enough. Not committed: it is a page from your account.
+DUMP = "yahoo-claim-page.html"
 
 
 def league_number(league_key):
@@ -107,8 +130,32 @@ def signed_out(url, title):
                ("login.yahoo", "/login", "sign in to yahoo"))
 
 
+def read_failed(found):
+    """Nothing was found at all, which is not the same as nothing being there.
+
+    A claim form with no buttons, no inputs and no forms on it is not a
+    claim form. Either it had not finished rendering, or it is an
+    interstitial, or the selectors are looking for markup Yahoo does not
+    use - and every one of those means the numbers below say nothing about
+    what a claim needs. Reporting "no drop control, so a claim can be filed
+    on its own" from a failed read is how the Sleeper submitter got written
+    against a page it had never actually seen.
+    """
+    return not any((found.get("buttons"), found.get("inputs"),
+                    found.get("forms"), found.get("drop_controls"),
+                    found.get("bid_inputs")))
+
+
 def describe_claim(found):
     """What the form behind Add turns out to want."""
+    if read_failed(found):
+        return ("  nothing readable on that page - no buttons, no inputs, "
+                "no forms.\n"
+                "      That is not an empty claim form, it is a failed read."
+                "\n"
+                "      Either it had not rendered, or it is not the page we"
+                " think.\n"
+                "      Nothing below should be concluded from it.")
     lines = [f"  opened as           {found.get('shape') or 'unknown'}"]
     if found.get("url"):
         lines.append(f"  address             {found['url'][:90]}")
@@ -124,6 +171,12 @@ def describe_claim(found):
                      " a look")
     buttons = found.get("buttons") or []
     lines.append(f"  buttons             {', '.join(buttons) or 'none found'}")
+    lines.append(f"  forms               {found.get('forms') or 0}")
+    names = found.get("inputs") or []
+    lines.append(f"  input names         {', '.join(names[:12]) or 'none'}")
+    heading = (found.get("heading") or "").strip()
+    if heading:
+        lines.append(f"  first heading       {heading[:70]}")
     return "\n".join(lines)
 
 
@@ -144,8 +197,28 @@ def look_at_claim(page):
                 labels.append(text[:30])
     except Exception:
         pass
+    names = []
+    try:
+        fields = page.locator("input, select, textarea")
+        for i in range(min(fields.count(), 25)):
+            got = (fields.nth(i).get_attribute("name")
+                   or fields.nth(i).get_attribute("id") or "")
+            if got and got not in names:
+                names.append(got[:30])
+    except Exception:
+        pass
+    heading = ""
+    try:
+        head = page.locator("h1, h2").first
+        if head.count():
+            heading = head.inner_text(timeout=1000)
+    except Exception:
+        pass
     dialog = count("[role='dialog'], .Modal, #modal")
     return {
+        "forms": count("form"),
+        "inputs": names,
+        "heading": heading,
         "shape": "a dialog on the same page" if dialog else "a new page",
         "url": page.url,
         "drop_controls": count(
@@ -223,7 +296,11 @@ def do_probe(pw, league_key, player=None):
     print("reading submit or confirm is touched.")
     try:
         page.goto(url, wait_until="domcontentloaded", timeout=45000)
-        page.wait_for_timeout(3000)
+        try:
+            page.wait_for_load_state("networkidle", timeout=15000)
+        except Exception:
+            pass
+        page.wait_for_timeout(2000)
     except Exception as exc:
         print()
         print(f"The page would not open: {type(exc).__name__}: {exc}")
@@ -247,6 +324,16 @@ def do_probe(pw, league_key, player=None):
     print()
     print(f"  page                {title[:70]}")
     print(describe_claim(look_at_claim(page)))
+    # Kept because the summary above is only as good as the selectors that
+    # produced it, and when it comes back empty the page itself is the only
+    # way to find out why.
+    try:
+        with open(DUMP, "w") as fh:
+            fh.write(page.content())
+        print(f"  page saved to       {DUMP}")
+    except Exception as exc:
+        print(f"  could not save the page: {type(exc).__name__}")
+
     print()
     print("No claim was placed. Send this and the claim flow gets written")
     print("from it.")

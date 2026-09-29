@@ -17,3 +17,4 @@ failed-*.log
 # The marker that says Yahoo access has been announced.
 .yahoo-ready
 .yahoo-asked
+yahoo-claim-page.html

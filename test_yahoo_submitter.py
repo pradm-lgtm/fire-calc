@@ -134,6 +134,61 @@ class TheProbeNeverPlacesAClaim(unittest.TestCase):
         self.assertIn("No claim was placed", source)
 
 
+class AFailedReadIsNotAnEmptyForm(unittest.TestCase):
+    """The distinction that keeps costing rounds on this project.
+
+    A claim form with no buttons, no inputs and no forms on it is not a
+    claim form that needs nothing. It is a page that did not render, or an
+    interstitial, or markup our selectors do not match - and concluding "no
+    drop control, so a claim can be filed on its own" from that is how the
+    Sleeper submitter came to be written against a page it had never seen.
+    """
+
+    EMPTY = {"buttons": [], "inputs": [], "forms": 0,
+             "drop_controls": 0, "bid_inputs": 0}
+
+    def test_nothing_found_at_all_is_called_a_failed_read(self):
+        said = ys.describe_claim(self.EMPTY)
+        self.assertIn("failed read", said)
+
+    def test_and_it_draws_no_conclusion_from_it(self):
+        said = ys.describe_claim(self.EMPTY)
+        self.assertNotIn("can be filed on its own", said)
+        self.assertNotIn("wants the drop", said)
+
+    def test_one_real_control_is_enough_to_trust_the_rest(self):
+        said = ys.describe_claim(dict(self.EMPTY, buttons=["Submit"]))
+        self.assertNotIn("failed read", said)
+        self.assertIn("can be filed on its own", said)
+
+    def test_a_form_alone_counts_as_readable(self):
+        self.assertFalse(ys.read_failed(dict(self.EMPTY, forms=1)))
+
+    def test_an_input_alone_counts_as_readable(self):
+        self.assertFalse(ys.read_failed(dict(self.EMPTY, inputs=["apid"])))
+
+    def test_a_drop_control_alone_counts_as_readable(self):
+        self.assertFalse(ys.read_failed(dict(self.EMPTY, drop_controls=2)))
+
+    def test_an_empty_report_is_empty_not_an_exception(self):
+        self.assertIn("failed read", ys.describe_claim({}))
+
+
+class WhatItKeeps(unittest.TestCase):
+
+    def test_the_saved_page_is_not_something_to_commit(self):
+        """It is a page out of his own fantasy account."""
+        import os
+        here = os.path.dirname(os.path.abspath(ys.__file__))
+        for name in ("gitignore.fantasy", ".gitignore"):
+            path = os.path.join(here, name)
+            if os.path.exists(path):
+                with open(path) as fh:
+                    self.assertIn(ys.DUMP, fh.read())
+                return
+        self.fail("no gitignore found")
+
+
 class ReadingTheClaimForm(unittest.TestCase):
     """The question the Sleeper version answered only after two rewrites."""
 
@@ -142,7 +197,7 @@ class ReadingTheClaimForm(unittest.TestCase):
         self.assertIn("wants the drop chosen here", said)
 
     def test_none_means_a_claim_can_stand_alone(self):
-        said = ys.describe_claim({"drop_controls": 0})
+        said = ys.describe_claim({"drop_controls": 0, "forms": 1})
         self.assertIn("on its own", said)
 
     def test_a_bid_field_is_flagged_as_surprising(self):
@@ -161,7 +216,8 @@ class ReadingTheClaimForm(unittest.TestCase):
         self.assertIn("Cancel", said)
 
     def test_no_buttons_says_so_rather_than_printing_an_empty_list(self):
-        self.assertIn("none found", ys.describe_claim({"buttons": []}))
+        self.assertIn("none found",
+                      ys.describe_claim({"buttons": [], "forms": 1}))
 
 
 class ItWillNotLaunchABrowserOfItsOwn(unittest.TestCase):
