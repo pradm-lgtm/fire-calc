@@ -659,6 +659,69 @@ class BenchIsNotAVerdict(unittest.TestCase):
         self.assertNotIn("paid", why)
 
 
+class TheNudgesWereNotNudges(unittest.TestCase):
+    """Being in this week's lineup, and what you paid in August.
+
+    Both are meant to break ties between players of similar worth. Both
+    were the same size as an entire keep value, so they decided the order
+    instead: a receiver worth 41.6 was offered ahead of one worth 38.5
+    because the second was in that week's lineup, and a fifth-round pick
+    carried 36.7 points against keep values in the thirties - what you
+    paid in August outweighing everything known about him since.
+    """
+
+    def test_the_lineup_nudge_is_a_nudge_against_the_scale_it_sits_on(self):
+        """Keep values run to about a hundred. This is a tiebreaker.
+
+        At 40 it was nearly half of that, which is not a tiebreaker but a
+        verdict - and it decided the LEHG order, offering a better
+        receiver ahead of a worse one who happened to be starting. Under
+        a tenth of the scale it can still settle two men of similar worth
+        and cannot overturn a real gap between them.
+        """
+        self.assertLess(ew.STARTER_WEIGHT, 10)
+
+    def test_a_middle_round_pick_no_longer_outweighs_a_player(self):
+        paid = ew.draft_weight({"round": 5}, week=3)
+        self.assertLess(paid, 15)
+
+    def test_a_first_round_pick_still_counts_for_something(self):
+        self.assertGreater(ew.draft_weight({"round": 1}, week=3), 5)
+
+    def test_an_early_pick_is_worth_more_than_a_late_one(self):
+        self.assertGreater(ew.draft_weight({"round": 2}, week=3),
+                           ew.draft_weight({"round": 9}, week=3))
+
+    def test_it_still_fades_as_the_season_goes_on(self):
+        self.assertGreater(ew.draft_weight({"round": 3}, week=2),
+                           ew.draft_weight({"round": 3}, week=12))
+
+    def test_an_auction_price_is_on_the_same_scale_as_a_round(self):
+        """A $14 receiver and a fifth-rounder should not differ tenfold."""
+        auction = ew.draft_weight({"amount": 14}, week=3)
+        rounds = ew.draft_weight({"round": 5}, week=3)
+        self.assertLess(abs(auction - rounds), 10)
+
+    def test_the_order_follows_worth_not_who_is_starting(self):
+        """The LEHG rows that prompted this, with the real numbers."""
+        players = {
+            "pierce": {"full_name": "Alec Pierce", "position": "WR",
+                       "search_rank": 900},
+            "burden": {"full_name": "Luther Burden", "position": "WR",
+                       "search_rank": 40, "depth_chart_order": 2},
+            "vele": {"full_name": "Devaughn Vele", "position": "WR",
+                     "search_rank": 120, "depth_chart_order": 2},
+        }
+        roster = {"starters": ["vele"],
+                  "players": ["pierce", "burden", "vele"]}
+        order = [r[2] for r in ew.drop_candidates(
+            roster, players, {}, {"WR": (3, 2.0, "deep")},
+            cost={"pierce": {"round": 1}, "burden": {"round": 5}}, week=3,
+            projected={"pierce": 1.0, "burden": 12.0, "vele": 11.0})]
+        self.assertEqual(order[0], "pierce")
+        self.assertLess(order.index("vele"), order.index("burden"))
+
+
 class APositionTheLeagueDoesNotUse(unittest.TestCase):
     """LEHG has no defense slot and was proposed the Steelers defense.
 

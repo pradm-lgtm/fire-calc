@@ -763,9 +763,14 @@ def explain(username, name, db_path=None):
         print(f"Nobody called {name} in Sleeper's player list.")
         return 1
     trending = wa.trending_adds()
-    outlook = week_outlook(season, week)
+    import ros as rs
+    outlook = week_outlook(season, week, players)
     shots = outlook.get("points") or {}
     holds = keeping_points(outlook)
+    # The diagnostic has to compute what the run computes. Without this it
+    # printed a keep value the site never used, which is a bad thing for
+    # the tool you reach for when the site looks wrong.
+    season_ranks = outlook.get("ros") or {}
 
     for pid in hits[:5]:
         p = players[pid]
@@ -788,9 +793,11 @@ def explain(username, name, db_path=None):
               f"{(outlook.get('next_points') or {}).get(pid, '(none)')}")
         print(f"  worth adding this week "
               f"{wa.score_player(p, trending.get(pid, 0), shot):.1f}")
+        rank = season_ranks.get(pid)
+        print(f"  rest-of-season rank    "
+              f"{rank if rank else 'unranked - nobody is holding him'}")
         print(f"  worth keeping          "
-              f"{wa.keep_value(p, trending.get(pid, 0), hold):.1f}"
-              "   (over both weeks)")
+              f"{wa.keep_value(p, trending.get(pid, 0), hold, rs.worth(season_ranks, pid)):.1f}")
 
         for league in sc.user_leagues(user["user_id"], season):
             rosters = sc.league_rosters(league["league_id"])
@@ -803,7 +810,8 @@ def explain(username, name, db_path=None):
             except Exception:
                 cost = {}
             ranked = ew.drop_candidates(mine, players, trending, depth,
-                                        cost=cost, week=week, projected=holds)
+                                        cost=cost, week=week,
+                                        projected=holds, ros=season_ranks)
             order = [row[2] for row in ranked]
             if pid not in order:
                 print(f"  in {league.get('name')}: protected, never offered")

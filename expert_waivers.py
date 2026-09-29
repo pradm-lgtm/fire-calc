@@ -182,7 +182,12 @@ def positional_depth(league, roster, players):
 # offered before any starter - and people sit out weeks for reasons that say
 # nothing about their value, a bye being the obvious one. Small enough that
 # a clearly better player on the bench is still offered after a weak starter.
-STARTER_WEIGHT = 40
+# Still a tiebreaker, and now actually the size of one. At 40 it was the
+# same size as a whole keep value, so it decided the order rather than
+# breaking ties in it: a receiver worth 41.6 was offered ahead of one worth
+# 38.5 because the second happened to be in this week's lineup. Being in
+# the lineup is a fact about Sunday; a drop is a decision about the season.
+STARTER_WEIGHT = 8
 
 
 def draft_weight(cost, week=1):
@@ -197,17 +202,23 @@ def draft_weight(cost, week=1):
     the sunk cost it always was. So this is a strong tiebreaker early, a
     faint one late, and never a veto at any point - the whole argument for
     showing it is that you get to overrule it.
+
+    The scale was four times this. A fifth-round pick carried 36.7 points
+    in week three, against keep values in the thirties and forties - so
+    what you paid in August was worth about as much as everything known
+    about the player since, which is the definition of the sunk cost this
+    docstring claims not to be.
     """
     if not cost:
         return 0.0
     amount = cost.get("amount")
     if isinstance(amount, int) and amount > 0:
-        raw = amount * 1.5
+        raw = amount * 0.4
     else:
         rnd = cost.get("round")
         if not isinstance(rnd, int) or rnd <= 0:
             return 0.0
-        raw = max(0, 16 - rnd) * 4.0
+        raw = max(0, 16 - rnd) * 1.0
     try:
         age = max(1, int(week))
     except (TypeError, ValueError):
