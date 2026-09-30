@@ -663,6 +663,97 @@ class BenchIsNotAVerdict(unittest.TestCase):
         self.assertNotIn("paid", why)
 
 
+class NotEveryoneIsWorthCutting(unittest.TestCase):
+    """The model always names a worst player, and called him the drop.
+
+    A roster of fifteen good men still has a fifteenth, so "who is last"
+    kept being answered as though it were "who is expendable". They are
+    different questions and only the second should put a name on a card.
+
+    The line is teams times starting slots: how many players this league
+    actually fields on a Sunday. Below all of them a man is nobody's
+    starter - a lottery ticket, and lottery tickets are what you cut.
+    """
+
+    LEHG = {"settings": {"num_teams": 12},
+            "roster_positions": ["QB", "RB", "RB", "WR", "WR", "WR", "TE",
+                                 "FLEX", "DEF"] + ["BN"] * 6}
+
+    def test_the_line_is_what_the_league_can_field(self):
+        self.assertEqual(ew.replaceable_after(self.LEHG), 12 * 9)
+
+    def test_a_bigger_league_draws_it_deeper(self):
+        big = dict(self.LEHG, settings={"num_teams": 14})
+        self.assertGreater(ew.replaceable_after(big),
+                           ew.replaceable_after(self.LEHG))
+
+    def test_somebodys_starter_is_not_droppable(self):
+        """Burden at 61 in a league that fields 108."""
+        self.assertFalse(ew.worth_cutting(61, self.LEHG))
+
+    def test_a_bench_flier_is(self):
+        """The men he actually wanted offered: Lloyd at 142, Pitts at 170."""
+        self.assertTrue(ew.worth_cutting(142, self.LEHG))
+        self.assertTrue(ew.worth_cutting(170, self.LEHG))
+
+    def test_nobody_ranked_him_at_all_is_the_clearest_case(self):
+        self.assertTrue(ew.worth_cutting(None, self.LEHG))
+
+    def test_a_league_with_no_team_count_still_answers(self):
+        self.assertTrue(ew.worth_cutting(900, {"roster_positions": ["QB"]}))
+
+    def test_the_run_refuses_a_claim_with_nobody_to_cut(self):
+        source = open("run_weekly.py").read()
+        self.assertIn("nobody on this roster is worth cutting", source)
+
+
+class InjuredReserveIsNotARosterSpot(unittest.TestCase):
+    """Dropping a man parked on IR frees nothing.
+
+    That is the point of the slot. And keep_multiplier had it exactly
+    backwards for a league that has them: it scored an IR player at a
+    tenth of his worth, which put him first in the cut order - so the one
+    player whose roster spot costs nothing was the one being offered.
+    """
+
+    ROSTER = {"starters": ["s1"], "players": ["s1", "b1", "hurt"],
+              "reserve": ["hurt"]}
+    PLAYERS = {
+        "s1": {"full_name": "A Starter", "position": "WR",
+               "search_rank": 30},
+        "b1": {"full_name": "A Bench Body", "position": "WR",
+               "search_rank": 800},
+        "hurt": {"full_name": "Alec Pierce", "position": "WR",
+                 "search_rank": 400, "injury_status": "IR"},
+    }
+    DEPTH = {"WR": (3, 2.0, "deep")}
+
+    def test_the_ir_list_is_read(self):
+        import sleeper_client as sc
+        self.assertEqual(sc.reserved(self.ROSTER), {"hurt"})
+
+    def test_a_reserved_player_is_not_a_drop_candidate(self):
+        order = [r[2] for r in ew.drop_candidates(
+            self.ROSTER, self.PLAYERS, {}, self.DEPTH)]
+        self.assertNotIn("hurt", order)
+
+    def test_nor_does_choose_drop_offer_him(self):
+        order = [r[2] for r in ew.choose_drop(
+            self.ROSTER, self.PLAYERS, {}, self.DEPTH, set())]
+        self.assertNotIn("hurt", order)
+
+    def test_the_rest_of_the_roster_is_still_offered(self):
+        order = [r[2] for r in ew.drop_candidates(
+            self.ROSTER, self.PLAYERS, {}, self.DEPTH)]
+        self.assertEqual(order[0], "b1")
+
+    def test_a_roster_with_no_reserve_list_is_unaffected(self):
+        plain = {"starters": ["s1"], "players": ["s1", "b1"]}
+        order = [r[2] for r in ew.drop_candidates(
+            plain, self.PLAYERS, {}, self.DEPTH)]
+        self.assertEqual(sorted(order), ["b1", "s1"])
+
+
 class BeatingTheStarterNotTheBackup(unittest.TestCase):
     """A third quarterback only had to be better than your backup.
 

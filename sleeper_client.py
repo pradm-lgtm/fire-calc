@@ -219,6 +219,16 @@ def split_roster(roster):
     return starters, bench
 
 
+def reserved(roster):
+    """Player ids parked on injured reserve.
+
+    They do not occupy a roster spot - that is the whole point of the
+    slot - so dropping one frees nothing and costs you whatever he is
+    worth when he comes back.
+    """
+    return {str(p) for p in (roster.get("reserve") or []) if p and p != "0"}
+
+
 def find_matchup(matchups, roster_id):
     """Return (my_entry, opponent_entry) for a roster in a week's matchups."""
     mine = next(

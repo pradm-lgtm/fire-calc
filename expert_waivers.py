@@ -250,6 +250,31 @@ def draft_weight(cost, week=1):
     return raw * max(0.2, 1.0 - (age - 1) / 12.0)
 
 
+def replaceable_after(league):
+    """The rest-of-season rank past which a player is a bench flier.
+
+    Teams times starting slots: how many players this league actually
+    fields on a Sunday. Somebody ranked below all of them is nobody's
+    starter, whatever his name is - he is a lottery ticket, and lottery
+    tickets are what you cut to make a claim.
+
+    Above the line he is somebody's starter, and offering him as the drop
+    is the complaint that keeps coming back.
+    """
+    teams = ((league.get("settings") or {}).get("num_teams")
+             or league.get("total_rosters") or 10)
+    required, flex = starting_requirements(league)
+    slots = sum(required.values()) + flex
+    return int(teams) * max(1, slots)
+
+
+def worth_cutting(ros_rank, league):
+    """Is this man a bench flier rather than somebody's starter?"""
+    if ros_rank is None:
+        return True          # nobody ranked him at all
+    return float(ros_rank) > replaceable_after(league)
+
+
 def drop_candidates(roster, players, trending, depth, cost=None, week=1,
                     projected=None, ros=None):
     """Everyone you could cut, weakest first.
@@ -266,6 +291,12 @@ def drop_candidates(roster, players, trending, depth, cost=None, week=1,
     """
     starters, bench = sc.split_roster(roster)
     starting = {str(p) for p in starters}
+    # Injured reserve is not a roster spot. Dropping a man parked there
+    # frees nothing and costs you whatever he is when he returns, so he is
+    # not a candidate at any price. keep_multiplier had it exactly
+    # backwards for these leagues: it scored an IR player at a tenth of
+    # his worth and put him first in the cut order.
+    on_ir = sc.reserved(roster)
     protected = wa.never_drop_names()
     cost = cost or {}
     projected = projected or {}
@@ -274,6 +305,8 @@ def drop_candidates(roster, players, trending, depth, cost=None, week=1,
     ranked = []
     for pid in list(bench) + list(starters):
         pid = str(pid)
+        if pid in on_ir:
+            continue
         player = players.get(pid)
         if not player or wa.is_protected(player, protected):
             continue
@@ -306,11 +339,12 @@ def choose_drop(roster, players, trending, depth, protect_ids,
     trade even when the WR scores better.
     """
     _, bench = sc.split_roster(roster)
+    on_ir = sc.reserved(roster)
     protected = wa.never_drop_names()
     ranked = []
     for pid in bench:
         pid = str(pid)
-        if pid in protect_ids:
+        if pid in protect_ids or pid in on_ir:
             continue
         p = players.get(pid)
         if not p:

@@ -485,6 +485,14 @@ def proposals_for_league(league, user_id, players, trending, texts, max_moves,
                                         projected=holds, ros=season_ranks)
         drops = ew.choose_drop(mine, players, trending, depth, protect,
                                projected=holds, ros=season_ranks)
+        # A line under which somebody is not worth cutting at all. Without
+        # one, the model always names a worst player - a roster of fifteen
+        # good men still has a fifteenth - and calls him the drop. Who is
+        # last is not the same question as who is expendable.
+        def expendable(pid):
+            return ew.worth_cutting(season_ranks.get(str(pid)), league)
+
+        drops = [d for d in drops if expendable(d[2])]
         if drops:
             _, drop_score, drop_pid, drop_player, drop_label = drops[0]
         else:
@@ -492,9 +500,14 @@ def proposals_for_league(league, user_id, players, trending, texts, max_moves,
             # the whole league produced nothing, while the card underneath
             # would happily have offered a starter - the gate was stricter
             # than the choice it was gating.
-            spare = [c for c in candidates if c[2] not in protect]
+            spare = [c for c in candidates
+                     if c[2] not in protect and expendable(c[2])]
             if not spare:
-                why = "there is nobody on the roster left to drop"
+                line = ew.replaceable_after(league)
+                why = ("nobody on this roster is worth cutting - everyone "
+                       f"left is inside the top {line} for the rest of the "
+                       "season, which is as many players as this league "
+                       "starts")
                 break
             _rank, drop_score, drop_pid, drop_player, drop_label, _st = spare[0]
         place = standings(candidates)
