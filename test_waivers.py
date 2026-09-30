@@ -663,6 +663,65 @@ class BenchIsNotAVerdict(unittest.TestCase):
         self.assertNotIn("paid", why)
 
 
+class SayingWhoWasTurnedDown(unittest.TestCase):
+    """A league that produced nothing named one refusal as its whole reason.
+
+    "Nothing, because you already carry 2 TEs" was the first refusal
+    recorded, reported as though it explained the league - when a dozen
+    players had been weighed and turned down for several different
+    reasons. Several rounds went by fixing gates that were not the one
+    firing, because there was no way to see which was.
+    """
+
+    PASSED_OVER = {"LEHG": [
+        ("Some Tight End", "TE", "you already carry 2 TEs"),
+        ("A Quarterback", "QB", "not clearly better than the one you start"),
+        ("A Defense", "DEF", "this league has no DEF slot"),
+    ]}
+
+    MINE = object()          # so None can be passed through as itself
+
+    def said(self, passed_over=MINE):
+        import contextlib
+        import io
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            rw.show_refusals(self.PASSED_OVER if passed_over is self.MINE
+                             else passed_over)
+        return out.getvalue()
+
+    def test_it_names_every_player_it_turned_down(self):
+        said = self.said()
+        for who in ("Some Tight End", "A Quarterback", "A Defense"):
+            self.assertIn(who, said)
+
+    def test_and_the_reason_for_each(self):
+        said = self.said()
+        self.assertIn("no DEF slot", said)
+        self.assertIn("the one you start", said)
+
+    def test_it_gives_the_position_so_a_pattern_is_visible(self):
+        """Every refusal being a TE is itself the finding."""
+        said = self.said()
+        self.assertIn("(TE)", said)
+        self.assertIn("(QB)", said)
+
+    def test_a_long_list_is_cut_rather_than_dumped(self):
+        many = {"LEHG": [(f"Player {i}", "WR", "no") for i in range(30)]}
+        said = self.said(many)
+        self.assertIn("and 18 more", said)
+
+    def test_nothing_turned_down_prints_nothing(self):
+        self.assertEqual(self.said({}), "")
+        self.assertEqual(self.said(None), "")
+
+    def test_the_run_counts_the_candidates_it_had(self):
+        """Three names written up and thirty all refused are different
+        problems, and both read as "nothing, because <one sentence>"."""
+        source = open("run_weekly.py").read()
+        self.assertIn("candidate(s) written up and free here", source)
+
+
 class ReadingThemWithoutTheBrowser(unittest.TestCase):
     """--status answered "is this stale" and never "is this any good".
 

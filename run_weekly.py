@@ -369,7 +369,8 @@ def best_available(league, mine, players, rosters, available, trending,
 
 
 def proposals_for_league(league, user_id, players, trending, texts, max_moves,
-                         week=1, byes=None, weeks=None, verbose=False):
+                         week=1, byes=None, weeks=None, verbose=False,
+                         skipped=None):
     """(proposals, why none) - the reasoning, returned as data not text.
 
     A league that yields nothing says why. There are five ways to come back
@@ -468,18 +469,39 @@ def proposals_for_league(league, user_id, players, trending, texts, max_moves,
 
     ordered = sorted(consensus.items(), key=sort_key, reverse=True) \
         if consensus else []
+    # How many names even reached the gates. A league where the articles
+    # named three available players and a league where they named thirty
+    # and every one was refused are different problems, and both looked
+    # like "nothing, because <one sentence>".
+    step(f"{len(ordered)} candidate(s) written up and free here")
 
     out, protect, budget_left, why = [], set(), remaining, None
     # Positions already spoken for this week. Three quarterbacks is never
     # the answer, however many analysts wrote about quarterbacks.
     spoken_for = set()
+
+    def refused(pid, reason):
+        """Record a candidate and why it was turned down.
+
+        A league that produces nothing reported one sentence - whichever
+        refusal happened to come first - as though it explained the whole
+        league. It explained one player out of a dozen considered, and
+        every round of guessing at which gate had fired was guessing at
+        something this list would have said outright.
+        """
+        if skipped is not None:
+            who = players.get(pid) or {}
+            skipped.append((strip_label(sc.player_label(players, pid)),
+                            who.get("position") or "?", reason))
+
     for pid, info in ordered:
         if len(out) >= max_moves:
             break
         add_pos = (players.get(pid) or {}).get("position") or ""
         if not ew.uses_position(league, add_pos):
-            why = why or (f"the names left are {add_pos}s and this league "
-                          f"has no {add_pos} slot")
+            reason = f"this league has no {add_pos} slot"
+            refused(pid, reason)
+            why = why or reason
             continue
         # One claim per position, with no exception for being short there.
         # Thin used to buy a bypass, and thin is what a position you start
@@ -487,8 +509,9 @@ def proposals_for_league(league, user_id, players, trending, texts, max_moves,
         # only case anyone complained about. Being short is an argument for
         # making a claim, never for making three.
         if add_pos in spoken_for:
-            why = why or (f"the best remaining names are all {add_pos}s and "
-                          "one claim there is enough")
+            reason = f"one {add_pos} claim is enough"
+            refused(pid, reason)
+            why = why or reason
             continue
         # Everyone you could cut, not only the bench and not only the one it
         # picked. Whether there is anyone worth dropping is half the
@@ -540,6 +563,7 @@ def proposals_for_league(league, user_id, players, trending, texts, max_moves,
         needed, no_thanks = worth_the_spot(pid, players, mine, depth,
                                            trending, holds, ros=season_ranks)
         if not needed:
+            refused(pid, no_thanks)
             why = why or no_thanks
             continue
         if drop_score > add_score * 1.5:
@@ -1056,6 +1080,22 @@ def show(proposals, quiet=None):
         print(f"  {name}: nothing, because {reason}")
 
 
+def show_refusals(passed_over):
+    """Who was considered and turned down, for a league that came up short.
+
+    "Nothing, because you already carry 2 TEs" named one player out of a
+    dozen weighed, and reading it as the league's whole reasoning is how
+    several rounds went by fixing gates that were not the one firing.
+    """
+    for name, rows in (passed_over or {}).items():
+        print()
+        print(f"  {name}: considered and passed over")
+        for who, pos, reason in rows[:12]:
+            print(f"    - {who} ({pos}): {reason}")
+        if len(rows) > 12:
+            print(f"    ... and {len(rows) - 12} more")
+
+
 def _run(username, urls, moves, dry_run, db_path, force=False,
          update=False):
     try:
@@ -1083,17 +1123,21 @@ def _run(username, urls, moves, dry_run, db_path, force=False,
 
         weeks = week_outlook(season, week, players, verbose=True)
 
-        all_proposals, quiet = [], {}
+        all_proposals, quiet, passed_over = [], {}, {}
         for league in leagues:
+            turned_down = []
             rows, why = proposals_for_league(league, user["user_id"], players,
                                              trending, texts, moves, week,
                                              verbose=True,
+                                             skipped=turned_down,
                                              byes=bye_weeks, weeks=weeks)
             name = league.get("name") or league.get("league_id")
             print(f"  {name}: {len(rows)} proposal(s)"
                   + (f" — {why}" if why else ""))
             if why:
                 quiet[name] = why
+            if turned_down and len(rows) < moves:
+                passed_over[name] = turned_down
             all_proposals.extend(rows)
 
         if not all_proposals:
@@ -1113,6 +1157,7 @@ def _run(username, urls, moves, dry_run, db_path, force=False,
         print("WHAT IT IS PROPOSING")
         print("=" * 66)
         show(all_proposals, quiet)
+        show_refusals(passed_over)
         print()
 
         if dry_run:
