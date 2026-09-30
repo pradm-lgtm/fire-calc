@@ -369,7 +369,7 @@ def best_available(league, mine, players, rosters, available, trending,
 
 
 def proposals_for_league(league, user_id, players, trending, texts, max_moves,
-                         week=1, byes=None, weeks=None):
+                         week=1, byes=None, weeks=None, verbose=False):
     """(proposals, why none) - the reasoning, returned as data not text.
 
     A league that yields nothing says why. There are five ways to come back
@@ -379,6 +379,16 @@ def proposals_for_league(league, user_id, players, trending, texts, max_moves,
     could stop producing proposals for a fortnight and look exactly like a
     league with a settled roster.
     """
+    # Progress, because everything from here to the first proposal was
+    # silent - a roster fetch, a draft history, a gazetteer over four
+    # hundred free agents and six articles read against it. A run pausing
+    # in there looks identical to a run that has hung, and there was no
+    # way to tell which from the outside.
+    def step(what):
+        if verbose:
+            print(f"    {what}", flush=True)
+
+    step(f"reading {league.get('name') or league['league_id']}")
     rosters = sc.league_rosters(league["league_id"])
     mine = sc.my_roster(rosters, user_id)
     if not mine:
@@ -392,10 +402,12 @@ def proposals_for_league(league, user_id, players, trending, texts, max_moves,
     taken = wa.rostered_player_ids(rosters)
     available = [pid for pid, p in players.items()
                  if pid not in taken and wa.is_rosterable(p)]
+    step(f"{len(available)} free agents; building the name index")
     gaz = ex.build_gazetteer(players, available)
 
     per_source = {}
-    for source, text in texts.items():
+    for n, (source, text) in enumerate(texts.items(), start=1):
+        step(f"article {n} of {len(texts)} ({len(text):,} chars)")
         recs = ex.extract_recommendations(text, gaz, source=source,
                                           players=players)
         if recs:
@@ -416,6 +428,7 @@ def proposals_for_league(league, user_id, players, trending, texts, max_moves,
     # What each player cost in the draft, and whether anyone has written that
     # he is finished. The first protects the people you would not part with;
     # the second is what lets you part with them anyway.
+    step("draft history")
     try:
         cost = sc.draft_cost(league["league_id"])
     except Exception:
@@ -1074,6 +1087,7 @@ def _run(username, urls, moves, dry_run, db_path, force=False,
         for league in leagues:
             rows, why = proposals_for_league(league, user["user_id"], players,
                                              trending, texts, moves, week,
+                                             verbose=True,
                                              byes=bye_weeks, weeks=weeks)
             name = league.get("name") or league.get("league_id")
             print(f"  {name}: {len(rows)} proposal(s)"
