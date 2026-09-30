@@ -1866,3 +1866,75 @@ class Starters(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+
+class ALongArticleMustNotStopTheRun(unittest.TestCase):
+    """A sixty-thousand character round-up hung the weekly job.
+
+    Two faults, both quadratic. _sentence_bounds walked every sentence
+    end from the top of the article for each mention, and
+    _ends_a_sentence sliced text[:dot] - copying the whole article - then
+    ran an end-anchored regex over the copy, which tries every starting
+    offset in it. Nineteen thousand of those took twenty seconds.
+
+    A run that pauses for minutes is indistinguishable from one that has
+    died, so this is guarded by a clock rather than by eye.
+    """
+
+    def article(self, size=60000):
+        import random
+        import string
+        random.seed(7)
+
+        def word(n):
+            return "".join(random.choice(string.ascii_lowercase)
+                           for _ in range(n)).capitalize()
+        names, players = [], {}
+        for i in range(651):
+            name = f"{word(5)} {word(7)}"
+            names.append(name)
+            players[str(i)] = {"full_name": name, "position": "WR",
+                               "team": "GB"}
+        parts = []
+        while sum(len(p) for p in parts) < size:
+            parts.append(f"{random.choice(names)} is a strong add this week. "
+                         "Spend 4% of your FAAB on him. ")
+        return "".join(parts), players
+
+    def test_it_finishes_in_a_sensible_time(self):
+        import time
+        text, players = self.article()
+        gaz = ex.build_gazetteer(players, list(players))
+        started = time.time()
+        got = ex.extract_recommendations(text, gaz, source="x",
+                                         players=players)
+        spent = time.time() - started
+        self.assertTrue(got)
+        self.assertLess(spent, 5.0, f"took {spent:.1f}s on a 60k article")
+
+    def test_twice_the_article_is_not_four_times_the_work(self):
+        """Which is what quadratic looks like from the outside."""
+        import time
+        small, players = self.article(20000)
+        big, _ = self.article(80000)
+        gaz = ex.build_gazetteer(players, list(players))
+
+        def clock(text):
+            started = time.time()
+            ex.extract_recommendations(text, gaz, source="x", players=players)
+            return time.time() - started
+        one, four = clock(small), clock(big)
+        self.assertLess(four, max(0.5, one * 12))
+
+    def test_initials_still_do_not_end_a_sentence(self):
+        for line in ("J.K. Dobbins is good.", "A.J. Brown is good.",
+                     "Brian Robinson Jr. is good."):
+            with self.subTest(line=line):
+                self.assertFalse(ex._ends_a_sentence(line, line.index(".")))
+
+    def test_a_real_full_stop_still_does(self):
+        line = "He is good. And so is the other one."
+        self.assertTrue(ex._ends_a_sentence(line, line.index(".")))
+
+    def test_a_dot_at_the_very_start_is_not_an_initial(self):
+        self.assertTrue(ex._ends_a_sentence(".", 0))

@@ -323,14 +323,23 @@ _ABBREVIATIONS = {"jr", "sr", "st", "vs", "no", "dr", "mr", "mrs", "inc"}
 
 
 def _ends_a_sentence(text, dot):
-    """Is the full stop at `dot` the end of a sentence, or part of a name?"""
-    before = text[:dot]
-    if before[-1:].isupper() and not before[-2:-1].isalpha():
+    """Is the full stop at `dot` the end of a sentence, or part of a name?
+
+    Looks at the handful of characters before the dot and nothing else.
+    It used to slice text[:dot] - copying up to sixty thousand characters
+    - and then run an end-anchored regex over the copy, which tries every
+    starting offset in it. Nineteen thousand of those took twenty seconds
+    and stopped the run dead on a long article. The answer only ever
+    depended on the word the dot is attached to.
+    """
+    if dot <= 0:
+        return True
+    if text[dot - 1].isupper() and not (dot >= 2 and text[dot - 2].isalpha()):
         return False  # a lone capital: an initial
-    word = re.search(r"([A-Za-z]+)$", before)
-    if word and word.group(1).lower() in _ABBREVIATIONS:
-        return False
-    return True
+    i = dot
+    while i > 0 and text[i - 1].isalpha():
+        i -= 1
+    return text[i:dot].lower() not in _ABBREVIATIONS
 
 
 def _sentence_ends(text, start=0, stop=None):
@@ -341,15 +350,29 @@ def _sentence_ends(text, start=0, stop=None):
             yield m
 
 
+# How far back to look for the start of a sentence. Sentences are not
+# this long; the number only has to be comfortably larger than one.
+SENTENCE_LOOKBACK = 600
+
+
 def _sentence_bounds(text, index):
     """(start, end) of the sentence containing index.
 
     Negative cues are judged at sentence scope. "Do not bother with X" is
     about X, but a following sentence about a different player must not
     suppress the recommendation before it.
+
+    The backward search is bounded. It used to walk every sentence end
+    from the top of the article, for every mention - so a sixty-thousand
+    character round-up naming hundreds of players did that work hundreds
+    of times over, and the run stopped dead on it. Nothing is lost by
+    starting the search a few hundred characters back: a sentence is
+    shorter than that, and the worst case is a context a little wider
+    than the sentence rather than a wrong one.
     """
-    start = 0
-    for m in _sentence_ends(text, 0, index):
+    floor = max(0, index - SENTENCE_LOOKBACK)
+    start = floor
+    for m in _sentence_ends(text, floor, index):
         start = m.end()
     end = len(text)
     for m in _sentence_ends(text, index):
