@@ -204,6 +204,20 @@ def held_at(mine, players, pos, trending, projected, ros=None):
 # the better body is the whole of the question.
 UPGRADE_EDGE = 1.0
 
+# How many alternatives are worth filing at one position. His own week is
+# three running backs, two tight ends and two receivers, and past three
+# the rest are noise: a fourth tight end is not a fourth chance at one
+# good one, it is a bid on somebody nobody wanted.
+ALTERNATIVES = 3
+
+# How many claims one man can be the drop for. A drop is a chain: the
+# second claim only fires if the first fails, so the same player backing
+# three bids is one roster spot offered three ways. Backing eight is a
+# fiction - by the time the eighth ran, the seven before it would have to
+# have failed, and nothing that deep is a plan. His own week shared a
+# drop three ways.
+CLAIMS_PER_DROP = 3
+
 
 def worth_the_spot(pid, players, mine, depth, trending, projected,
                    add_score=None, ros=None, already=0):
@@ -265,12 +279,16 @@ def worth_the_spot(pid, players, mine, depth, trending, projected,
         return False, (f"you have a {pos} and a backup, and this league "
                        f"starts {need:g} - a third could never play")
 
-    spare = held - slots
+    # Past this point the claims already made do NOT count as men held.
+    # They are alternatives, not additions: three running backs go in
+    # together precisely because a claim is a bid that usually loses and
+    # only one of them will land. Tapering the bar upward treated the
+    # second as though the first had already succeeded, which refused the
+    # very alternatives his own week is made of.
+    spare = len(mine_here) - slots
     if spare <= 0:
         return True, None          # nothing behind your starters to replace
-    # Each further claim at a position displaces a better man than the
-    # last, because the one before it has taken the worst spot.
-    bar, bar_pid = mine_here[min(spare, len(mine_here)) - 1]
+    bar, bar_pid = mine_here[spare - 1]
     import ros as rs
     worth = wa.keep_value(players.get(pid) or {}, trending.get(pid, 0),
                           projected.get(pid), rs.worth(ros, pid))
@@ -516,8 +534,9 @@ def proposals_for_league(league, user_id, players, trending, texts, max_moves,
     out, protect, budget_left, why = [], set(), remaining, None
     # Positions already spoken for this week. Three quarterbacks is never
     # the answer, however many analysts wrote about quarterbacks.
-    # How many claims this run has already made at each position.
-    claimed = {}
+    # How many claims this run has already made at each position, and how
+    # many each drop is already backing.
+    claimed, backing = {}, {}
 
     def refused(pid, reason):
         """Record a candidate and why it was turned down.
@@ -565,7 +584,11 @@ def proposals_for_league(league, user_id, players, trending, texts, max_moves,
         def expendable(pid):
             return ew.worth_cutting(season_ranks.get(str(pid)), league)
 
-        drops = [d for d in drops if expendable(d[2])]
+        def still_free(pid):
+            return backing.get(str(pid), 0) < CLAIMS_PER_DROP
+
+        drops = [d for d in drops
+                 if expendable(d[2]) and still_free(d[2])]
         # Cut from the position you are adding to, when you are already
         # full there. Adding a third tight end and cutting a receiver
         # leaves you with three tight ends, which is not what anybody
@@ -589,7 +612,8 @@ def proposals_for_league(league, user_id, players, trending, texts, max_moves,
             # would happily have offered a starter - the gate was stricter
             # than the choice it was gating.
             spare = [c for c in candidates
-                     if c[2] not in protect and expendable(c[2])]
+                     if c[2] not in protect and expendable(c[2])
+                     and still_free(c[2])]
             if not spare:
                 line = ew.replaceable_after(league)
                 why = ("nobody on this roster is worth cutting - everyone "
@@ -613,9 +637,15 @@ def proposals_for_league(league, user_id, players, trending, texts, max_moves,
         add_score = wa.score_player(players.get(pid, {}), trending.get(pid, 0),
                                     shots.get(pid))
         # Before anything about who to drop: do you need another one of him?
+        taken = claimed.get(add_pos, 0)
+        if taken >= ALTERNATIVES:
+            reason = f"{taken} {add_pos} claims is enough alternatives"
+            refused(pid, reason)
+            why = why or reason
+            continue
         needed, no_thanks = worth_the_spot(pid, players, mine, depth,
                                            trending, holds, ros=season_ranks,
-                                           already=claimed.get(add_pos, 0))
+                                           already=taken)
         if not needed:
             refused(pid, no_thanks)
             why = why or no_thanks
@@ -675,6 +705,8 @@ def proposals_for_league(league, user_id, players, trending, texts, max_moves,
         ))
         if add_pos:
             claimed[add_pos] = claimed.get(add_pos, 0) + 1
+        if drop_pid:
+            backing[str(drop_pid)] = backing.get(str(drop_pid), 0) + 1
         # Deliberately not protecting drop_pid. Each proposal used to
         # consume a drop, so the second claim offered your second-worst
         # player and the third your third-worst - which is how a receiver

@@ -2075,6 +2075,97 @@ class CutFromThePositionYouAreFillingUp(unittest.TestCase):
         self.assertIn('!= "thin"', source[max(0, spot - 300):spot])
 
 
+class AlternativesAreNotAdditions(unittest.TestCase):
+    """Three running backs go in together because only one will land.
+
+    A claim is a bid that usually loses. Tapering the bar upward for each
+    one treated the second as though the first had already succeeded,
+    which refused the very alternatives his own week is made of - and it
+    still let four tight ends through in the other league, because the
+    taper is a slope and not a limit.
+
+    What his week actually shows is a limit: three backs, two tight ends,
+    two receivers. Never more than three.
+    """
+
+    def rbs(self):
+        players = {
+            "rb1": {"full_name": "Starter", "position": "RB",
+                    "search_rank": 20, "depth_chart_order": 1},
+            "rb2": {"full_name": "Second", "position": "RB",
+                    "search_rank": 45, "depth_chart_order": 1},
+            "rb3": {"full_name": "Third", "position": "RB",
+                    "search_rank": 150, "depth_chart_order": 2},
+            "spare": {"full_name": "Lloyd", "position": "RB",
+                      "search_rank": 220, "depth_chart_order": 3},
+        }
+        for i, rank in enumerate([90, 100, 110], start=1):
+            players[f"a{i}"] = {"full_name": f"Back {i}", "position": "RB",
+                                "search_rank": rank, "depth_chart_order": 1}
+        mine = {"starters": ["rb1", "rb2"],
+                "players": ["rb1", "rb2", "rb3", "spare"]}
+        return players, mine
+
+    def test_all_three_alternatives_get_through(self):
+        """Allen, Mitchell and Gordon, filed together."""
+        players, mine = self.rbs()
+        taken, allowed = 0, []
+        for i in range(1, 4):
+            ok, _why = rw.worth_the_spot(f"a{i}", players, mine,
+                                         {"RB": (4, 2.7, "ok")}, {}, {},
+                                         already=taken)
+            if ok:
+                taken += 1
+                allowed.append(i)
+        self.assertEqual(allowed, [1, 2, 3])
+
+    def test_but_there_is_a_limit_on_how_many(self):
+        self.assertEqual(rw.ALTERNATIVES, 3)
+
+    def test_the_run_stops_at_it(self):
+        source = open("run_weekly.py").read()
+        self.assertIn("is enough alternatives", source)
+
+    def test_a_position_that_can_never_play_is_still_capped_at_the_backup(self):
+        """The taper is gone, but the quarterback rule is not."""
+        qb = {"qb1": {"full_name": "My QB", "position": "QB",
+                      "search_rank": 35, "depth_chart_order": 1},
+              "free": {"full_name": "Geno", "position": "QB",
+                       "search_rank": 60, "depth_chart_order": 1}}
+        mine = {"starters": ["qb1"], "players": ["qb1"]}
+        first, _ = rw.worth_the_spot("free", qb, mine, {"QB": (1, 1.0, "ok")},
+                                     {}, {}, already=0)
+        second, why = rw.worth_the_spot("free", qb, mine,
+                                        {"QB": (1, 1.0, "ok")}, {}, {},
+                                        already=1)
+        self.assertTrue(first)
+        self.assertFalse(second)
+        self.assertIn("could never play", why)
+
+
+class OneManCannotBackEightClaims(unittest.TestCase):
+    """A drop is a chain, and eight deep is a fiction.
+
+    The second claim only fires if the first fails, so the same player
+    backing three bids is one roster spot offered three ways. By the time
+    an eighth ran, the seven before it would all have had to fail, and
+    nothing that deep is a plan. Every OTG claim dropped MarShawn Lloyd.
+    """
+
+    def test_the_limit_matches_what_he_files(self):
+        self.assertEqual(rw.CLAIMS_PER_DROP, 3)
+
+    def test_the_run_counts_what_each_drop_is_backing(self):
+        source = open("run_weekly.py").read()
+        self.assertIn("backing[str(drop_pid)]", source)
+
+    def test_a_drop_at_its_limit_is_passed_over(self):
+        source = open("run_weekly.py").read()
+        self.assertIn("still_free", source)
+        spot = source.index("def still_free")
+        self.assertIn("CLAIMS_PER_DROP", source[spot:spot + 200])
+
+
 class ClaimsAlreadyMadeCountAsPlayersHeld(unittest.TestCase):
     """OTG came back with three quarterbacks and four tight ends.
 
@@ -2110,8 +2201,8 @@ class ClaimsAlreadyMadeCountAsPlayersHeld(unittest.TestCase):
     def test_nor_a_fourth(self):
         self.assertFalse(self.ask(2)[0])
 
-    def test_tight_ends_taper_rather_than_stopping_dead(self):
-        """Each further claim displaces a better man than the last."""
+    def test_a_fourth_tight_end_is_stopped_by_the_limit(self):
+        """Not by a taper - alternatives do not get harder, they run out."""
         players = {"te1": {"full_name": "My TE", "position": "TE",
                            "search_rank": 120, "depth_chart_order": 1}}
         for i, rank in enumerate([70, 140, 200, 260], start=1):
@@ -2120,13 +2211,15 @@ class ClaimsAlreadyMadeCountAsPlayersHeld(unittest.TestCase):
         mine = {"starters": ["te1"], "players": ["te1"]}
         taken, allowed = 0, []
         for i in range(1, 5):
+            if taken >= rw.ALTERNATIVES:
+                continue
             ok, _why = rw.worth_the_spot(f"c{i}", players, mine,
                                          {"TE": (1, 1.7, "ok")}, {}, {},
                                          already=taken)
             if ok:
                 taken += 1
                 allowed.append(i)
-        self.assertEqual(allowed, [1, 2])
+        self.assertEqual(allowed, [1, 2, 3])
 
     def test_the_run_keeps_the_count(self):
         source = open("run_weekly.py").read()
