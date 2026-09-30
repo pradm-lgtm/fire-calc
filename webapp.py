@@ -477,7 +477,31 @@ def run_summary(conn):
             None if not failed or (ok and ok["id"] > failed["id"])
             else {"at": failed["at"], "detail": failed["detail"]}),
         "database": conn.kind,
+        # The proposals themselves, not only how many there are. Counting
+        # them answered "is this stale" and never "is this any good", so
+        # judging the output still meant opening the page.
+        "rows": [{
+            "league_name": r["league_name"],
+            "add_player_name": r["add_player_name"],
+            "add_position": r["add_position"],
+            "drop_player_name": r["drop_player_name"],
+            "drop_position": r["drop_position"],
+            "bid": r["bid"],
+            "status": r["status"],
+            "rationale": r["rationale"],
+            "consensus": r["consensus"],
+        } for r in rows],
+        "quiet": quiet_reasons(run),
     }
+
+
+def quiet_reasons(run):
+    """{league: why it produced nothing}, as data rather than markup."""
+    try:
+        got = json.loads(run["note"] or "{}")
+    except (ValueError, TypeError):
+        return {}
+    return got if isinstance(got, dict) else {}
 
 
 def quiet_leagues(run):

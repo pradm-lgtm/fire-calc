@@ -907,6 +907,8 @@ def main():
     ap.add_argument("--db", default=str(st.DB_PATH))
     ap.add_argument("--why", metavar="PLAYER",
                     help="show every signal behind where one player ranks")
+    ap.add_argument("--show", action="store_true",
+                    help="print the proposals currently on the page")
     ap.add_argument("--status", action="store_true",
                     help="say what is on the approval page now, and stop")
     ap.add_argument("--force", action="store_true",
@@ -918,6 +920,9 @@ def main():
 
     if args.status:
         return say_status()
+
+    if args.show:
+        return say_proposals()
 
     if args.why:
         if not args.username:
@@ -932,6 +937,39 @@ def main():
         return 1
     return _run(username, args.url, args.moves, args.dry_run, args.db,
                 args.force, args.update)
+
+
+def say_proposals():
+    """Print what the approval page is offering right now.
+
+    Reading the recommendations meant loading the site. --status said how
+    many there were and how old they were, which answers "is this stale"
+    and never "is this any good" - and the second is the question anybody
+    actually has.
+    """
+    import cloud_client as cloud
+    if not cloud.configured():
+        print("FANTASY_API_URL is not set, so there is no hosted page to ask.")
+        print("For a local database: python3 webapp.py")
+        return 1
+    try:
+        info = cloud.status()
+    except cloud.RemoteError as exc:
+        print(f"ERROR: {exc}")
+        return 1
+    if not info.get("run"):
+        print("The page has no proposals at all yet.")
+        return 0
+    print(f"Run {info['run']} - season {info['season']}, week {info['week']}, "
+          f"filed {info['age']}")
+    rows = info.get("rows") or []
+    show(rows, info.get("quiet"))
+    states = info.get("statuses") or {}
+    if states:
+        print()
+        print("  " + ", ".join(f"{n} {k.lower()}"
+                               for k, n in sorted(states.items())))
+    return 0
 
 
 def say_status():

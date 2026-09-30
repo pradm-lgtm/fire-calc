@@ -663,6 +663,84 @@ class BenchIsNotAVerdict(unittest.TestCase):
         self.assertNotIn("paid", why)
 
 
+class ReadingThemWithoutTheBrowser(unittest.TestCase):
+    """--status answered "is this stale" and never "is this any good".
+
+    The second is the question anybody actually has, and answering it
+    meant opening the site - which is the loop that made every judgement
+    this week cost a deploy, a push and a cache clear.
+    """
+
+    PAYLOAD = {
+        "run": 30, "season": "2026", "week": 3, "age": "2 minutes ago",
+        "statuses": {"PENDING": 2},
+        "quiet": {"OTG Alumni": "nobody free is better than your roster"},
+        "rows": [{
+            "league_name": "LEHG",
+            "add_player_name": "Braelon Allen (NYJ RB)", "add_position": "RB",
+            "drop_player_name": "Emanuel Wilson (GB RB)",
+            "drop_position": "RB", "bid": 11, "status": "PENDING",
+            "rationale": "Dropping Emanuel Wilson.", "consensus": 1,
+        }],
+    }
+
+    def said(self, payload=None):
+        import contextlib
+        import io
+        import cloud_client as cloud
+        real = (cloud.configured, cloud.status)
+        cloud.configured = lambda: True
+        cloud.status = lambda: (self.PAYLOAD if payload is None else payload)
+        out = io.StringIO()
+        try:
+            with contextlib.redirect_stdout(out):
+                code = rw.say_proposals()
+        finally:
+            cloud.configured, cloud.status = real
+        return code, out.getvalue()
+
+    def test_it_prints_the_add_and_the_drop(self):
+        _code, said = self.said()
+        self.assertIn("Braelon Allen", said)
+        self.assertIn("Emanuel Wilson", said)
+
+    def test_it_says_which_run_and_how_old(self):
+        _code, said = self.said()
+        self.assertIn("Run 30", said)
+        self.assertIn("2 minutes ago", said)
+
+    def test_a_quiet_league_still_says_why(self):
+        _code, said = self.said()
+        self.assertIn("OTG Alumni", said)
+        self.assertIn("nobody free is better", said)
+
+    def test_it_says_what_has_been_decided(self):
+        _code, said = self.said()
+        self.assertIn("pending", said.lower())
+
+    def test_an_empty_page_says_so(self):
+        _code, said = self.said({"run": None})
+        self.assertIn("no proposals", said)
+
+    def test_the_status_payload_carries_the_rows(self):
+        """The counts were all it sent, which is why this could not exist."""
+        source = open("webapp.py").read()
+        spot = source.index('"database": conn.kind,')
+        self.assertIn('"rows"', source[spot:spot + 900])
+
+    def test_the_quiet_reasons_are_data_not_markup(self):
+        """quiet_leagues builds HTML, which has no business in an API."""
+        import webapp
+        run = {"note": '{"LEHG": "nobody is worth cutting"}'}
+        self.assertEqual(webapp.quiet_reasons(run),
+                         {"LEHG": "nobody is worth cutting"})
+
+    def test_a_run_with_no_note_is_empty_not_an_error(self):
+        import webapp
+        self.assertEqual(webapp.quiet_reasons({"note": None}), {})
+        self.assertEqual(webapp.quiet_reasons({"note": "not json"}), {})
+
+
 class NotEveryoneIsWorthCutting(unittest.TestCase):
     """The model always names a worst player, and called him the drop.
 
