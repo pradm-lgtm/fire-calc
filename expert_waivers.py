@@ -250,6 +250,25 @@ def draft_weight(cost, week=1):
     return raw * max(0.2, 1.0 - (age - 1) / 12.0)
 
 
+def open_spots(league, roster):
+    """How many roster places are free right now.
+
+    His own claims include two with no drop at all - a thirty dollar bid
+    on Braelon Allen and a free one on Tyreek Hill - because there was
+    room. Every proposal here insisted on cutting somebody, which is a
+    worse trade than the one he actually made and sometimes an impossible
+    one: a roster with a spare place and nobody worth cutting produced
+    nothing rather than the obvious claim.
+
+    Reserve does not count against it, being the point of that slot.
+    """
+    spots = len([s for s in (league.get("roster_positions") or [])
+                 if s != "IR"])
+    held = len([p for p in (roster.get("players") or []) if p and p != "0"])
+    held -= len(sc.reserved(roster))
+    return max(0, spots - held)
+
+
 def replaceable_after(league):
     """The rest-of-season rank past which a player is a bench flier.
 

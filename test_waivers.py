@@ -891,14 +891,16 @@ class InjuredReserveIsNotARosterSpot(unittest.TestCase):
         self.assertEqual(sorted(order), ["b1", "s1"])
 
 
-class BeatingTheStarterNotTheBackup(unittest.TestCase):
-    """A third quarterback only had to be better than your backup.
+class AThirdQuarterbackCanNeverPlay(unittest.TestCase):
+    """One slot, no flex to reach it: a starter and a backup is the lot.
 
-    worth_the_spot compared a candidate against the weakest man held at
-    his position. With two quarterbacks that is your backup, a bar almost
-    any startable quarterback clears - which is how Matthew Stafford came
-    to be proposed to somebody who already had two. Adding a third only
-    helps if he beats the one you actually start.
+    The bar moved twice before it landed. Against the weakest man held,
+    a third quarterback only had to beat your backup and Stafford got
+    through. Against the one you start, the three running backs he
+    actually claimed that week were all refused. Neither is the question:
+    a quarterback behind the backup cannot take the field at all, while a
+    fourth running back is reached by the flex and by injuries - which is
+    why the same week wants no quarterbacks and three backs.
     """
 
     PLAYERS = {
@@ -906,34 +908,39 @@ class BeatingTheStarterNotTheBackup(unittest.TestCase):
                 "search_rank": 30, "depth_chart_order": 1},
         "qb2": {"full_name": "My Backup", "position": "QB",
                 "search_rank": 200, "depth_chart_order": 1},
-        "free": {"full_name": "Stafford", "position": "QB",
-                 "search_rank": 95, "depth_chart_order": 1},
+        "free": {"full_name": "Geno Smith", "position": "QB",
+                 "search_rank": 60, "depth_chart_order": 1},
     }
     MINE = {"starters": ["qb1"], "players": ["qb1", "qb2"]}
     DEPTH = {"QB": (2, 1.0, "ok")}
 
-    def ask(self, players=None):
-        return rw.worth_the_spot("free", players or self.PLAYERS, self.MINE,
-                                 self.DEPTH, {}, {})
-
-    def test_better_than_the_backup_is_not_enough(self):
-        ok, why = self.ask()
+    def test_a_third_is_refused_however_good_he_is(self):
+        ok, why = rw.worth_the_spot("free", self.PLAYERS, self.MINE,
+                                    self.DEPTH, {}, {})
         self.assertFalse(ok)
-        self.assertIn("the one you start", why)
+        self.assertIn("could never play", why)
 
-    def test_better_than_the_starter_is(self):
-        players = dict(self.PLAYERS)
-        players["free"] = dict(players["free"], search_rank=5)
-        ok, _why = self.ask(players)
+    def test_a_second_is_not(self):
+        """A backup can play, when your starter is hurt or on a bye."""
+        mine = {"starters": ["qb1"], "players": ["qb1"]}
+        ok, _why = rw.worth_the_spot("free", self.PLAYERS, mine,
+                                     {"QB": (1, 1.0, "ok")}, {}, {})
         self.assertTrue(ok)
 
-    def test_two_starting_slots_means_beating_your_second(self):
-        """In a two-flex league the bar is the second man, not the first."""
-        players = dict(self.PLAYERS)
-        players = {k: dict(v, position="RB") for k, v in players.items()}
-        mine = {"starters": ["qb1", "qb2"], "players": ["qb1", "qb2"]}
-        ok, _why = rw.worth_the_spot("free", players, mine,
-                                     {"RB": (2, 2.0, "ok")}, {}, {})
+    def test_the_same_rule_holds_for_kickers_and_defenses(self):
+        for pos in ("K", "DEF"):
+            with self.subTest(pos=pos):
+                players = {k: dict(v, position=pos)
+                           for k, v in self.PLAYERS.items()}
+                ok, _why = rw.worth_the_spot("free", players, self.MINE,
+                                             {pos: (2, 1.0, "ok")}, {}, {})
+                self.assertFalse(ok)
+
+    def test_but_never_for_a_flex_position(self):
+        """A fourth running back is reached by the flex."""
+        players = {k: dict(v, position="RB") for k, v in self.PLAYERS.items()}
+        ok, _why = rw.worth_the_spot("free", players, self.MINE,
+                                     {"RB": (2, 2.7, "ok")}, {}, {})
         self.assertTrue(ok)
 
 
@@ -996,11 +1003,15 @@ class HavingEnoughIsNotBeingShort(unittest.TestCase):
         got = ew.positional_depth(self.LEAGUE, roster, players)
         self.assertEqual(got["WR"][2], "deep")
 
-    def test_the_cap_no_longer_has_an_exception(self):
-        """Being short is an argument for a claim, never for three."""
+    def test_there_is_no_cap_per_position_any_more(self):
+        """His own week is three running backs, filed as alternatives.
+
+        Capping at one read "three quarterbacks for a man who starts one"
+        as a rule about counting. It was a rule about need, and
+        worth_the_spot is what asks that.
+        """
         source = open("run_weekly.py").read()
-        spot = source.index("if add_pos in spoken_for")
-        self.assertNotIn("thin_here", source[spot:spot + 200])
+        self.assertNotIn("spoken_for", source)
 
 
 class SeeingItWithoutTheWebsite(unittest.TestCase):
@@ -1232,18 +1243,20 @@ class ComparingLikeWithLike(unittest.TestCase):
     """
 
     PLAYERS = {
-        "free": {"full_name": "Hyped QB", "position": "QB",
+        "free": {"full_name": "Hyped WR", "position": "WR",
                  "search_rank": 150, "depth_chart_order": 1},
-        "mine": {"full_name": "My QB", "position": "QB",
+        "mine": {"full_name": "My WR", "position": "WR",
                  "search_rank": 90, "depth_chart_order": 1},
+        "spare": {"full_name": "My Spare WR", "position": "WR",
+                  "search_rank": 95, "depth_chart_order": 1},
     }
-    MINE = {"starters": ["mine"], "players": ["mine"]}
-    DEPTH = {"QB": (1, 1.0, "ok")}
+    MINE = {"starters": ["mine"], "players": ["mine", "spare"]}
+    DEPTH = {"WR": (2, 1.0, "ok")}
 
     def ask(self, trending):
         return rw.worth_the_spot("free", self.PLAYERS, self.MINE, self.DEPTH,
                                  trending,
-                                 {"free": 14.0, "mine": 12.0})
+                                 {"free": 4.0, "spare": 20.0})
 
     def test_a_hyped_pickup_no_better_than_yours_is_refused(self):
         ok, _why = self.ask({"free": 20000})
@@ -1257,12 +1270,13 @@ class ComparingLikeWithLike(unittest.TestCase):
         players = dict(self.PLAYERS)
         players["free"] = dict(players["free"], search_rank=10)
         ok, _why = rw.worth_the_spot("free", players, self.MINE, self.DEPTH,
-                                     {}, {"free": 22.0, "mine": 8.0})
+                                     {}, {"free": 22.0, "spare": 3.0})
         self.assertTrue(ok)
 
     def test_it_tolerates_a_caller_still_passing_add_score(self):
         ok, _why = rw.worth_the_spot("free", self.PLAYERS, self.MINE,
-                                     self.DEPTH, {}, {"free": 14.0},
+                                     self.DEPTH, {},
+                                     {"free": 4.0, "spare": 20.0},
                                      add_score=999.0)
         self.assertFalse(ok)
 
@@ -1379,13 +1393,14 @@ class ThreeQuarterbacksIsNeverTheAnswer(unittest.TestCase):
 
     def test_the_refusal_says_what_you_already_have(self):
         _ok, why = self.ask("free_qb")
-        self.assertIn("2 QBs", why)
-        self.assertIn("1 starting", why)
+        self.assertIn("QB", why)
+        self.assertIn("1", why)
 
-    def test_a_clearly_better_quarterback_still_gets_through(self):
-        """Positional need is a question, not a wall."""
-        ok, _why = self.ask("great_qb")
-        self.assertTrue(ok)
+    def test_even_a_clearly_better_third_quarterback_is_refused(self):
+        """He cannot play. Being good is not the same as being usable."""
+        ok, why = self.ask("great_qb")
+        self.assertFalse(ok)
+        self.assertIn("could never play", why)
 
     def test_a_position_you_are_short_at_is_never_refused(self):
         """Even a mediocre one, because you have nobody."""
@@ -1997,3 +2012,64 @@ class ALongArticleMustNotStopTheRun(unittest.TestCase):
 
     def test_a_dot_at_the_very_start_is_not_an_initial(self):
         self.assertTrue(ex._ends_a_sentence(".", 0))
+
+
+class WhatHisOwnClaimsLookLike(unittest.TestCase):
+    """The week he filed by hand, as the specification it should have been.
+
+    Seven claims in one league. Three of them running backs - Allen,
+    Mitchell, Gordon - filed together as alternatives. Three of those
+    seven dropping the same man. Two with no drop at all. Every one of
+    those shapes was one this could not make.
+    """
+
+    LEAGUE = {"settings": {"num_teams": 10},
+              "roster_positions": ["QB", "RB", "RB", "WR", "WR", "WR", "TE",
+                                   "FLEX", "DEF"] + ["BN"] * 6}
+
+    def test_several_claims_at_one_position_are_allowed(self):
+        """Three running backs is his actual week, not a bug."""
+        source = open("run_weekly.py").read()
+        self.assertNotIn("spoken_for", source)
+
+    def test_claims_may_share_a_drop(self):
+        """MarShawn Lloyd is the drop on three of his seven."""
+        source = open("run_weekly.py").read()
+        self.assertNotIn("protect.add(drop_pid)", source)
+
+    def test_a_free_roster_spot_means_no_drop_is_needed(self):
+        roster = {"players": ["a", "b", "c"]}
+        self.assertEqual(ew.open_spots(self.LEAGUE, roster), 12)
+
+    def test_a_full_roster_has_no_room(self):
+        roster = {"players": [str(i) for i in range(15)]}
+        self.assertEqual(ew.open_spots(self.LEAGUE, roster), 0)
+
+    def test_reserve_does_not_fill_a_spot(self):
+        """Which is the point of the slot, and why Pierce is not a drop."""
+        roster = {"players": [str(i) for i in range(15)], "reserve": ["0"]}
+        self.assertEqual(ew.open_spots(self.LEAGUE, roster), 1)
+
+    def test_the_run_offers_more_than_a_handful(self):
+        """He filed seven. Offering three made two bad ones fatal."""
+        source = open("run_weekly.py").read()
+        self.assertIn("moves=8", source)
+
+
+class CutFromThePositionYouAreFillingUp(unittest.TestCase):
+    """Adding a third tight end and cutting a receiver leaves three.
+
+    Which is not what anybody asking for a tight end wanted. Only a
+    preference - if nobody at that position can be spared, the best drop
+    anywhere still wins.
+    """
+
+    def test_the_same_position_is_preferred(self):
+        source = open("run_weekly.py").read()
+        self.assertIn("same = [d for d in drops", source)
+
+    def test_but_not_when_you_are_short_there(self):
+        """Adding your second tight end should not cut your first."""
+        source = open("run_weekly.py").read()
+        spot = source.index("same = [d for d in drops")
+        self.assertIn('!= "thin"', source[max(0, spot - 300):spot])

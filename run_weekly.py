@@ -197,7 +197,12 @@ def held_at(mine, players, pos, trending, projected, ros=None):
 # with like costs a roster spot and a waiver claim to move sideways, and
 # the whole complaint that prompted this was three quarterbacks proposed to
 # somebody who starts one.
-UPGRADE_EDGE = 1.25
+# Better than the man he replaces, and no more than that. It was 1.25 -
+# a quarter better - which is a high bar for something that is mostly a
+# bid you lose: he claimed Braelon Allen at thirty dollars knowing full
+# well it might not land. A claim swaps one body for another, so being
+# the better body is the whole of the question.
+UPGRADE_EDGE = 1.0
 
 
 def worth_the_spot(pid, players, mine, depth, trending, projected,
@@ -236,15 +241,39 @@ def worth_the_spot(pid, players, mine, depth, trending, projected,
     # had two. Adding a third only helps if he is better than the one
     # you actually start.
     slots = max(1, int(round(need or 1)))
-    bar, _bar_pid = mine_here[max(0, len(mine_here) - slots)]
+    # The man he would displace: your best bench player at that position,
+    # not the one you start. Against the weakest, a third quarterback only
+    # had to beat your backup; against the starter, the three running
+    # backs he actually claimed this week - Allen, Gordon, Mitchell - were
+    # all refused for not being better than a man he had no intention of
+    # cutting. What a claim really replaces is the first body on the bench
+    # behind the slots you fill, and that is a bar both cases agree with.
+    # A third quarterback can never play. One slot, no flex to reach, so
+    # a starter and a backup is the whole of what the position can use and
+    # anybody after that is a roster spot spent on a man who will not take
+    # the field. A fourth running back is a different thing entirely -
+    # the flex reaches him, and injuries reach him - which is why the same
+    # week that wants no quarterbacks wants three backs.
+    if pos not in ew.FLEX_ELIGIBLE and len(mine_here) >= slots + 1:
+        return False, (f"you have a {pos} and a backup, and this league "
+                       f"starts {need:g} - a third could never play")
+
+    spare = len(mine_here) - slots
+    if spare <= 0:
+        return True, None          # nothing behind your starters to replace
+    bar, bar_pid = mine_here[spare - 1]
     import ros as rs
     worth = wa.keep_value(players.get(pid) or {}, trending.get(pid, 0),
                           projected.get(pid), rs.worth(ros, pid))
     if worth > bar * UPGRADE_EDGE:
         return True, None
-    return False, (f"you already carry {have} {pos}s for {need:g} "
-                   f"starting spots, and he is not clearly better than "
-                   f"the one you start")
+    # With the numbers. "Not clearly better" was unarguable-with, and
+    # whether the fault is the bar or the ranking behind it is exactly
+    # what the numbers say and the sentence did not.
+    return False, (f"worth {worth:.0f} against the {bar:.0f} of "
+                   f"{strip_label(sc.player_label(players, bar_pid))}, the "
+                   f"spare {pos} he would replace "
+                   f"({have} for {need:g} starting spots)")
 
 
 def keeping_points(weeks):
@@ -478,8 +507,6 @@ def proposals_for_league(league, user_id, players, trending, texts, max_moves,
     out, protect, budget_left, why = [], set(), remaining, None
     # Positions already spoken for this week. Three quarterbacks is never
     # the answer, however many analysts wrote about quarterbacks.
-    spoken_for = set()
-
     def refused(pid, reason):
         """Record a candidate and why it was turned down.
 
@@ -503,16 +530,14 @@ def proposals_for_league(league, user_id, players, trending, texts, max_moves,
             refused(pid, reason)
             why = why or reason
             continue
-        # One claim per position, with no exception for being short there.
-        # Thin used to buy a bypass, and thin is what a position you start
-        # one of and roster one of was called - so the cap was off in the
-        # only case anyone complained about. Being short is an argument for
-        # making a claim, never for making three.
-        if add_pos in spoken_for:
-            reason = f"one {add_pos} claim is enough"
-            refused(pid, reason)
-            why = why or reason
-            continue
+        # No cap per position. His own week is three running backs - Allen,
+        # Mitchell, Gordon - filed together as alternatives, because a
+        # waiver claim is a bid that usually loses and the second only
+        # matters if the first fails. Capping that at one was reading
+        # "three quarterbacks for a man who starts one" as a rule about
+        # counting, when it was a rule about need: worth_the_spot below
+        # asks whether you need another one of him at all, and that is the
+        # question that should decide it.
         # Everyone you could cut, not only the bench and not only the one it
         # picked. Whether there is anyone worth dropping is half the
         # decision, and it was being made for you out of sight.
@@ -529,7 +554,22 @@ def proposals_for_league(league, user_id, players, trending, texts, max_moves,
             return ew.worth_cutting(season_ranks.get(str(pid)), league)
 
         drops = [d for d in drops if expendable(d[2])]
-        if drops:
+        # Cut from the position you are adding to, when you are already
+        # full there. Adding a third tight end and cutting a receiver
+        # leaves you with three tight ends, which is not what anybody
+        # asking for a tight end wanted. Only a preference: if nobody at
+        # that position is expendable, the best drop anywhere still wins.
+        if add_pos and depth.get(add_pos, (0, 0, "thin"))[2] != "thin":
+            same = [d for d in drops
+                    if (players.get(d[2]) or {}).get("position") == add_pos]
+            drops = same + [d for d in drops if d not in same]
+        room = ew.open_spots(league, mine) - len(out)
+        if room > 0:
+            # Nobody has to go. Two of his own claims this week were adds
+            # with no drop against them, which is the better trade when
+            # there is a place free, and was not a shape this could make.
+            drop_score, drop_pid, drop_player, drop_label = 0.0, None, {}, "ok"
+        elif drops:
             _, drop_score, drop_pid, drop_player, drop_label = drops[0]
         else:
             # The bench is used up or is entirely never-drops. That decided
@@ -546,6 +586,7 @@ def proposals_for_league(league, user_id, players, trending, texts, max_moves,
                        "starts")
                 break
             _rank, drop_score, drop_pid, drop_player, drop_label, _st = spare[0]
+
         place = standings(candidates)
         options = [{
             "id": cid,
@@ -596,8 +637,11 @@ def proposals_for_league(league, user_id, players, trending, texts, max_moves,
             low = max(1, round(remaining * min(faabs) / 100))
             high = max(low, round(remaining * max(faabs) / 100))
 
-        why = depth_sentence(drop_player, drop_label, depth,
-                             sc.player_label(players, drop_pid))
+        why = (depth_sentence(drop_player, drop_label, depth,
+                              sc.player_label(players, drop_pid))
+               if drop_pid else
+               f"Adding {strip_label(sc.player_label(players, pid))} - "
+               "you have a free roster spot, so nobody has to go.")
         out.append(dict(
             platform="sleeper",
             league_id=league["league_id"],
@@ -607,8 +651,9 @@ def proposals_for_league(league, user_id, players, trending, texts, max_moves,
             add_player_name=sc.player_label(players, pid),
             add_position=add.get("position"),
             drop_player_id=drop_pid,
-            drop_player_name=sc.player_label(players, drop_pid),
-            drop_position=drop_player.get("position"),
+            drop_player_name=(sc.player_label(players, drop_pid)
+                              if drop_pid else None),
+            drop_position=drop_player.get("position") if drop_pid else None,
             bid=bid, max_bid=remaining, bid_low=low, bid_high=high,
             drop_options=options,
             consensus=info["count"], sources=info["sources"],
@@ -624,8 +669,7 @@ def proposals_for_league(league, user_id, players, trending, texts, max_moves,
         # claim you make, and claim_order already turns two claims sharing
         # a drop into a chain where the second only runs if the first
         # fails. The card offers the whole roster anyway.
-        if add_pos:
-            spoken_for.add(add_pos)
+
 
     # Appended outside the loop: a defense is not competing with the skill
     # players for a roster spot, because it replaces itself.
@@ -927,7 +971,7 @@ def explain(username, name, db_path=None):
     return 0
 
 
-def main_for(username, db_path, moves=6, force=False):
+def main_for(username, db_path, moves=8, force=False):
     """Run the job programmatically, for the host's own scheduler."""
     return _run(username, [], moves, False, db_path, force)
 
@@ -938,8 +982,8 @@ def main():
     ap.add_argument("username", nargs="?", default=None,
                     help="Sleeper username (or set it in sources.json)")
     ap.add_argument("--url", action="append", default=[])
-    ap.add_argument("--moves", type=int, default=6,
-                    help="proposals per league (default 6)")
+    ap.add_argument("--moves", type=int, default=8,
+                    help="proposals per league (default 8)")
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--db", default=str(st.DB_PATH))
     ap.add_argument("--why", metavar="PLAYER",
