@@ -2073,3 +2073,64 @@ class CutFromThePositionYouAreFillingUp(unittest.TestCase):
         source = open("run_weekly.py").read()
         spot = source.index("same = [d for d in drops")
         self.assertIn('!= "thin"', source[max(0, spot - 300):spot])
+
+
+class ClaimsAlreadyMadeCountAsPlayersHeld(unittest.TestCase):
+    """OTG came back with three quarterbacks and four tight ends.
+
+    worth_the_spot looked only at the roster as it stands, so with one
+    quarterback rostered every quarterback candidate asked the same
+    question of the same one-man roster and every one of them passed.
+    Removing the per-position cap was right - his own week is three
+    running backs - but the thing that then has to do the counting is the
+    need gate, and it was not counting.
+    """
+
+    QB = {"qb1": {"full_name": "My QB", "position": "QB",
+                  "search_rank": 35, "depth_chart_order": 1},
+          "free": {"full_name": "Geno Smith", "position": "QB",
+                   "search_rank": 60, "depth_chart_order": 1}}
+    MINE = {"starters": ["qb1"], "players": ["qb1"]}
+
+    def ask(self, already):
+        return rw.worth_the_spot("free", self.QB, self.MINE,
+                                 {"QB": (1, 1.0, "ok")}, {}, {},
+                                 already=already)
+
+    def test_a_second_quarterback_is_fine(self):
+        ok, _why = self.ask(0)
+        self.assertTrue(ok)
+
+    def test_a_third_is_not_even_when_the_roster_shows_one(self):
+        """The second is already claimed; the roster has not caught up."""
+        ok, why = self.ask(1)
+        self.assertFalse(ok)
+        self.assertIn("could never play", why)
+
+    def test_nor_a_fourth(self):
+        self.assertFalse(self.ask(2)[0])
+
+    def test_tight_ends_taper_rather_than_stopping_dead(self):
+        """Each further claim displaces a better man than the last."""
+        players = {"te1": {"full_name": "My TE", "position": "TE",
+                           "search_rank": 120, "depth_chart_order": 1}}
+        for i, rank in enumerate([70, 140, 200, 260], start=1):
+            players[f"c{i}"] = {"full_name": f"Cand {i}", "position": "TE",
+                                "search_rank": rank, "depth_chart_order": 1}
+        mine = {"starters": ["te1"], "players": ["te1"]}
+        taken, allowed = 0, []
+        for i in range(1, 5):
+            ok, _why = rw.worth_the_spot(f"c{i}", players, mine,
+                                         {"TE": (1, 1.7, "ok")}, {}, {},
+                                         already=taken)
+            if ok:
+                taken += 1
+                allowed.append(i)
+        self.assertEqual(allowed, [1, 2])
+
+    def test_the_run_keeps_the_count(self):
+        source = open("run_weekly.py").read()
+        self.assertIn("already=claimed.get(add_pos, 0)", source)
+
+    def test_a_negative_count_cannot_widen_the_gate(self):
+        self.assertTrue(self.ask(-5)[0])

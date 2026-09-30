@@ -206,7 +206,7 @@ UPGRADE_EDGE = 1.0
 
 
 def worth_the_spot(pid, players, mine, depth, trending, projected,
-                   add_score=None, ros=None):
+                   add_score=None, ros=None, already=0):
     """(yes/no, why not) - should this position take another player at all?
 
     Both sides are measured with keep_value, and that is the whole point.
@@ -254,14 +254,23 @@ def worth_the_spot(pid, players, mine, depth, trending, projected,
     # the field. A fourth running back is a different thing entirely -
     # the flex reaches him, and injuries reach him - which is why the same
     # week that wants no quarterbacks wants three backs.
-    if pos not in ew.FLEX_ELIGIBLE and len(mine_here) >= slots + 1:
+    # Count the claims already made this run. Each one is a man you would
+    # be holding, so the second quarterback proposed makes the third the
+    # third - and without this, every quarterback candidate asked the same
+    # question of the same one-man roster and every one of them passed.
+    # OTG came back with three quarterbacks and four tight ends.
+    held = len(mine_here) + max(0, already)
+
+    if pos not in ew.FLEX_ELIGIBLE and held >= slots + 1:
         return False, (f"you have a {pos} and a backup, and this league "
                        f"starts {need:g} - a third could never play")
 
-    spare = len(mine_here) - slots
+    spare = held - slots
     if spare <= 0:
         return True, None          # nothing behind your starters to replace
-    bar, bar_pid = mine_here[spare - 1]
+    # Each further claim at a position displaces a better man than the
+    # last, because the one before it has taken the worst spot.
+    bar, bar_pid = mine_here[min(spare, len(mine_here)) - 1]
     import ros as rs
     worth = wa.keep_value(players.get(pid) or {}, trending.get(pid, 0),
                           projected.get(pid), rs.worth(ros, pid))
@@ -507,6 +516,9 @@ def proposals_for_league(league, user_id, players, trending, texts, max_moves,
     out, protect, budget_left, why = [], set(), remaining, None
     # Positions already spoken for this week. Three quarterbacks is never
     # the answer, however many analysts wrote about quarterbacks.
+    # How many claims this run has already made at each position.
+    claimed = {}
+
     def refused(pid, reason):
         """Record a candidate and why it was turned down.
 
@@ -602,7 +614,8 @@ def proposals_for_league(league, user_id, players, trending, texts, max_moves,
                                     shots.get(pid))
         # Before anything about who to drop: do you need another one of him?
         needed, no_thanks = worth_the_spot(pid, players, mine, depth,
-                                           trending, holds, ros=season_ranks)
+                                           trending, holds, ros=season_ranks,
+                                           already=claimed.get(add_pos, 0))
         if not needed:
             refused(pid, no_thanks)
             why = why or no_thanks
@@ -660,6 +673,8 @@ def proposals_for_league(league, user_id, players, trending, texts, max_moves,
             rationale=why,
             quote=quote, rank=len(out) + 1,
         ))
+        if add_pos:
+            claimed[add_pos] = claimed.get(add_pos, 0) + 1
         # Deliberately not protecting drop_pid. Each proposal used to
         # consume a drop, so the second claim offered your second-worst
         # player and the third your third-worst - which is how a receiver
