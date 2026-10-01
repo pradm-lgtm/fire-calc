@@ -1941,9 +1941,6 @@ class Starters(unittest.TestCase):
         self.assertTrue(settled)
 
 
-if __name__ == "__main__":
-    unittest.main(verbosity=2)
-
 
 class ALongArticleMustNotStopTheRun(unittest.TestCase):
     """A sixty-thousand character round-up hung the weekly job.
@@ -2045,12 +2042,16 @@ class WhatHisOwnClaimsLookLike(unittest.TestCase):
         self.assertEqual(ew.open_spots(self.LEAGUE, roster), 12)
 
     def test_a_full_roster_has_no_room(self):
-        roster = {"players": [str(i) for i in range(15)]}
+        # Ids from 1, because "0" is how Sleeper spells an empty slot and
+        # is filtered out - a fixture that uses it as a player id is
+        # testing a roster one man short of the one it describes.
+        roster = {"players": [str(i) for i in range(1, 16)]}
         self.assertEqual(ew.open_spots(self.LEAGUE, roster), 0)
 
     def test_reserve_does_not_fill_a_spot(self):
         """Which is the point of the slot, and why Pierce is not a drop."""
-        roster = {"players": [str(i) for i in range(15)], "reserve": ["0"]}
+        roster = {"players": [str(i) for i in range(1, 16)],
+                  "reserve": ["15"]}
         self.assertEqual(ew.open_spots(self.LEAGUE, roster), 1)
 
     def test_the_run_offers_more_than_a_handful(self):
@@ -2310,7 +2311,9 @@ class ClaimsAlreadyMadeCountAsPlayersHeld(unittest.TestCase):
 
     def test_the_run_keeps_the_count(self):
         source = open("run_weekly.py").read()
-        self.assertIn("already=claimed.get(add_pos, 0)", source)
+        spot = source.index("needed, no_thanks = worth_the_spot(")
+        self.assertIn("already=", source[spot:spot + 400])
+        self.assertIn("claimed.get(add_pos, 0)", source)
 
     def test_a_negative_count_cannot_widen_the_gate(self):
         self.assertTrue(self.ask(-5)[0])
@@ -2347,3 +2350,6 @@ class TheDiagnosticCoversEveryLeague(unittest.TestCase):
     def test_yahoo_has_no_draft_history_and_that_is_fine(self):
         source = open("run_weekly.py").read()
         self.assertIn("Yahoo has no draft history", source)
+
+if __name__ == "__main__":
+    unittest.main(verbosity=2)

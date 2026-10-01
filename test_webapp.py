@@ -541,9 +541,6 @@ class ThursdayFirst(unittest.TestCase):
         self.assertNotIn("Fix these", body)
 
 
-if __name__ == "__main__":
-    unittest.main(verbosity=2)
-
 
 class APriorityLeagueHasNoPrice(unittest.TestCase):
     """Both Yahoo leagues run waiver priority.
@@ -647,8 +644,10 @@ class SayingWhenYahooIsMissing(unittest.TestCase):
         """The check did refresh. Calling it a failed refresh and showing
         "the last check" would be two lies about a page that is current."""
         source = open("webapp.py").read()
-        spot = source.index("no Yahoo credentials")
-        self.assertIn("NOTE +", source[max(0, spot - 300):spot])
+        start = source.index("def refresh_lineup(")
+        body = source[start:source.index("\ndef ", start + 10)]
+        self.assertIn("NOTE +", body)
+        self.assertIn("no Yahoo credentials", body)
 
     def test_a_real_failure_still_reads_as_one(self):
         source = open("webapp.py").read()
@@ -685,3 +684,42 @@ class AskingForAFreshCheck(unittest.TestCase):
         source = open("webapp.py").read()
         spot = source.index('again = "again" in parse_qs(')
         self.assertIn("urlparse(self.path).query", source[spot:spot + 120])
+
+
+class ASlowLinkSaysItIsWorking(unittest.TestCase):
+    """"check again now" went quiet for several seconds.
+
+    Rechecking four leagues means fetching every roster and every
+    ranking page before anything comes back, so the page sat there
+    looking as though the click had missed.
+    """
+
+    def test_the_link_carries_what_to_say(self):
+        source = open("webapp.py").read()
+        self.assertIn("data-slow='checking every league", source)
+
+    def test_the_script_watches_for_it(self):
+        self.assertIn("a[data-slow]", webapp.BUSY_JS)
+
+    def test_it_swaps_the_label(self):
+        self.assertIn("link.textContent = link.getAttribute('data-slow')",
+                      webapp.BUSY_JS)
+
+    def test_a_second_click_cannot_start_a_second_check(self):
+        self.assertIn("again.preventDefault()", webapp.BUSY_JS)
+
+    def test_opening_in_a_new_tab_is_left_alone(self):
+        """Command-click should not relabel a link that is not navigating
+        this page anywhere."""
+        self.assertIn("e.metaKey || e.ctrlKey", webapp.BUSY_JS)
+
+    def test_the_page_looks_busy_too(self):
+        self.assertIn("body.busy", webapp.CSS)
+        self.assertIn("cursor: progress", webapp.CSS)
+
+    def test_ordinary_links_are_untouched(self):
+        """Only links that say they are slow get this."""
+        self.assertIn("closest('a[data-slow]')", webapp.BUSY_JS)
+
+if __name__ == "__main__":
+    unittest.main(verbosity=2)

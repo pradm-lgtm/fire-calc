@@ -189,13 +189,21 @@ def eligible(player, slot):
 def assess(league, roster, players, consensus):
     """One verdict per started player, with the bench player behind it."""
     slots = starting_slots(league)
-    starters = [str(p) for p in (roster.get("starters") or []) if p and p != "0"]
+    # Paired with the slot each man is in, rather than filtered and then
+    # counted off against the slot list. An empty slot is spelled "0", and
+    # dropping those first shifted everybody after them up a place - so a
+    # running back was judged as a quarterback, nothing on the bench was
+    # eligible for the slot he was supposedly in, and the verdict came
+    # back green with no alternative beside it.
+    filled = [(slots[i] if i < len(slots) else "?", str(p))
+              for i, p in enumerate(roster.get("starters") or [])
+              if p and str(p) != "0"]
+    starters = [pid for _slot, pid in filled]
     everyone = [str(p) for p in (roster.get("players") or []) if p and p != "0"]
     bench = [p for p in everyone if p not in starters]
 
     verdicts, claimed = [], set()
-    for i, pid in enumerate(starters):
-        slot = slots[i] if i < len(slots) else "?"
+    for slot, pid in filled:
         player = players.get(pid) or {}
         pos = player.get("position")
         # A flex slot pits positions against each other, so compare where the

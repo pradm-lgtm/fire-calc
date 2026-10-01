@@ -224,9 +224,6 @@ class WhichDay(unittest.TestCase):
         self.assertIsNone(got["day"])
 
 
-if __name__ == "__main__":
-    unittest.main(verbosity=2)
-
 
 class TheYahooLineups(unittest.TestCase):
     """The start/sit model never cared which site a roster came from.
@@ -312,4 +309,69 @@ class TheYahooLineups(unittest.TestCase):
 
     def test_the_check_asks_for_them(self):
         source = open("lineup.py").read()
-        self.assertIn("found.extend(yahoo_rows(", source)
+        spot = source.index("def check(")
+        self.assertIn("yahoo_rows(players, consensus, context",
+                      source[spot:])
+
+
+class AnEmptySlotKeepsItsPlace(unittest.TestCase):
+    """assess counted starters off against the slot list after filtering.
+
+    An empty slot is spelled "0" and those were dropped first, so
+    everybody after one shifted up a place - a running back judged as a
+    quarterback, nothing on the bench eligible for the slot he was
+    supposedly in, and a green verdict with no alternative beside it.
+    This bit the Yahoo leagues, where a lineup is routinely not full,
+    but it was never right for Sleeper either.
+    """
+
+    import yahoo_waivers as yw
+
+    SLOTS = ["QB", "RB", "RB", "WR", "WR", "TE", "W/R/T", "K", "DEF",
+             "BN", "BN", "IR"]
+    LEAGUE = yw.as_league(
+        {"key": "470.l.715420", "name": "The Minor League", "teams": 10},
+        SLOTS)
+    PLAYERS = {
+        "weak": {"full_name": "Weak Starter", "position": "RB",
+                 "team": "NYJ", "fantasy_positions": ["RB"]},
+        "strong": {"full_name": "Better Bench", "position": "RB",
+                   "team": "BUF", "fantasy_positions": ["RB"]},
+        "hurt": {"full_name": "On The IR", "position": "RB", "team": "GB",
+                 "fantasy_positions": ["RB"]},
+    }
+    CONSENSUS = {
+        "RB": {"weak": {"rank": 40.0, "sources": ["x"], "spread": 0},
+               "strong": {"rank": 12.0, "sources": ["x"], "spread": 0}},
+        rk.OVERALL: {"weak": {"rank": 90.0, "sources": ["x"], "spread": 0},
+                     "strong": {"rank": 30.0, "sources": ["x"],
+                                "spread": 0}}}
+
+    def rows(self):
+        squad = [{"key": "a", "slot": "RB"}, {"key": "b", "slot": "BN"},
+                 {"key": "c", "slot": "IR+"}]
+        mine = self.yw.as_roster(squad, {"a": "weak", "b": "strong",
+                                         "c": "hurt"}, self.SLOTS)
+        return lineup.flag_rows(self.LEAGUE, mine, self.PLAYERS,
+                                self.CONSENSUS, lineup.EMPTY_WEEK)
+
+    def test_the_man_is_judged_in_the_slot_he_is_actually_in(self):
+        self.assertEqual(self.rows()[0]["slot"], "RB")
+
+    def test_and_the_better_bench_player_is_named(self):
+        self.assertEqual(self.rows()[0]["better_name"],
+                         "Better Bench (BUF RB)")
+
+    def test_a_clear_gap_is_flagged_rather_than_passed(self):
+        self.assertEqual(self.rows()[0]["verdict"], "RED")
+
+    def test_the_man_on_reserve_is_not_judged_at_all(self):
+        """He is not in the lineup, so there is nothing to say about him."""
+        self.assertNotIn("On The IR",
+                         [r["player_name"] for r in self.rows()])
+
+    def test_only_the_filled_slots_produce_rows(self):
+        self.assertEqual(len(self.rows()), 1)
+
+if __name__ == "__main__":
+    unittest.main(verbosity=2)

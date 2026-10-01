@@ -24,15 +24,56 @@ class TurningAYahooRosterIntoOneTheModelReads(unittest.TestCase):
     MAP = {"470.p.1": "s1", "470.p.2": "s2", "470.p.3": "s3",
            "470.p.4": "s4"}
 
+    SLOTS = ["QB", "RB", "RB", "WR", "WR", "TE", "W/R/T", "K", "DEF",
+             "BN", "BN", "IR"]
+
     def roster(self):
-        return yw.as_roster(self.SQUAD, self.MAP)
+        return yw.as_roster(self.SQUAD, self.MAP, self.SLOTS)
 
     def test_everybody_bridged_is_on_the_roster(self):
         self.assertEqual(self.roster()["players"],
                          ["s1", "s2", "s3", "s4"])
 
     def test_a_filled_slot_means_a_starter(self):
-        self.assertEqual(sorted(self.roster()["starters"]), ["s1", "s4"])
+        got = [p for p in self.roster()["starters"] if p != "0"]
+        self.assertEqual(sorted(got), ["s1", "s4"])
+
+    def test_the_starters_are_in_the_leagues_slot_order(self):
+        """The start/sit check takes starters[i] to be the man in
+        slots[i]. Built in the order Yahoo returned the squad, a running
+        back was judged as a quarterback."""
+        got = self.roster()["starters"]
+        self.assertEqual(got[0], "s1")                 # QB slot
+        self.assertEqual(got[self.SLOTS.index("W/R/T")], "s4")
+
+    def test_an_empty_slot_keeps_its_place(self):
+        """Spelled "0", the way Sleeper spells one, so the places after
+        it still mean what they say."""
+        self.assertIn("0", self.roster()["starters"])
+
+    def test_every_kind_of_yahoo_reserve_is_reserve(self):
+        """IR, IR+ and IL are all "not in your lineup". Only a bare IR
+        was handled, so the others became starters and the page told him
+        to sit men already on his injured list."""
+        squad = [{"key": "a", "slot": "IR"}, {"key": "b", "slot": "IR+"},
+                 {"key": "c", "slot": "IL"}]
+        got = yw.as_roster(squad, {"a": "x", "b": "y", "c": "z"},
+                           self.SLOTS)
+        self.assertEqual(sorted(got["reserve"]), ["x", "y", "z"])
+        self.assertEqual([p for p in got["starters"] if p != "0"], [])
+
+    def test_a_slot_we_do_not_know_becomes_a_bench_player(self):
+        """Which is the harmless way to be wrong about one."""
+        squad = [{"key": "a", "slot": "SOMETHING_NEW"}]
+        got = yw.as_roster(squad, {"a": "x"}, self.SLOTS)
+        self.assertNotIn("x", got["starters"])
+        self.assertNotIn("x", got["reserve"])
+        self.assertIn("x", got["players"])
+
+    def test_without_slots_it_guesses_rather_than_emptying_the_lineup(self):
+        squad = [{"key": "a", "slot": "RB"}, {"key": "b", "slot": "BN"}]
+        got = yw.as_roster(squad, {"a": "x", "b": "y"})
+        self.assertEqual(got["starters"], ["x"])
 
     def test_the_flex_counts_as_starting(self):
         """Yahoo calls it W/R/T and it is a man in your lineup."""

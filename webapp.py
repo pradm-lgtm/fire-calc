@@ -602,7 +602,10 @@ details.league > summary:hover::after { opacity: 1; }
 """
 
 
-CSS += FOLD_CSS
+CSS += FOLD_CSS + """
+body.busy { cursor: progress; }
+body.busy a[aria-busy] { opacity: .6; pointer-events: none; }
+"""
 
 
 def league_heading(conn, lid, lname, items, waiting, live):
@@ -1449,7 +1452,8 @@ def render_lineup(conn, force=False):
     out = [nav("/lineup"), "<h1>Start / sit</h1>",
            f"<p class='sub'>Week {e(check['week'])} &middot; checked "
            f"{e(said_ago(age))} &middot; "
-           "<a href='/lineup?again=1'>check again now</a></p>"]
+           "<a href='/lineup?again=1' data-slow='checking every league"
+           "\u2026'>check again now</a></p>"]
     if problem and problem.startswith(NOTE):
         out.append(f"<div class='bar'><span>{e(problem[len(NOTE):])}</span>"
                    "</div>")
@@ -1525,6 +1529,22 @@ def render_lineup(conn, force=False):
 # check fetches six ranking pages and a player database, and an unmarked
 # wait reads as a dead link.
 BUSY_JS = """
+// A link that goes away and does real work before anything comes back.
+// Rechecking four leagues means fetching every roster and every ranking
+// page, which is seconds of a page that looks as though the click missed.
+document.addEventListener('click', function (e) {
+  var link = e.target.closest && e.target.closest('a[data-slow]');
+  if (!link || e.metaKey || e.ctrlKey || e.shiftKey || e.button) { return; }
+  document.body.classList.add('busy');
+  link.textContent = link.getAttribute('data-slow');
+  link.setAttribute('aria-busy', 'true');
+  // Stop a second click starting a second check: the first is already
+  // on its way and the page is about to be replaced either way.
+  link.addEventListener('click', function (again) {
+    again.preventDefault();
+  });
+});
+
 document.addEventListener('submit', function (e) {
   document.body.classList.add('busy');
   var button = e.submitter || e.target.querySelector('button');

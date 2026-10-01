@@ -32,28 +32,66 @@ import expert_extract as ex
 import expert_waivers as ew
 import yahoo_bridge as yb
 
-# Slots that hold somebody without starting him.
-BENCHED = {"BN", "IR", "TAXI"}
+# Slots that hold somebody without starting him. Yahoo has several kinds
+# of reserve - IR, IR+, IL for leagues that allow the long-term list, NA
+# for a man who is not on an NFL roster at all - and the point of all of
+# them is that he is not in your lineup.
+BENCHED = {"BN", "TAXI", "NA"}
+RESERVE_PREFIX = ("IR", "IL")
 
 
-def as_roster(squad, mapping):
+def as_roster(squad, mapping, slots=None):
     """A Yahoo roster in the shape sleeper_client.split_roster expects.
 
-    Yahoo says which slot each man is in, which is the same thing
-    Sleeper's starters list says less directly - and it says IR outright,
-    where Sleeper needs a separate reserve list.
+    A man is starting only if his slot is one the league actually starts.
+    The first version asked the opposite - anything not in a list of
+    bench names counted as a starter - so every reserve slot Yahoo has
+    beyond a bare "IR" put an injured player in the lineup, and the page
+    told him to sit men who were already on his injured list.
+
+    Asking it this way round means an unfamiliar slot becomes a bench
+    player, which is the harmless way to be wrong about one.
     """
-    players, starters, reserve = [], [], []
+    import yahoo_client as yc
+
+    def tidy(name):
+        name = (name or "").upper()
+        return yc.SLOT_NAMES.get(name, name)
+
+    playing = [tidy(s) for s in (slots or [])
+               if tidy(s) not in BENCHED
+               and not tidy(s).startswith(RESERVE_PREFIX)]
+    # Without the league's slots there is no way to know what starting
+    # looks like, and answering "nobody" would be a worse guess than
+    # answering "whoever is not on the bench". Every caller passes them;
+    # this only stops a forgetful one producing an empty lineup.
+    loose = not playing
+    fillable = set(playing)
+
+    players, reserve, by_slot = [], [], {}
     for who in squad:
         pid = mapping.get(who.get("key"))
         if not pid:
             continue
         players.append(pid)
-        slot = (who.get("slot") or "").upper()
-        if slot == "IR":
+        slot = tidy(who.get("slot"))
+        if slot.startswith(RESERVE_PREFIX):
             reserve.append(pid)
-        elif slot not in BENCHED:
-            starters.append(pid)
+        elif slot in fillable or (loose and slot not in BENCHED):
+            by_slot.setdefault(slot, []).append(pid)
+        # anything else is a bench player, including a slot we do not know
+
+    # In the league's own slot order, because that is what the start/sit
+    # check reads: it takes starters[i] to be the man in slots[i]. Built
+    # in the order Yahoo happened to return the squad, a running back
+    # landed in the quarterback slot, no bench back was eligible for it,
+    # and every verdict came back green with no alternative beside it.
+    starters = []
+    for slot in (playing or list(by_slot)):
+        pool = by_slot.get(slot) or []
+        # "0" is how Sleeper spells an empty slot, and split_roster drops
+        # it - so the places keep their meaning without inventing a man.
+        starters.append(pool.pop(0) if pool else "0")
     return {"players": players, "starters": starters, "reserve": reserve,
             "settings": {}}
 
@@ -95,15 +133,16 @@ def gather(league_key=None, verbose=False):
         # twenty-fives, so this is six requests, and the articles name
         # players well below the top of anybody's list.
         wire = yc.free_agents(league["key"], count=150)
+        slots = yc.roster_slots(league["key"])
         held, missed = yb.bridge(squad, players)
         free, free_missed = yb.bridge(wire, players)
         if verbose:
             yb.report(held, missed, "your roster")
             yb.report(free, free_missed, "the wire")
         out.append({
-            "league": as_league(league, yc.roster_slots(league["key"])),
+            "league": as_league(league, slots),
             "team": mine,
-            "roster": as_roster(squad, held),
+            "roster": as_roster(squad, held, slots),
             "available": sorted(set(free.values())),
             "players": players,
             "week": league.get("week") or 1,
