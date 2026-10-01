@@ -1448,7 +1448,8 @@ def render_lineup(conn, force=False):
 
     out = [nav("/lineup"), "<h1>Start / sit</h1>",
            f"<p class='sub'>Week {e(check['week'])} &middot; checked "
-           f"{e(said_ago(age))}</p>"]
+           f"{e(said_ago(age))} &middot; "
+           "<a href='/lineup?again=1'>check again now</a></p>"]
     if problem and problem.startswith(NOTE):
         out.append(f"<div class='bar'><span>{e(problem[len(NOTE):])}</span>"
                    "</div>")
@@ -2015,6 +2016,12 @@ class Handler(BaseHTTPRequestHandler):
         if path not in ("/", "/lineup"):
             self._no_route(path)
             return
+        # A forced recheck, because there was no way to ask for one. The
+        # page recomputes only when its stored check is three hours old,
+        # so a check taken before the Yahoo credentials reached the host
+        # kept two leagues off the page for three hours with no way to
+        # hurry it along.
+        again = "again" in parse_qs(urlparse(self.path).query)
         if not self._authed():
             self.send_response(303)
             self.send_header("Location", "/login")
@@ -2022,7 +2029,8 @@ class Handler(BaseHTTPRequestHandler):
             return
         conn = self._conn()
         try:
-            body = render_lineup(conn) if path == "/lineup" else render(conn)
+            body = (render_lineup(conn, force=again) if path == "/lineup"
+                    else render(conn))
         finally:
             conn.close()
         self.send_response(200)

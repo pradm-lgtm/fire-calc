@@ -653,3 +653,35 @@ class SayingWhenYahooIsMissing(unittest.TestCase):
     def test_a_real_failure_still_reads_as_one(self):
         source = open("webapp.py").read()
         self.assertIn("Could not ", source)
+
+
+class AskingForAFreshCheck(unittest.TestCase):
+    """There was no way to say "look again".
+
+    The page recomputes only when its stored check is three hours old.
+    A check taken before the Yahoo credentials reached the host kept two
+    of four leagues off the page, and nothing on it could hurry that
+    along - the waivers showed Yahoo, because those are pushed from a
+    machine that has credentials, which made the absence look like a
+    Yahoo fault rather than a stale check.
+    """
+
+    def test_the_page_offers_it(self):
+        source = open("webapp.py").read()
+        self.assertIn("check again now", source)
+        self.assertIn("/lineup?again=1", source)
+
+    def test_the_handler_reads_it(self):
+        source = open("webapp.py").read()
+        self.assertIn('again = "again" in parse_qs(', source)
+
+    def test_and_passes_it_through(self):
+        source = open("webapp.py").read()
+        self.assertIn("render_lineup(conn, force=again)", source)
+
+    def test_an_ordinary_visit_does_not_force_one(self):
+        """Every load recomputing would be four leagues of fetching on
+        every refresh of a page people leave open."""
+        source = open("webapp.py").read()
+        spot = source.index('again = "again" in parse_qs(')
+        self.assertIn("urlparse(self.path).query", source[spot:spot + 120])
