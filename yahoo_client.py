@@ -405,13 +405,34 @@ def matchup(league_key, week=None):
     return found
 
 
+# Yahoo serves at most this many players per request and expects you to
+# page. Asking for seventy-five returns twenty-five without complaint,
+# which is how the Yahoo wire came to be a quarter the size of the
+# Sleeper one - a difference that shows up as thin proposals rather than
+# as an error.
+PAGE = 25
+
+
 def free_agents(league_key, count=50, position=None):
-    """The waiver wire and free agents, most relevant first."""
-    path = (f"/league/{league_key}/players;status=A;sort=AR"
-            f";count={int(count)}")
-    if position:
-        path += f";position={position}"
-    return player_rows(_content(get(path)))
+    """The waiver wire and free agents, most relevant first.
+
+    Pages until it has what was asked for or Yahoo runs out. Stops on a
+    short page, because that is Yahoo saying there is no more.
+    """
+    out, start = [], 0
+    while len(out) < int(count):
+        path = (f"/league/{league_key}/players;status=A;sort=AR"
+                f";start={start};count={PAGE}")
+        if position:
+            path += f";position={position}"
+        page = player_rows(_content(get(path)))
+        if not page:
+            break
+        out.extend(page)
+        if len(page) < PAGE:
+            break
+        start += PAGE
+    return out[:int(count)]
 
 
 # Yahoo's slot names against the ones the model already speaks. Only the

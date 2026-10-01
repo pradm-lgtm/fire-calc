@@ -91,7 +91,10 @@ def gather(league_key=None, verbose=False):
         if verbose:
             print(f"    reading {league.get('name')}")
         squad = yc.roster(mine["key"], league.get("week"))
-        wire = yc.free_agents(league["key"], count=75)
+        # Deep enough to be a wire rather than a sample. Yahoo pages in
+        # twenty-fives, so this is six requests, and the articles name
+        # players well below the top of anybody's list.
+        wire = yc.free_agents(league["key"], count=150)
         held, missed = yb.bridge(squad, players)
         free, free_missed = yb.bridge(wire, players)
         if verbose:
@@ -140,7 +143,7 @@ def main():
     import argparse
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--leagues", action="store_true",
-                    help="show what the model sees in each Yahoo league")
+                    help="check the translation only - proposes nothing")
     ap.add_argument("--league", metavar="LEAGUE_KEY")
     args = ap.parse_args()
 
@@ -157,6 +160,10 @@ def main():
         print(f"  free     {len(block['available'])} players")
         for pos, (have, need, label) in sorted(depth.items()):
             print(f"  {pos:5}    {have} for {need:g} starting ({label})")
+    print()
+    print("That is the translation only - no proposals are made here. For")
+    print("those, and to put them on the site:")
+    print("    python3 run_weekly.py pradm7 --force")
     print()
     print(yc.ATTRIBUTION)
     return 0

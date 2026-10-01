@@ -646,6 +646,71 @@ class LookingAtWhatActuallyArrived(unittest.TestCase):
         self.assertEqual(yc.raw_settings("470.l.715420"), {})
 
 
+class PagingThroughTheWire(unittest.TestCase):
+    """Yahoo caps a player request at twenty-five and does not say so.
+
+    Asking for seventy-five returned twenty-five without complaint, so
+    the Yahoo wire was a quarter the size of the Sleeper one - which
+    shows up as thin proposals rather than as an error, and is the sort
+    of thing that gets blamed on the model for a week.
+    """
+
+    def setUp(self):
+        self.real = yc.get
+        self.asked = []
+
+    def tearDown(self):
+        yc.get = self.real
+
+    def serving(self, total):
+        def fake(path):
+            self.asked.append(path)
+            start = int(path.split("start=")[1].split(";")[0])
+            n = max(0, min(yc.PAGE, total - start))
+            members = {str(i): {"player": [[
+                {"player_key": f"470.p.{start + i}"},
+                {"name": {"full": f"Player {start + i}"}}]]}
+                for i in range(n)}
+            members["count"] = n
+            return {"fantasy_content": {"league": [{}, {"players": members}]}}
+        yc.get = fake
+
+    def test_it_pages_past_the_first_twenty_five(self):
+        self.serving(60)
+        self.assertEqual(len(yc.free_agents("470.l.715420", count=75)), 60)
+
+    def test_it_asks_more_than_once(self):
+        self.serving(60)
+        yc.free_agents("470.l.715420", count=75)
+        self.assertGreater(len(self.asked), 1)
+
+    def test_it_stops_when_yahoo_runs_out(self):
+        """A short page is Yahoo saying there is no more."""
+        self.serving(30)
+        yc.free_agents("470.l.715420", count=200)
+        self.assertEqual(len(self.asked), 2)
+
+    def test_it_does_not_ask_for_more_than_it_needs(self):
+        self.serving(500)
+        yc.free_agents("470.l.715420", count=20)
+        self.assertEqual(len(self.asked), 1)
+
+    def test_it_returns_no_more_than_asked(self):
+        self.serving(500)
+        self.assertEqual(len(yc.free_agents("470.l.715420", count=40)), 40)
+
+    def test_an_empty_wire_is_empty_not_a_loop(self):
+        self.serving(0)
+        self.assertEqual(yc.free_agents("470.l.715420", count=75), [])
+        self.assertEqual(len(self.asked), 1)
+
+    def test_the_players_are_the_ones_served(self):
+        self.serving(60)
+        got = yc.free_agents("470.l.715420", count=75)
+        self.assertEqual(got[0]["name"], "Player 0")
+        self.assertEqual(got[-1]["name"], "Player 59")
+
+
 class TheAgreement(unittest.TestCase):
     """Terms that are easy to honour today and easy to lose later."""
 
