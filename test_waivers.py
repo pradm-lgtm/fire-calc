@@ -2311,3 +2311,36 @@ class ClaimsAlreadyMadeCountAsPlayersHeld(unittest.TestCase):
 
     def test_a_negative_count_cannot_widen_the_gate(self):
         self.assertTrue(self.ask(-5)[0])
+
+
+class TheDiagnosticCoversEveryLeague(unittest.TestCase):
+    """Asking why a Yahoo drop was proposed printed nothing at all.
+
+    --why walked the Sleeper leagues only, so a man the run had just
+    offered to cut in The Minor League came back with his numbers and
+    then silence - which reads as "he is on no roster of yours".
+    """
+
+    def test_it_gathers_both_platforms(self):
+        source = open("run_weekly.py").read()
+        spot = source.index("teams = [(league, None) for league in")
+        window = source[spot:spot + 700]
+        self.assertIn("sc.user_leagues", window)
+        self.assertIn("yw.gather", window)
+
+    def test_a_yahoo_roster_is_used_as_given(self):
+        """It is already in the model's shape; refetching it from Sleeper
+        would find nothing, because the ids are Sleeper's but the league
+        is not."""
+        source = open("run_weekly.py").read()
+        spot = source.index("for league, ready in teams:")
+        self.assertIn("if ready is None:", source[spot:spot + 300])
+
+    def test_yahoo_being_unreachable_does_not_stop_the_answer(self):
+        source = open("run_weekly.py").read()
+        spot = source.index("teams = [(league, None) for league in")
+        self.assertIn("except Exception", source[spot:spot + 700])
+
+    def test_yahoo_has_no_draft_history_and_that_is_fine(self):
+        source = open("run_weekly.py").read()
+        self.assertIn("Yahoo has no draft history", source)

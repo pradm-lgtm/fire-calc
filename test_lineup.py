@@ -226,3 +226,90 @@ class WhichDay(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+
+class TheYahooLineups(unittest.TestCase):
+    """The start/sit model never cared which site a roster came from.
+
+    It reads a league's slots, who is in them, and what the analysts
+    think. All Yahoo needed was the roster in the shape the Sleeper one
+    arrives in - which yahoo_waivers already builds for the waiver side -
+    so this is a loop rather than a second model.
+    """
+
+    import yahoo_waivers as yw
+
+    LEAGUE = yw.as_league(
+        {"key": "470.l.715420", "name": "The Minor League", "teams": 10},
+        ["QB", "RB", "RB", "WR", "WR", "TE", "FLEX", "K", "DEF", "BN", "BN"])
+    PLAYERS = {
+        "q": {"full_name": "My QB", "position": "QB", "team": "JAX",
+              "fantasy_positions": ["QB"]},
+        "r1": {"full_name": "Back One", "position": "RB", "team": "BUF",
+               "fantasy_positions": ["RB"]},
+        "r2": {"full_name": "Hurt Back", "position": "RB", "team": "GB",
+               "injury_status": "Out", "fantasy_positions": ["RB"]},
+        "w1": {"full_name": "Wide One", "position": "WR", "team": "BAL",
+               "fantasy_positions": ["WR"]},
+        "b1": {"full_name": "Bench Man", "position": "RB", "team": "MIA",
+               "fantasy_positions": ["RB"]},
+    }
+    MINE = {"players": ["q", "r1", "r2", "w1", "b1"],
+            "starters": ["q", "r1", "r2", "w1"], "reserve": []}
+
+    def flags(self):
+        return lineup.flag_rows(self.LEAGUE, self.MINE, self.PLAYERS, {},
+                                lineup.EMPTY_WEEK)
+
+    def test_every_started_player_gets_a_row(self):
+        self.assertEqual(len(self.flags()), 4)
+
+    def test_a_started_player_who_is_out_is_flagged(self):
+        hurt = [r for r in self.flags() if r["player_id"] == "r2"]
+        self.assertEqual(hurt[0]["verdict"], "RED")
+
+    def test_the_rows_name_the_yahoo_league(self):
+        """So the page can group them, as it does for the Sleeper ones."""
+        for row in self.flags():
+            self.assertEqual(row["league_name"], "The Minor League")
+            self.assertEqual(row["league_id"], "470.l.715420")
+
+    def test_the_bench_is_read_too(self):
+        bench = lineup.bench_rows(self.LEAGUE, self.MINE, self.PLAYERS, {},
+                                  lineup.EMPTY_WEEK)
+        self.assertEqual([b["player_id"] for b in bench], ["b1"])
+
+    def test_a_man_on_yahoo_reserve_is_not_a_starter(self):
+        """Yahoo says IR outright, where Sleeper needs a reserve list."""
+        squad = [{"key": "470.p.1", "slot": "RB"},
+                 {"key": "470.p.2", "slot": "IR"}]
+        got = self.yw.as_roster(squad, {"470.p.1": "r1", "470.p.2": "r2"})
+        self.assertEqual(got["starters"], ["r1"])
+        self.assertEqual(got["reserve"], ["r2"])
+
+    def test_no_yahoo_configured_means_no_rows_and_no_error(self):
+        import yahoo_client as yc
+        real = yc.configured
+        yc.configured = lambda: False
+        try:
+            self.assertEqual(lineup.yahoo_rows({}, {}, lineup.EMPTY_WEEK), [])
+        finally:
+            yc.configured = real
+
+    def test_a_yahoo_failure_does_not_take_the_sleeper_check_with_it(self):
+        import yahoo_client as yc
+        import yahoo_waivers as yw
+        real_conf, real_gather = yc.configured, yw.gather
+        yc.configured = lambda: True
+
+        def broken(*a, **k):
+            raise RuntimeError("token expired")
+        yw.gather = broken
+        try:
+            self.assertEqual(lineup.yahoo_rows({}, {}, lineup.EMPTY_WEEK), [])
+        finally:
+            yc.configured, yw.gather = real_conf, real_gather
+
+    def test_the_check_asks_for_them(self):
+        source = open("lineup.py").read()
+        self.assertIn("found.extend(yahoo_rows(", source)

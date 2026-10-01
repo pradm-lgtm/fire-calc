@@ -380,6 +380,41 @@ def league_rows(league, user_id, players, consensus, week=None):
             + bench_rows(league, mine, players, consensus, week))
 
 
+def yahoo_rows(players, consensus, week, verbose=False):
+    """[(league, rows)] for the Yahoo leagues, judged the same way.
+
+    The start/sit model never cared which site a roster came from - it
+    reads a league's slots, who is in them, and what the analysts think.
+    All Yahoo needed was the roster in the shape the Sleeper one arrives
+    in, which yahoo_waivers already builds for the waiver side.
+
+    Any failure here is reported and swallowed: the Sleeper leagues
+    should not lose their lineup check over a Yahoo token.
+    """
+    try:
+        import yahoo_client as yc
+        if not yc.configured():
+            return []
+        import yahoo_waivers as yw
+    except Exception:
+        return []
+    found = []
+    try:
+        for block in yw.gather(verbose=False):
+            league, mine = block["league"], block["roster"]
+            if verbose:
+                print(f"  {league['name']}: "
+                      f"{len(mine.get('starters') or [])} started, "
+                      f"{len(mine.get('players') or [])} rostered")
+            found.append((league,
+                          flag_rows(league, mine, players, consensus, week)
+                          + bench_rows(league, mine, players, consensus,
+                                       week)))
+    except Exception as exc:
+        print(f"  ! Yahoo lineups skipped: {type(exc).__name__}: {exc}")
+    return found
+
+
 def report(league, rows):
     print()
     print("=" * 74)
@@ -445,6 +480,7 @@ def check(username, week=None, urls=(), verbose=True):
     for league in leagues:
         found.append((league, league_rows(league, user["user_id"], players,
                                           consensus, context)))
+    found.extend(yahoo_rows(players, consensus, context, verbose=verbose))
     return {"season": season, "week": week, "sources": sorted(per_source),
             "leagues": found,
             "rows": [r for _l, rows in found for r in (rows or [])]}

@@ -1045,16 +1045,35 @@ def explain(username, name, db_path=None):
         print(f"  worth keeping          "
               f"{wa.keep_value(p, trending.get(pid, 0), hold, rs.worth(season_ranks, pid)):.1f}")
 
-        for league in sc.user_leagues(user["user_id"], season):
-            rosters = sc.league_rosters(league["league_id"])
-            mine = sc.my_roster(rosters, user["user_id"])
+        # Every league he is in, both platforms. The diagnostic walked
+        # Sleeper only, so asking why a Yahoo drop was proposed printed
+        # the player's numbers and then nothing at all - which reads as
+        # "he is on no roster of yours" about a man the run had just
+        # offered to cut.
+        teams = [(league, None) for league in
+                 sc.user_leagues(user["user_id"], season)]
+        try:
+            import yahoo_client as yc
+            if yc.configured():
+                import yahoo_waivers as yw
+                teams += [(b["league"], b["roster"])
+                          for b in yw.gather(verbose=False)]
+        except Exception as exc:
+            print(f"  (Yahoo leagues not read: {type(exc).__name__})")
+
+        for league, ready in teams:
+            if ready is None:
+                rosters = sc.league_rosters(league["league_id"])
+                mine = sc.my_roster(rosters, user["user_id"])
+            else:
+                mine = ready
             if not mine or pid not in [str(x) for x in (mine.get("players") or [])]:
                 continue
             depth = ew.positional_depth(league, mine, players)
             try:
                 cost = sc.draft_cost(league["league_id"])
             except Exception:
-                cost = {}
+                cost = {}      # Yahoo has no draft history through this API
             ranked = ew.drop_candidates(mine, players, trending, depth,
                                         cost=cost, week=week,
                                         projected=holds, ros=season_ranks)
