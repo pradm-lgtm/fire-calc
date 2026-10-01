@@ -117,6 +117,35 @@ def starting_requirements(league):
     return required, flex
 
 
+def last_at_required(league, roster, players):
+    """Player ids who are the only one you have at a position you must start.
+
+    Dropping your only defense leaves you unable to field a lineup. The
+    depth label cannot carry this: one defense for one slot is not fewer
+    than you start, so it comes out "ok" and takes a ten point nudge,
+    while being unranked for the rest of the season makes it expendable -
+    and the run proposed cutting it twice in one week, for a tight end.
+
+    Flex-eligible positions are left out: your last running back is still
+    covered by the flex and by the rest of the roster, and a hard rule
+    there would stop ordinary trades of depth.
+    """
+    required, _flex = starting_requirements(league)
+    held = {}
+    for pid in (roster.get("players") or []):
+        pos = (players.get(str(pid)) or {}).get("position")
+        if pos:
+            held.setdefault(pos, []).append(str(pid))
+    out = set()
+    for pos, need in required.items():
+        if pos in FLEX_ELIGIBLE:
+            continue
+        got = held.get(pos) or []
+        if 0 < len(got) <= need:
+            out.update(got)
+    return out
+
+
 def uses_position(league, pos):
     """Does this league start anybody at that position?
 

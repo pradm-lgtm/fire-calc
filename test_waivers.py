@@ -2075,6 +2075,90 @@ class CutFromThePositionYouAreFillingUp(unittest.TestCase):
         self.assertIn('!= "thin"', source[max(0, spot - 300):spot])
 
 
+class YourLastDefenceIsNotADrop(unittest.TestCase):
+    """Two claims in one week proposed cutting his only defense.
+
+    One of them to add a tight end, which leaves a roster that cannot
+    fill a required slot and so cannot be submitted at all. The depth
+    label could not catch it: one defense for one slot is not fewer than
+    you start, so it came out "ok" and took a ten point nudge, while
+    being unranked for the rest of the season made it expendable.
+    """
+
+    LEAGUE = {"roster_positions": ["QB", "RB", "RB", "WR", "WR", "TE",
+                                   "FLEX", "DEF", "K"] + ["BN"] * 6}
+    PLAYERS = {"g": {"position": "DEF"}, "k": {"position": "K"},
+               "q": {"position": "QB"}, "r1": {"position": "RB"},
+               "r2": {"position": "RB"}}
+    ROSTER = {"players": ["g", "k", "q", "r1", "r2"]}
+
+    def test_your_only_defence_kicker_and_quarterback_are_held_back(self):
+        got = ew.last_at_required(self.LEAGUE, self.ROSTER, self.PLAYERS)
+        self.assertEqual(sorted(got), ["g", "k", "q"])
+
+    def test_a_second_defence_frees_the_first(self):
+        players = dict(self.PLAYERS, g2={"position": "DEF"})
+        roster = {"players": self.ROSTER["players"] + ["g2"]}
+        got = ew.last_at_required(self.LEAGUE, roster, players)
+        self.assertNotIn("g", got)
+        self.assertNotIn("g2", got)
+
+    def test_flex_positions_are_left_alone(self):
+        """Your last running back is covered by the flex, and a hard rule
+        there would stop ordinary trades of depth."""
+        got = ew.last_at_required(self.LEAGUE, self.ROSTER, self.PLAYERS)
+        self.assertNotIn("r1", got)
+
+    def test_a_position_the_league_does_not_start_is_not_required(self):
+        lehg = {"roster_positions": ["QB", "RB", "WR", "TE", "FLEX", "BN"]}
+        got = ew.last_at_required(lehg, self.ROSTER, self.PLAYERS)
+        self.assertNotIn("g", got)
+
+    def test_swapping_one_defence_for_another_is_still_allowed(self):
+        """Which is the whole of defense streaming."""
+        source = open("run_weekly.py").read()
+        spot = source.index("def expendable(pid):")
+        self.assertIn('!= add_pos', source[spot:spot + 600])
+
+
+class AMessageMustNotMisdescribeTheRoster(unittest.TestCase):
+    """"You have a DEF and a backup" - he had one defense.
+
+    The count that refused the third claim includes the claims already
+    made this week, which is correct, but the sentence described it as
+    players held. A message that is wrong about the roster is worse than
+    no message, because it sends you looking at the roster.
+    """
+
+    PLAYERS = {"d1": {"full_name": "My Defence", "position": "DEF",
+                      "search_rank": 100, "depth_chart_order": 1},
+               "free": {"full_name": "Chicago Bears", "position": "DEF",
+                        "search_rank": 90, "depth_chart_order": 1}}
+    MINE = {"starters": ["d1"], "players": ["d1"]}
+    DEPTH = {"DEF": (1, 1.0, "ok")}
+
+    def ask(self, already):
+        return rw.worth_the_spot("free", self.PLAYERS, self.MINE,
+                                 self.DEPTH, {}, {}, already=already)
+
+    def test_it_blames_the_claim_when_a_claim_is_the_reason(self):
+        ok, why = self.ask(1)
+        self.assertFalse(ok)
+        self.assertIn("claim(s) already this week", why)
+        self.assertNotIn("and a backup", why)
+
+    def test_and_says_how_many_are_really_on_the_roster(self):
+        _ok, why = self.ask(1)
+        self.assertIn("1 on the roster", why)
+
+    def test_it_still_blames_the_roster_when_that_is_the_reason(self):
+        mine = {"starters": ["d1"], "players": ["d1", "free"]}
+        ok, why = rw.worth_the_spot("free", self.PLAYERS, mine, self.DEPTH,
+                                    {}, {}, already=0)
+        self.assertFalse(ok)
+        self.assertIn("and a backup", why)
+
+
 class AlternativesAreNotAdditions(unittest.TestCase):
     """Three running backs go in together because only one will land.
 

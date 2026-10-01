@@ -276,6 +276,15 @@ def worth_the_spot(pid, players, mine, depth, trending, projected,
     held = len(mine_here) + max(0, already)
 
     if pos not in ew.FLEX_ELIGIBLE and held >= slots + 1:
+        # Say which of the two it is. With one defense rostered and one
+        # already claimed this week, the refusal read "you have a DEF and
+        # a backup" - which was not true of his roster, and a message
+        # that misdescribes the roster is worse than no message.
+        if already:
+            return False, (f"{already} {pos} claim(s) already this week and "
+                           f"{len(mine_here)} on the roster, for "
+                           f"{need:g} starting spot(s) - another could "
+                           "never play")
         return False, (f"you have a {pos} and a backup, and this league "
                        f"starts {need:g} - a third could never play")
 
@@ -581,7 +590,18 @@ def proposals_for_league(league, user_id, players, trending, texts, max_moves,
         # one, the model always names a worst player - a roster of fifteen
         # good men still has a fifteenth - and calls him the drop. Who is
         # last is not the same question as who is expendable.
+        # Never your last defense or kicker. Not a preference - a roster
+        # that cannot fill a required slot cannot be submitted.
+        irreplaceable = ew.last_at_required(league, mine, players)
+
         def expendable(pid):
+            if str(pid) in irreplaceable:
+                # Unless you are replacing him with one of his own kind.
+                # Dropping your only defense for a better defense is the
+                # whole of defense streaming; dropping it for a tight end
+                # leaves you unable to field a lineup.
+                if (players.get(str(pid)) or {}).get("position") != add_pos:
+                    return False
             return ew.worth_cutting(season_ranks.get(str(pid)), league)
 
         def still_free(pid):
