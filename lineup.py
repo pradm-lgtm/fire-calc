@@ -380,6 +380,21 @@ def league_rows(league, user_id, players, consensus, week=None):
             + bench_rows(league, mine, players, consensus, week))
 
 
+def yahoo_possible():
+    """Can this machine read Yahoo at all?
+
+    The hosted page recomputes the check itself, and the host has no
+    Yahoo credentials - so two leagues simply were not there, with
+    nothing on the page to say a word about it. An absence is not
+    something anyone notices.
+    """
+    try:
+        import yahoo_client as yc
+        return bool(yc.configured())
+    except Exception:
+        return False
+
+
 def yahoo_rows(players, consensus, week, verbose=False):
     """[(league, rows)] for the Yahoo leagues, judged the same way.
 
@@ -480,8 +495,10 @@ def check(username, week=None, urls=(), verbose=True):
     for league in leagues:
         found.append((league, league_rows(league, user["user_id"], players,
                                           consensus, context)))
-    found.extend(yahoo_rows(players, consensus, context, verbose=verbose))
+    yahoo = yahoo_rows(players, consensus, context, verbose=verbose)
+    found.extend(yahoo)
     return {"season": season, "week": week, "sources": sorted(per_source),
+            "yahoo": bool(yahoo), "yahoo_possible": yahoo_possible(),
             "leagues": found,
             "rows": [r for _l, rows in found for r in (rows or [])]}
 

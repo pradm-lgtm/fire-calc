@@ -587,3 +587,69 @@ class APriorityLeagueHasNoPrice(unittest.TestCase):
     def test_a_row_without_a_budget_field_is_read_as_faab(self):
         """Older rows predate the column; a bid box is the safe default."""
         self.assertTrue(webapp.bids_money({"max_bid": 100}))
+
+
+class OneFoldPerLeague(unittest.TestCase):
+    """Four leagues of eight proposals is thirty-two cards on one page.
+
+    The question is always about one league at a time, so each gets a
+    fold with its heading as the handle.
+    """
+
+    def test_the_heading_is_the_handle(self):
+        source = open("webapp.py").read()
+        self.assertIn("<summary>\"\n                   + league_heading(",
+                      source.replace("'", '"'))
+
+    def test_a_league_with_live_claims_starts_open(self):
+        source = open("webapp.py").read()
+        spot = source.index("shut = \"\" if live else")
+        self.assertIn("' open' if live else ''", source[spot:spot + 300])
+
+    def test_approving_the_last_claim_does_not_fold_it_away(self):
+        """An approved claim is still live, so the confirmation stays on
+        screen - which is the one moment you want to see the card."""
+        source = open("webapp.py").read()
+        spot = source.index("shut = \"\" if live else")
+        self.assertNotIn("if waiting else", source[spot:spot + 300])
+
+    def test_a_settled_league_is_marked_as_done(self):
+        source = open("webapp.py").read()
+        self.assertIn("data-done", source)
+
+    def test_the_browser_triangle_is_replaced_not_left(self):
+        """It sits wrong against a two-line heading and cannot be coloured."""
+        self.assertIn("details.league > summary::after", webapp.CSS)
+        self.assertIn("list-style: none", webapp.CSS)
+
+    def test_the_fold_styles_reach_the_page(self):
+        self.assertIn("details.league", webapp.CSS)
+
+
+class SayingWhenYahooIsMissing(unittest.TestCase):
+    """The host recomputes the lineup check and has no Yahoo credentials.
+
+    So two of four leagues were simply absent from the start/sit page,
+    with nothing on it to say a word about why. An absence is not
+    something anyone notices.
+    """
+
+    def test_the_check_reports_whether_yahoo_was_reachable(self):
+        source = open("lineup.py").read()
+        self.assertIn('"yahoo_possible": yahoo_possible()', source)
+
+    def test_the_page_says_so_rather_than_dropping_them(self):
+        source = open("webapp.py").read()
+        self.assertIn("no Yahoo credentials", source)
+        self.assertIn("YAHOO_REFRESH_TOKEN", source)
+
+    def test_it_is_a_note_and_not_a_failure(self):
+        """The check did refresh. Calling it a failed refresh and showing
+        "the last check" would be two lies about a page that is current."""
+        source = open("webapp.py").read()
+        spot = source.index("no Yahoo credentials")
+        self.assertIn("NOTE +", source[max(0, spot - 300):spot])
+
+    def test_a_real_failure_still_reads_as_one(self):
+        source = open("webapp.py").read()
+        self.assertIn("Could not ", source)

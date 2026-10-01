@@ -438,10 +438,24 @@ def render(conn):
         live = [i for i in items
                 if i["status"] in (st.PENDING, st.APPROVED, st.SUBMITTED)]
         waiting = [i for i in items if i["status"] == st.PENDING]
-        out.append(league_heading(conn, lid, lname, items, waiting, live))
+        # One fold per league. Four leagues of eight proposals is thirty-two
+        # cards on one page, and the question is always about one league at
+        # a time. A league with nothing left to decide starts closed,
+        # because it is history rather than work.
+        # Open while anything is still in flight, not merely while
+        # something is undecided. Approving the last pending claim folded
+        # the league away and took the confirmation with it, which is the
+        # one moment you want to see the card.
+        shut = "" if live else " data-done"
+        out.append(f"<details class='league'{' open' if live else ''}"
+                   f"{shut}>")
+        out.append("<summary>"
+                   + league_heading(conn, lid, lname, items, waiting, live)
+                   + "</summary>")
         marks = chain_marks(live)
         for r in items:
             out.append(card(r, marks.get(r["id"])))
+        out.append("</details>")
     return page("".join(out), "Spike — waivers")
 
 
@@ -564,6 +578,31 @@ def refresh_trouble(conn):
             "</p><p class='why'>What is below is from the run before it, so "
             "it may be out of date. Re-checking from a computer that can "
             "reach the article sites is the way round it.</p></div>")
+
+
+# A fold per league, with the heading as its handle. The marker is drawn
+# rather than left to the browser's triangle, which sits in the wrong
+# place against a two-line heading and cannot be coloured.
+FOLD_CSS = """
+details.league { margin: 0 0 18px; }
+details.league > summary {
+  list-style: none; cursor: pointer; position: relative;
+  padding-right: 34px;
+}
+details.league > summary::-webkit-details-marker { display: none; }
+details.league > summary::after {
+  content: ""; position: absolute; right: 10px; top: 20px;
+  width: 9px; height: 9px; border-right: 2px solid currentColor;
+  border-bottom: 2px solid currentColor; opacity: .55;
+  transform: rotate(45deg); transition: transform .15s ease;
+}
+details.league[open] > summary::after { transform: rotate(-135deg); }
+details.league[data-done] > summary { opacity: .72; }
+details.league > summary:hover::after { opacity: 1; }
+"""
+
+
+CSS += FOLD_CSS
 
 
 def league_heading(conn, lid, lname, items, waiting, live):
@@ -1149,6 +1188,13 @@ def refresh_button(label):
             f"{e(label)}</button></form>")
 
 
+# Marks a message that is worth saying but is not a failure. The check
+# refreshed; it simply could not see everything, and reporting that as
+# "could not refresh - showing the last check" would be two lies about a
+# page that is up to date.
+NOTE = "\u2139 "
+
+
 def refresh_lineup(conn):
     """Work the verdicts out now. Returns an error to show, or None."""
     import lineup as ln
@@ -1160,6 +1206,14 @@ def refresh_lineup(conn):
     try:
         got = ln.check(username, verbose=False)
         ln.store_check(conn, got)
+        if not got.get("yahoo_possible"):
+            # Said rather than silently dropped. The host recomputes this
+            # itself and has no Yahoo credentials, so two of four leagues
+            # were missing from the page with nothing to explain it.
+            return (NOTE + "Your Yahoo leagues are not in this check: the "
+                    "host has no Yahoo credentials. Set YAHOO_CLIENT_ID, "
+                    "YAHOO_CLIENT_SECRET and YAHOO_REFRESH_TOKEN where this "
+                    "page runs and they will appear.")
         return None
     except ln.NoRankings:
         return "No ranking page could be read just now, so there was nothing " \
@@ -1395,7 +1449,10 @@ def render_lineup(conn, force=False):
     out = [nav("/lineup"), "<h1>Start / sit</h1>",
            f"<p class='sub'>Week {e(check['week'])} &middot; checked "
            f"{e(said_ago(age))}</p>"]
-    if problem:
+    if problem and problem.startswith(NOTE):
+        out.append(f"<div class='bar'><span>{e(problem[len(NOTE):])}</span>"
+                   "</div>")
+    elif problem:
         out.append(f"<div class='bar'><span class='warn'>Could not "
                    f"refresh:</span> {e(problem)} Showing the last check."
                    "</div>")

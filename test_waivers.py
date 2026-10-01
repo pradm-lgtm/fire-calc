@@ -148,10 +148,13 @@ class Drops(unittest.TestCase):
 
     def test_the_drop_is_named_without_opening_anything(self):
         # Who goes is half of what you are approving, so it is on the card.
+        # The league fold is a summary too now, so this wants the one that
+        # belongs to the drop picker rather than the first on the page.
         html = webapp.render(self.build()).decode()
-        summary = re.search(r"<summary>(.*?)</summary>", html).group(1)
+        summary = next(s for s in re.findall(r"<summary>(.*?)</summary>",
+                                             html, re.S)
+                       if "Change" in s)
         self.assertIn("J.K. Dobbins", summary)
-        self.assertIn("Change", summary)
 
     def test_the_drop_is_a_choice_with_reasons_beside_it(self):
         html = webapp.render(self.build()).decode()
