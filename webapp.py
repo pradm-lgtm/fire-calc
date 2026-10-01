@@ -573,9 +573,15 @@ def league_heading(conn, lid, lname, items, waiting, live):
     asked = sum(i["bid"] or 0 for i in waiting)
     note = claim_order.field(items[0], "league_note")
 
-    bar = (f"<span><strong data-left>{budget - committed}</strong> of "
-           f"{budget} left</span>")
-    if waiting:
+    if not budget:
+        # Waiver priority. "0 of 0 left" is worse than saying what the
+        # league actually costs you, which is your place in the queue.
+        bar = ("<span>waiver priority \u2014 no budget. Each claim that "
+               "lands sends you to the back of the order.</span>")
+    else:
+        bar = (f"<span><strong data-left>{budget - committed}</strong> of "
+               f"{budget} left</span>")
+    if budget and waiting:
         # Live, because the number that matters is what is left after the
         # bids in the boxes below - not after the ones the run suggested.
         bar += (f"<span>approving all {len(waiting)} costs <strong data-cost>"
@@ -847,7 +853,31 @@ def evidence(r):
     return body + f"<p class='why'>{named}</p>"
 
 
+def bids_money(r):
+    """Does this league pay for a claim, or spend a place in a queue?
+
+    Both Yahoo leagues run waiver priority. There is no budget, no number
+    to type, and no analyst percentage worth converting - what a claim
+    costs is your position, which you get back at the bottom. A bid box
+    on that card asks a question the league does not have.
+    """
+    try:
+        return bool(r["max_bid"])
+    except (KeyError, IndexError, TypeError):
+        return True
+
+
 def decide_form(r):
+    if not bids_money(r):
+        # No price, so the only question left is whether to file it.
+        return ("<p class='guide'>Waiver priority \u2014 no bidding. "
+                "Filing this costs your place in the queue if it "
+                "lands.</p>"
+                "<div class='acts'>"
+                f"<button class='approve' form='f{e(r['id'])}' name='action'"
+                " value='approve' data-approve>Approve</button>"
+                f"<button class='decline' form='f{e(r['id'])}' name='action'"
+                " value='decline'>Decline</button></div>")
     bid = r["bid"] if r["bid"] is not None else 0
     if r["bid_low"] is not None and r["bid_high"] is not None:
         span = (f"{r['bid_low']}" if r["bid_low"] == r["bid_high"]

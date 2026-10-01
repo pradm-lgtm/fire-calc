@@ -543,3 +543,47 @@ class ThursdayFirst(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+
+class APriorityLeagueHasNoPrice(unittest.TestCase):
+    """Both Yahoo leagues run waiver priority.
+
+    There is no budget, no number to type, and no analyst percentage
+    worth converting: a claim costs your place in the queue, which you
+    get back at the bottom. The card was built around FAAB, so without
+    this it asks for a bid out of a budget of nothing and reports "0 of
+    0 left" as though that were the state of something.
+    """
+
+    def row(self, **kw):
+        base = {"id": 1, "bid": None, "bid_low": None, "bid_high": None,
+                "max_bid": 0, "league_id": "470.l.715420"}
+        base.update(kw)
+        return base
+
+    def test_a_priority_league_gets_no_bid_box(self):
+        said = webapp.decide_form(self.row())
+        self.assertNotIn("type='number'", said)
+        self.assertIn("no bidding", said)
+
+    def test_but_still_gets_its_buttons(self):
+        said = webapp.decide_form(self.row())
+        self.assertIn("value='approve'", said)
+        self.assertIn("value='decline'", said)
+
+    def test_the_approve_button_names_no_price(self):
+        said = webapp.decide_form(self.row())
+        self.assertIn(">Approve</button>", said)
+
+    def test_a_faab_league_keeps_everything(self):
+        said = webapp.decide_form(self.row(max_bid=100, bid=14))
+        self.assertIn("type='number'", said)
+        self.assertIn("Approve at", said)
+
+    def test_it_says_what_a_claim_really_costs(self):
+        said = webapp.decide_form(self.row())
+        self.assertIn("place in the queue", said)
+
+    def test_a_row_without_a_budget_field_is_read_as_faab(self):
+        """Older rows predate the column; a bid box is the safe default."""
+        self.assertTrue(webapp.bids_money({"max_bid": 100}))
