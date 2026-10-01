@@ -433,92 +433,30 @@ def best_available(league, mine, players, rosters, available, trending,
     )
 
 
-def proposals_for_league(league, user_id, players, trending, texts, max_moves,
-                         week=1, byes=None, weeks=None, verbose=False,
-                         skipped=None):
-    """(proposals, why none) - the reasoning, returned as data not text.
+def decide(league, mine, players, available, consensus, trending, weeks,
+           week, moves, remaining, rosters, cost, advice, byes,
+           platform="sleeper", verbose=False, skipped=None, depth=None,
+           shots=None, holds=None, season_ranks=None, note=None,
+           streamed=None):
+    """(proposals, why none, passed over) for one league, either platform.
 
-    A league that yields nothing says why. There are five ways to come back
-    empty here and they mean entirely different things: nobody was written
-    up, nobody can be dropped, nobody available is better than what you
-    already have. Returning a bare empty list for all of them meant a league
-    could stop producing proposals for a fortnight and look exactly like a
-    league with a settled roster.
+    Lifted out of proposals_for_league so the Yahoo leagues get the same
+    decisions rather than a second model written to be like it. Every
+    rule about need, depth, who is worth cutting and what a claim
+    displaces lives here and nowhere else, so a fault found in one league
+    is fixed in four.
     """
-    # Progress, because everything from here to the first proposal was
-    # silent - a roster fetch, a draft history, a gazetteer over four
-    # hundred free agents and six articles read against it. A run pausing
-    # in there looks identical to a run that has hung, and there was no
-    # way to tell which from the outside.
     def step(what):
         if verbose:
             print(f"    {what}", flush=True)
 
-    step(f"reading {league.get('name') or league['league_id']}")
-    rosters = sc.league_rosters(league["league_id"])
-    mine = sc.my_roster(rosters, user_id)
-    if not mine:
-        return [], "your roster is not in this league"
-
-    settings = league.get("settings") or {}
-    budget = settings.get("waiver_budget") or 0
-    used = (mine.get("settings") or {}).get("waiver_budget_used", 0)
-    remaining = budget - used if budget else 0
-
-    taken = wa.rostered_player_ids(rosters)
-    available = [pid for pid, p in players.items()
-                 if pid not in taken and wa.is_rosterable(p)]
-    step(f"{len(available)} free agents; building the name index")
-    gaz = ex.build_gazetteer(players, available)
-
-    per_source = {}
-    for n, (source, text) in enumerate(texts.items(), start=1):
-        step(f"article {n} of {len(texts)} ({len(text):,} chars)")
-        recs = ex.extract_recommendations(text, gaz, source=source,
-                                          players=players)
-        if recs:
-            per_source[source] = recs
-    # A defense is picked on who it plays, not on who wrote about it, so
-    # this is settled before the articles are consulted and survives a week
-    # where they turned up nothing.
-    streamed = defense_proposal(league, mine, players, rosters, weeks or {},
-                                remaining, week)
-
-    consensus = ex.merge_sources(per_source)
-    # Not an early return any more. A week where no article named an
-    # available player is exactly the week best_available() exists for, and
-    # returning here meant the one path that does not need the articles was
-    # only ever reached when the articles had already worked.
-    depth = ew.positional_depth(league, mine, players)
-
-    # What each player cost in the draft, and whether anyone has written that
-    # he is finished. The first protects the people you would not part with;
-    # the second is what lets you part with them anyway.
-    step("draft history")
-    try:
-        cost = sc.draft_cost(league["league_id"])
-    except Exception:
-        cost = {}
-    held = ex.build_gazetteer(players,
-                              [str(p) for p in (mine.get("players") or [])])
-    per_source_drops = {}
-    for source, text in texts.items():
-        said = ex.extract_drops(text, held)
-        if said:
-            per_source_drops[source] = said
-    advice = ex.merge_drops(per_source_drops)
-    byes = byes or {}
-    # Already fetched for the defense look-ahead every run, and until now
-    # read by nothing else. It is the only signal here that is an estimate
-    # of what a player will actually do.
-    shots = (weeks or {}).get("points") or {}
-    # Two maps, because the two decisions look at different horizons: what
-    # he does on Sunday says whether to add him, and what he does over the
-    # next fortnight says whether to keep him.
-    holds = keeping_points(weeks)
-    # What analysts say he is worth for the rest of the year, which is the
-    # question a drop actually asks and the one nothing here was answering.
-    season_ranks = (weeks or {}).get("ros") or {}
+    depth = ew.positional_depth(league, mine, players) if depth is None \
+        else depth
+    shots = (weeks or {}).get("points") or {} if shots is None else shots
+    holds = keeping_points(weeks) if holds is None else holds
+    season_ranks = ((weeks or {}).get("ros") or {}) if season_ranks is None \
+        else season_ranks
+    cost, advice, byes = cost or {}, advice or {}, byes or {}
 
     def resting(pid):
         team = (players.get(pid) or {}).get("team")
@@ -534,12 +472,9 @@ def proposals_for_league(league, user_id, players, trending, texts, max_moves,
 
     ordered = sorted(consensus.items(), key=sort_key, reverse=True) \
         if consensus else []
-    # How many names even reached the gates. A league where the articles
-    # named three available players and a league where they named thirty
-    # and every one was refused are different problems, and both looked
-    # like "nothing, because <one sentence>".
     step(f"{len(ordered)} candidate(s) written up and free here")
 
+    passed = [] if skipped is None else skipped
     out, protect, budget_left, why = [], set(), remaining, None
     # Positions already spoken for this week. Three quarterbacks is never
     # the answer, however many analysts wrote about quarterbacks.
@@ -556,13 +491,13 @@ def proposals_for_league(league, user_id, players, trending, texts, max_moves,
         every round of guessing at which gate had fired was guessing at
         something this list would have said outright.
         """
-        if skipped is not None:
+        if passed is not None:
             who = players.get(pid) or {}
-            skipped.append((strip_label(sc.player_label(players, pid)),
+            passed.append((strip_label(sc.player_label(players, pid)),
                             who.get("position") or "?", reason))
 
     for pid, info in ordered:
-        if len(out) >= max_moves:
+        if len(out) >= moves:
             break
         add_pos = (players.get(pid) or {}).get("position") or ""
         if not ew.uses_position(league, add_pos):
@@ -706,10 +641,10 @@ def proposals_for_league(league, user_id, players, trending, texts, max_moves,
                f"Adding {strip_label(sc.player_label(players, pid))} - "
                "you have a free roster spot, so nobody has to go.")
         out.append(dict(
-            platform="sleeper",
+            platform=platform,
             league_id=league["league_id"],
             league_name=league.get("name"),
-            league_note=league_note(league, rosters),
+            league_note=note if note is not None else league_note(league, rosters),
             add_player_id=pid,
             add_player_name=sc.player_label(players, pid),
             add_position=add.get("position"),
@@ -763,7 +698,125 @@ def proposals_for_league(league, user_id, players, trending, texts, max_moves,
     if not out and not consensus:
         why = ("no article recommended anyone who is actually available "
                "here, and nobody free is clearly better than your roster")
-    return out, (why if not out else None)
+    return out, (why if not out else None), passed
+
+
+def proposals_for_league(league, user_id, players, trending, texts, max_moves,
+                         week=1, byes=None, weeks=None, verbose=False,
+                         skipped=None):
+    """(proposals, why none) - the reasoning, returned as data not text.
+
+    A league that yields nothing says why. There are five ways to come back
+    empty here and they mean entirely different things: nobody was written
+    up, nobody can be dropped, nobody available is better than what you
+    already have. Returning a bare empty list for all of them meant a league
+    could stop producing proposals for a fortnight and look exactly like a
+    league with a settled roster.
+    """
+    # Progress, because everything from here to the first proposal was
+    # silent - a roster fetch, a draft history, a gazetteer over four
+    # hundred free agents and six articles read against it. A run pausing
+    # in there looks identical to a run that has hung, and there was no
+    # way to tell which from the outside.
+    def step(what):
+        if verbose:
+            print(f"    {what}", flush=True)
+
+    step(f"reading {league.get('name') or league['league_id']}")
+    rosters = sc.league_rosters(league["league_id"])
+    mine = sc.my_roster(rosters, user_id)
+    if not mine:
+        return [], "your roster is not in this league"
+
+    settings = league.get("settings") or {}
+    budget = settings.get("waiver_budget") or 0
+    used = (mine.get("settings") or {}).get("waiver_budget_used", 0)
+    remaining = budget - used if budget else 0
+
+    taken = wa.rostered_player_ids(rosters)
+    available = [pid for pid, p in players.items()
+                 if pid not in taken and wa.is_rosterable(p)]
+    step(f"{len(available)} free agents; building the name index")
+    gaz = ex.build_gazetteer(players, available)
+
+    per_source = {}
+    for n, (source, text) in enumerate(texts.items(), start=1):
+        step(f"article {n} of {len(texts)} ({len(text):,} chars)")
+        recs = ex.extract_recommendations(text, gaz, source=source,
+                                          players=players)
+        if recs:
+            per_source[source] = recs
+    # A defense is picked on who it plays, not on who wrote about it, so
+    # this is settled before the articles are consulted and survives a week
+    # where they turned up nothing.
+    streamed = defense_proposal(league, mine, players, rosters, weeks or {},
+                                remaining, week)
+
+    consensus = ex.merge_sources(per_source)
+    # Not an early return any more. A week where no article named an
+    # available player is exactly the week best_available() exists for, and
+    # returning here meant the one path that does not need the articles was
+    # only ever reached when the articles had already worked.
+    depth = ew.positional_depth(league, mine, players)
+
+    # What each player cost in the draft, and whether anyone has written that
+    # he is finished. The first protects the people you would not part with;
+    # the second is what lets you part with them anyway.
+    step("draft history")
+    try:
+        cost = sc.draft_cost(league["league_id"])
+    except Exception:
+        cost = {}
+    held = ex.build_gazetteer(players,
+                              [str(p) for p in (mine.get("players") or [])])
+    per_source_drops = {}
+    for source, text in texts.items():
+        said = ex.extract_drops(text, held)
+        if said:
+            per_source_drops[source] = said
+    advice = ex.merge_drops(per_source_drops)
+    byes = byes or {}
+    # Already fetched for the defense look-ahead every run, and until now
+    # read by nothing else. It is the only signal here that is an estimate
+    # of what a player will actually do.
+    shots = (weeks or {}).get("points") or {}
+    # Two maps, because the two decisions look at different horizons: what
+    # he does on Sunday says whether to add him, and what he does over the
+    # next fortnight says whether to keep him.
+    holds = keeping_points(weeks)
+    # What analysts say he is worth for the rest of the year, which is the
+    # question a drop actually asks and the one nothing here was answering.
+    season_ranks = (weeks or {}).get("ros") or {}
+
+    def resting(pid):
+        team = (players.get(pid) or {}).get("team")
+        return bool(team) and byes.get(team) == week
+
+    def sort_key(item):
+        pid, info = item
+        pos = (players.get(pid) or {}).get("position")
+        thin = depth.get(pos, (0, 0, "ok"))[2] == "thin"
+        return (info["count"], thin,
+                wa.score_player(players.get(pid, {}), trending.get(pid, 0),
+                                shots.get(pid)))
+
+    ordered = sorted(consensus.items(), key=sort_key, reverse=True) \
+        if consensus else []
+    # How many names even reached the gates. A league where the articles
+    # named three available players and a league where they named thirty
+    # and every one was refused are different problems, and both looked
+    # like "nothing, because <one sentence>".
+    step(f"{len(ordered)} candidate(s) written up and free here")
+
+    turned_down = [] if skipped is None else skipped
+    rows, why, turned_down = decide(
+        league=league, mine=mine, players=players, available=available,
+        consensus=consensus, trending=trending, weeks=weeks, week=week,
+        moves=max_moves, remaining=remaining, rosters=rosters, cost=cost,
+        advice=advice, byes=byes, verbose=verbose, skipped=turned_down,
+        depth=depth, shots=shots, holds=holds, season_ranks=season_ranks,
+        streamed=streamed)
+    return rows, why
 
 
 def league_note(league, rosters):
@@ -1250,6 +1303,31 @@ def _run(username, urls, moves, dry_run, db_path, force=False,
             if turned_down and len(rows) < moves:
                 passed_over[name] = turned_down
             all_proposals.extend(rows)
+
+        # The Yahoo leagues, through the same model. Kept behind a try
+        # because Sleeper's four leagues should not go dark over a Yahoo
+        # token, and behind configured() because most machines have no
+        # Yahoo set up at all.
+        try:
+            import yahoo_client as yc
+            if yc.configured():
+                import yahoo_waivers as yw
+                print("Reading your Yahoo leagues...")
+                for block in yw.gather(verbose=True):
+                    turned_down = []
+                    rows, why, turned_down = yw.proposals_for(
+                        block, texts, trending, weeks, moves, verbose=True)
+                    name = block["league"]["name"]
+                    print(f"  {name}: {len(rows)} proposal(s)"
+                          + (f" - {why}" if why else ""))
+                    if why:
+                        quiet[name] = why
+                    if turned_down and len(rows) < moves:
+                        passed_over[name] = turned_down
+                    all_proposals.extend(rows)
+                print(f"  {yc.ATTRIBUTION}")
+        except Exception as exc:
+            print(f"  ! Yahoo leagues skipped: {type(exc).__name__}: {exc}")
 
         if not all_proposals:
             print("No moves worth proposing this week.")

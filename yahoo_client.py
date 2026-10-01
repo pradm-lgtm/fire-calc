@@ -414,6 +414,35 @@ def free_agents(league_key, count=50, position=None):
     return player_rows(_content(get(path)))
 
 
+# Yahoo's slot names against the ones the model already speaks. Only the
+# flex needs translating; the rest agree.
+SLOT_NAMES = {"W/R/T": "FLEX", "W/R": "FLEX", "Q/W/R/T": "SUPER_FLEX",
+              "W/T": "FLEX", "R/W/T": "FLEX", "DEF": "DEF", "D/ST": "DEF"}
+
+
+def roster_slots(league_key):
+    """['QB', 'RB', 'RB', ..., 'BN'] - the league's shape, one per slot.
+
+    The model works out positional depth, who can start and what a claim
+    would displace from exactly this list, so a Yahoo league becomes a
+    league it understands as soon as this is right.
+    """
+    payload = _content(get(f"/league/{league_key}/settings"))
+    block = fields_of(fields_of(payload, "settings") or {},
+                      "roster_positions")
+    out = []
+    for entry in (block if isinstance(block, list) else items(block or {})):
+        got = fields(entry.get("roster_position")
+                     if isinstance(entry, dict) and "roster_position" in entry
+                     else entry)
+        name = got.get("position")
+        if not name:
+            continue
+        name = SLOT_NAMES.get(name.upper(), name.upper())
+        out.extend([name] * max(1, as_int(got.get("count")) or 1))
+    return out
+
+
 def raw_settings(league_key):
     """Every settings field Yahoo returns, flattened, as strings.
 
