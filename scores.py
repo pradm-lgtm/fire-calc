@@ -117,8 +117,26 @@ def board(username, week_no=None):
         got = league_board(league, user["user_id"], players, week_no, week)
         if got:
             out.append(got)
+    out.extend(yahoo_boards(week_no))
     out.sort(key=sort_key)
     return {"season": season, "week": week_no, "leagues": out}
+
+
+def yahoo_boards(week_no):
+    """The Yahoo matchups, in the same shape, or nothing.
+
+    Swallowed on failure for the same reason the lineup check swallows
+    it: two leagues should not take the other two off the scoreboard.
+    """
+    try:
+        import yahoo_client as yc
+        if not yc.configured():
+            return []
+        import yahoo_live as yl
+        return yl.boards(week_no)
+    except Exception as exc:
+        print(f"  ! Yahoo scores skipped: {type(exc).__name__}: {exc}")
+        return []
 
 
 def left_to_play(board):

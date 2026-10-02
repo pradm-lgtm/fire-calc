@@ -440,9 +440,31 @@ def board(username, league_filter=None, protect=()):
         got["values"] = values
         out.append(got)
 
+    out.extend(yahoo_leagues(week, protect))
+
     if not out and not source:
         raise RuntimeError("no trade values could be read")
     return {"season": season, "week": week, "source": source, "leagues": out}
+
+
+def yahoo_leagues(week, protect=()):
+    """Trade ideas for the Yahoo leagues, against the opponent only.
+
+    Narrower than the Sleeper half on purpose. Walking every roster in a
+    league looking for a partner is compiling complete statistics for it,
+    which Yahoo's agreement forbids - so these are the team you are
+    playing this week, and the page says so rather than letting them look
+    like the others.
+    """
+    try:
+        import yahoo_client as yc
+        if not yc.configured():
+            return []
+        import yahoo_live as yl
+        return yl.trade_ideas(week, protect)
+    except Exception as exc:
+        print(f"  ! Yahoo trade ideas skipped: {type(exc).__name__}: {exc}")
+        return []
 
 
 def short(players, pid):
