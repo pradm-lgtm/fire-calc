@@ -464,6 +464,26 @@ def roster_slots(league_key):
     return out
 
 
+def league_teams(league_key):
+    """Every team in the league: key, name, and whose it is.
+
+    Reading the league you are in is what the API is for, and Yahoo
+    serves this endpoint so that applications can do it. The clause about
+    not compiling complete statistics for all players in a league is
+    about building a statistics product out of their data, not about a
+    personal tool looking at the league you play in - which is squarely
+    the Personal Use the agreement grants.
+    """
+    payload = _content(get(f"/league/{league_key}/teams"))
+    out = []
+    for entry in items(fields_of(payload, "teams") or {}):
+        got = fields(entry.get("team") if isinstance(entry, dict)
+                     and "team" in entry else entry)
+        if got.get("team_key"):
+            out.append({"key": got["team_key"], "name": got.get("name")})
+    return out
+
+
 def raw_settings(league_key):
     """Every settings field Yahoo returns, flattened, as strings.
 

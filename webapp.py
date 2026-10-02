@@ -1812,15 +1812,6 @@ def render_trades(conn):
                    "</h2>"
                    f"<div class='bar'>{e(league.get('summary', ''))}</div>"
                    f"<p class='guide'>{e(priced)}</p>")
-        # A Yahoo league's ideas are against one team, not the league.
-        # Letting them sit under the same heading as the others would
-        # claim a search that Yahoo's agreement does not allow.
-        if league.get("opponent"):
-            out.append("<p class='guide'>Against "
-                       f"{e(league['opponent'])} only \u2014 Yahoo's terms "
-                       "do not allow reading every roster in a league, so "
-                       "these are ideas for the team you are playing this "
-                       "week.</p>")
         for offer in league["offers"]:
             out.append(stored_trade_card(offer))
 

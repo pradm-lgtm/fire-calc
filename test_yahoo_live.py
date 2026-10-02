@@ -160,29 +160,47 @@ class TheScoreboard(unittest.TestCase):
         self.assertIsNotNone(rows[0]["theirs"])
 
 
-class WhatTheAgreementForbids(unittest.TestCase):
-    """The narrowness is the point, not a gap to close later."""
+class WhatTheAgreementActuallySays(unittest.TestCase):
+    """Trades look at every team, the way the Sleeper half does.
 
-    def test_trade_ideas_are_against_the_opponent_only(self):
+    An earlier version here offered them against the week's opponent
+    alone, reading "shall not compile complete statistics for all the
+    players in a fantasy league" as covering a tool that looks at the
+    league you play in. That clause is about building a statistics
+    product out of Yahoo's data; reading your own league is the Personal
+    Use the agreement grants, and Yahoo serves a league teams endpoint
+    for it. The caution made the Yahoo half quietly worse than the
+    Sleeper half for no reason the agreement gives.
+    """
+
+    def test_every_team_is_considered(self):
+        source = open("yahoo_live.py").read()
+        self.assertIn("for other in yc.league_teams(key):", source)
+
+    def test_your_own_team_is_not_offered_a_trade_with_itself(self):
+        source = open("yahoo_live.py").read()
+        spot = source.index("for other in yc.league_teams(key):")
+        self.assertIn('if other["key"] == mine["key"]',
+                      source[spot:spot + 200])
+
+    def test_the_offers_name_who_they_are_with(self):
+        source = open("yahoo_live.py").read()
+        self.assertIn('offer["with"] = other.get("name")', source)
+
+    def test_the_best_ones_come_first_across_the_whole_league(self):
+        """Sorted after gathering, not within each team."""
+        source = open("yahoo_live.py").read()
+        spot = source.index("found.sort(")
+        self.assertIn("my_gain", source[spot:spot + 150])
+
+    def test_scores_still_read_only_the_two_teams_in_your_matchup(self):
+        """Not for the agreement's sake - a scoreboard is a matchup."""
         source = open("yahoo_live.py").read()
         self.assertIn("two_teams(key, mine[\"key\"], at)", source)
-        # The Sleeper version loops every roster looking for a partner.
-        self.assertNotIn("for other in rosters", source)
-
-    def test_nothing_sweeps_every_roster_in_a_league(self):
-        source = open("yahoo_live.py").read()
-        self.assertNotIn("league_rosters", source)
-        self.assertNotIn("league_users", source)
 
     def test_who_is_free_comes_from_the_endpoint_that_answers_that(self):
-        """Rather than inferred by subtracting every roster from the
-        player list, which is the compiling the agreement bars."""
         source = open("yahoo_live.py").read()
         self.assertIn("yc.free_agents(key", source)
-
-    def test_the_limit_is_written_down_where_it_will_be_read(self):
-        self.assertIn("2.c.x", yl.__doc__)
-        self.assertIn("opponent", yl.__doc__.lower())
 
     def test_the_attribution_yahoo_asked_for_is_printed(self):
         source = open("yahoo_live.py").read()
@@ -215,12 +233,9 @@ class TheyReachThePages(unittest.TestCase):
                 spot = source.index("def yahoo_")
                 self.assertIn("yc.configured()", source[spot:spot + 900])
 
-    def test_the_page_says_the_ideas_are_against_one_team(self):
-        """Under the same heading as the others they would claim a search
-        the agreement does not allow."""
+    def test_the_page_does_not_claim_a_narrower_search_than_it_made(self):
         source = open("webapp.py").read()
-        self.assertIn("Against ", source)
-        self.assertIn("do not allow reading every roster", source)
+        self.assertNotIn("do not allow reading every roster", source)
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

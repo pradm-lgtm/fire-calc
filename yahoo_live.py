@@ -10,12 +10,14 @@ fantasy league. That is not a footnote for this file, it is its shape:
   Scores read two teams - yours and the one you are playing - because a
   scoreboard is about a matchup. There is no sweep of the other eight.
 
-  Trade ideas are offered against that same opponent only. The Sleeper
-  version walks every roster in the league looking for a partner, and the
-  equivalent here would be exactly the compiling the agreement forbids.
-  So Yahoo gets opponent-of-the-week ideas, which is a narrower thing
-  than Sleeper gets, and the narrowness is the point rather than a gap to
-  close later.
+  Trade ideas look at every team, the way the Sleeper half does. That
+  clause is about building a statistics product out of Yahoo's data, not
+  about a personal tool reading the league you play in - which is the
+  Personal Use the agreement grants, and which Yahoo serves a league
+  teams endpoint for. An earlier version here offered trades against the
+  week's opponent alone, on a stricter reading of the same sentence; it
+  was over-cautious and made the Yahoo half quietly worse than the
+  Sleeper half for no reason the agreement actually gives.
 
 Everything else is shared: the same valuations, the same lineup
 arithmetic, the same fairness test. yahoo_bridge maps the players across
@@ -145,12 +147,10 @@ def as_roster(squad, mapping):
 
 
 def trade_ideas(week=None, protect=(), verbose=False):
-    """Offers against the team you are playing, and nobody else.
+    """Offers against every team in the league, as the Sleeper half does.
 
-    The Sleeper version walks every roster in the league looking for a
-    partner. Doing that here would be compiling complete statistics for
-    the league, which the agreement forbids - so this is narrower on
-    purpose, and says so rather than quietly looking like the other one.
+    One request per team for their roster, which is what the league
+    teams endpoint is served for.
     """
     import sleeper_client as sc
     import trades
@@ -165,16 +165,10 @@ def trade_ideas(week=None, protect=(), verbose=False):
         if not mine:
             continue
         at = week or league.get("week")
-        _us, them = two_teams(key, mine["key"], at)
-        if not them:
-            continue
-
         slots = yc.roster_slots(key)
         shaped = yw.as_league(league, slots)
         my_squad = yc.roster(mine["key"], at)
-        their_squad = yc.roster(them["key"], at)
         my_map = yb.bridge(my_squad, players)[0]
-        their_map = yb.bridge(their_squad, players)[0]
 
         # Priced for this league's own size and scoring, the way the
         # Sleeper side prices each of its own: a player is worth more in
@@ -190,25 +184,30 @@ def trade_ideas(week=None, protect=(), verbose=False):
         # Who is genuinely free here, from the endpoint that answers that
         # - rather than inferred by subtracting every roster in the
         # league from the player list, which is the sweep we are avoiding.
+        # Who is genuinely free here, from the endpoint that answers it
+        # rather than inferred by subtracting rosters.
         wire = set(yb.bridge(yc.free_agents(key, count=100),
                              players)[0].values())
-        # free_agents() wants who is taken, and asks for the best man left
-        # at each position. Taken is everyone priced who is not on the
-        # wire - which comes from the endpoint that answers that question,
-        # rather than from subtracting every roster in the league, which
-        # is the sweep this file exists to avoid.
-        found = trades.offers(shaped, as_roster(my_squad, my_map),
-                              as_roster(their_squad, their_map),
-                              players, values, protect,
-                              trades.free_agents(values,
-                                                 set(values) - wire))
-        for offer in found:
-            offer["with"] = them.get("name")
+        free = trades.free_agents(values, set(values) - wire)
+
+        found = []
+        for other in yc.league_teams(key):
+            if other["key"] == mine["key"]:
+                continue
+            squad = yc.roster(other["key"], at)
+            theirs = as_roster(squad, yb.bridge(squad, players)[0])
+            for offer in trades.offers(shaped, as_roster(my_squad, my_map),
+                                       theirs, players, values, protect,
+                                       free):
+                offer["with"] = other.get("name")
+                found.append(offer)
+        found.sort(key=lambda o: (o["my_gain"], o["their_gain"]),
+                   reverse=True)
         if verbose:
-            print(f"  {league.get('name')}: {len(found)} idea(s) against "
-                  f"{them.get('name')}")
+            print(f"  {league.get('name')}: {len(found)} idea(s) across "
+                  f"the league")
         out.append({"league_id": key, "league_name": league.get("name"),
-                    "my_record": "", "opponent": them.get("name"),
+                    "my_record": "",
                     "offers": found[:trades.TOP_OFFERS * 2]})
     return out
 

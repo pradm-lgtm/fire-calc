@@ -791,5 +791,42 @@ class WithoutCredentials(unittest.TestCase):
         self.assertIn("yahoo_auth_check.py --auth-url", out.getvalue())
 
 
+
+class ReadingTheLeagueYouPlayIn(unittest.TestCase):
+    """Yahoo serves a league teams endpoint so applications can use it."""
+
+    def setUp(self):
+        self.real = yc.get
+
+    def tearDown(self):
+        yc.get = self.real
+
+    def serving(self, n):
+        members = {str(i): {"team": [[
+            {"team_key": f"470.l.715420.t.{i + 1}"},
+            {"name": f"Team {i + 1}"}]]} for i in range(n)}
+        members["count"] = n
+        yc.get = lambda path: {"fantasy_content": {
+            "league": [{}, {"teams": members}]}}
+
+    def test_every_team_comes_back(self):
+        self.serving(10)
+        self.assertEqual(len(yc.league_teams("470.l.715420")), 10)
+
+    def test_each_carries_a_key_and_a_name(self):
+        self.serving(3)
+        got = yc.league_teams("470.l.715420")[0]
+        self.assertEqual(got["key"], "470.l.715420.t.1")
+        self.assertEqual(got["name"], "Team 1")
+
+    def test_an_empty_league_is_empty_not_an_error(self):
+        self.serving(0)
+        self.assertEqual(yc.league_teams("470.l.715420"), [])
+
+    def test_a_team_with_no_key_is_left_out(self):
+        yc.get = lambda path: {"fantasy_content": {"league": [{}, {"teams": {
+            "0": {"team": [[{"name": "Nameless"}]]}, "count": 1}}]}}
+        self.assertEqual(yc.league_teams("470.l.715420"), [])
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
