@@ -1,10 +1,15 @@
 #!/usr/bin/env python3
 """Yahoo scores and trade ideas, and the limits the agreement puts on them.
 
-Section 2.c.x bars compiling complete statistics for all the players in a
-fantasy league. That is not a footnote here, it is the shape of the file:
-scores read the two teams in your matchup, and trade ideas are offered
-against that same opponent rather than hunted across every roster.
+Scores read the two teams in your matchup, because a scoreboard is about
+a matchup. Trade ideas look at every team, as the Sleeper half does -
+yahoo_live's docstring sets out the reading of section 2.c.x that an
+earlier, stricter version here got wrong.
+
+The contract tests at the bottom are the ones that matter most. A Yahoo
+league travels through the same stored run and the same page as a
+Sleeper one, so a key it does not carry is not a Yahoo bug, it is a
+trade run that fails for every league at once.
 """
 
 import unittest
@@ -160,6 +165,66 @@ class TheScoreboard(unittest.TestCase):
         self.assertIsNotNone(rows[0]["theirs"])
 
 
+class TheScoreboardTravelsToThePage(unittest.TestCase):
+    """The same contract the trade ideas broke, checked for the scores.
+
+    A Yahoo board joins the Sleeper ones in one list and is then sorted,
+    totalled and drawn by code written for a Sleeper board. These run
+    those readers over a Yahoo one rather than comparing key lists by
+    eye, which is how the missing trade key got through.
+    """
+
+    PAIRING = [[
+        {"key": "t.2", "name": "Slim Pickens", "points": "140.9",
+         "projected": "140.9"},
+        {"key": "t.7", "name": "Hey Yo Trey Trey!", "points": "118.8",
+         "projected": "118.8"}]]
+
+    def board(self, pairing=None):
+        import sleeper_client as sc
+        import yahoo_client as yc
+        real = (yc.my_leagues, yc.my_teams, yc.matchup, yc.roster,
+                sc.all_players)
+        board = pairing if pairing is not None else self.PAIRING
+        yc.my_leagues = lambda: [{"key": "470.l.1", "name": "The Minor League",
+                                  "week": 5}]
+        yc.my_teams = lambda: [{"key": "t.2", "name": "Slim Pickens",
+                                "league": "470.l.1"}]
+        yc.matchup = lambda key, week=None: board
+        yc.roster = lambda key, week=None: [
+            {"key": "a", "name": "My QB", "position": "QB", "slot": "QB",
+             "points": "22.3"}]
+        sc.all_players = lambda refresh=False: {}
+        try:
+            return yl.boards(5)[0]
+        finally:
+            (yc.my_leagues, yc.my_teams, yc.matchup, yc.roster,
+             sc.all_players) = real
+
+    def test_the_scoreboard_sort_can_order_it(self):
+        import scores
+        self.assertIsNotNone(scores.sort_key(self.board()))
+
+    def test_what_is_left_to_play_can_be_counted(self):
+        import scores
+        self.assertEqual(scores.left_to_play(self.board()), 0)
+
+    def test_the_page_can_draw_it(self):
+        import webapp
+        self.assertIn("QB", webapp.matchup_rows(self.board()))
+
+    def test_a_bye_week_board_survives_all_three(self):
+        """One side missing is the shape most likely to break a reader."""
+        import scores
+        import webapp
+        got = self.board(pairing=[[
+            {"key": "t.2", "name": "Slim Pickens", "points": "140.9"}]])
+        self.assertIsNone(got["them"])
+        self.assertIsNotNone(scores.sort_key(got))
+        self.assertEqual(scores.left_to_play(got), 0)
+        webapp.matchup_rows(got)
+
+
 class WhatTheAgreementActuallySays(unittest.TestCase):
     """Trades look at every team, the way the Sleeper half does.
 
@@ -241,30 +306,57 @@ class PrintingWhatItFound(unittest.TestCase):
              sys.argv) = real
         return out.getvalue()
 
-    OFFER = {"give": ["a"], "get": ["b"], "my_gain": 7, "their_gain": 3,
-             "with": "Team Ruhi"}
+    OFFER = {"give": ["a"], "get": ["b"], "my_gain": 453,
+             "their_gain": 1601, "my_pct": 5, "their_pct": 18,
+             "tilt": 3, "spots": 0, "changes": [],
+             "their_record": (4, 1, 0), "with": "Team Ruhi"}
+    LEAGUE = {"league_name": "L", "summary": "A paragraph.",
+              "offers": [OFFER]}
+
+    def board(self, **changed):
+        got = dict(self.LEAGUE)
+        got.update(changed)
+        return [got]
 
     def test_it_names_who_the_trade_is_with(self):
-        said = self.said([{"league_name": "L", "offers": [self.OFFER]}])
+        said = self.said(self.board())
         self.assertIn("Team Ruhi", said)
 
     def test_it_names_both_sides_of_the_deal(self):
-        said = self.said([{"league_name": "L", "offers": [self.OFFER]}])
+        said = self.said(self.board())
         self.assertIn("My Man", said)
         self.assertIn("Their Man", said)
 
-    def test_it_says_what_each_side_gains(self):
-        said = self.said([{"league_name": "L", "offers": [self.OFFER]}])
-        self.assertIn("you +7", said)
-        self.assertIn("them +3", said)
+    def test_it_says_the_gain_as_a_share_of_the_lineup(self):
+        """Raw value units made every idea look like a robbery.
+
+        "you +453, them +1601" is two lineups with different baselines,
+        on a scale where the best player in the game is ten thousand.
+        The page has always shown the percentage; the terminal showed
+        the raw number and read as a tool handing games away.
+        """
+        said = self.said(self.board())
+        self.assertIn("+5%", said)
+        self.assertIn("+18%", said)
+        self.assertNotIn("+453", said)
+        self.assertNotIn("+1601", said)
+
+    def test_it_says_how_the_other_team_is_doing(self):
+        said = self.said(self.board())
+        self.assertIn("4-1", said)
 
     def test_a_league_with_nothing_says_so(self):
-        said = self.said([{"league_name": "L", "offers": []}])
+        said = self.said(self.board(offers=[]))
         self.assertIn("nothing worth proposing", said)
 
     def test_an_offer_with_no_partner_named_does_not_crash(self):
         bare = {k: v for k, v in self.OFFER.items() if k != "with"}
-        said = self.said([{"league_name": "L", "offers": [bare]}])
+        said = self.said(self.board(offers=[bare]))
+        self.assertIn("My Man", said)
+
+    def test_an_offer_with_no_record_does_not_crash(self):
+        bare = {k: v for k, v in self.OFFER.items() if k != "their_record"}
+        said = self.said(self.board(offers=[bare]))
         self.assertIn("My Man", said)
 
     def test_it_reads_no_field_the_offers_do_not_carry(self):
@@ -302,6 +394,173 @@ class TheyReachThePages(unittest.TestCase):
     def test_the_page_does_not_claim_a_narrower_search_than_it_made(self):
         source = open("webapp.py").read()
         self.assertNotIn("do not allow reading every roster", source)
+
+
+class TheSameShapeAsTheSleeperHalf(unittest.TestCase):
+    """A Yahoo league has to survive every reader a Sleeper one does.
+
+    trades.board puts both kinds in one list, and written_out, the stored
+    run and the page then read them through the same code. `their_record`
+    was missing from the Yahoo offers, so written_out raised KeyError on
+    the first one and the whole trade run failed - losing the Sleeper
+    leagues, which were fine.
+
+    So these drive the real trade_ideas against stub endpoints and feed
+    what comes out to the real readers. Nothing here lists the keys by
+    hand: a list written next to the code it checks agrees with it by
+    construction and proves nothing.
+    """
+
+    PLAYERS = {
+        "rb1": {"full_name": "My First Back", "position": "RB", "team": "GB"},
+        "rb2": {"full_name": "My Spare Back", "position": "RB", "team": "KC"},
+        "wr1": {"full_name": "My Weak End", "position": "WR", "team": "NO"},
+        "wra": {"full_name": "Their Good End", "position": "WR", "team": "DET"},
+        "wrb": {"full_name": "Their Other End", "position": "WR", "team": "SF"},
+        "rbx": {"full_name": "Their Weak Back", "position": "RB", "team": "LV"},
+    }
+    VALUES = {
+        "rb1": {"value": 5000.0, "position": "RB"},
+        "rb2": {"value": 4800.0, "position": "RB"},
+        "wr1": {"value": 1000.0, "position": "WR"},
+        "wra": {"value": 4900.0, "position": "WR"},
+        "wrb": {"value": 4700.0, "position": "WR"},
+        "rbx": {"value": 1100.0, "position": "RB"},
+    }
+    SQUADS = {"t.1": ["rb1", "rb2", "wr1"], "t.2": ["wra", "wrb", "rbx"]}
+
+    def ideas(self, records=None):
+        """trade_ideas over one stubbed league, with the real trade code."""
+        import sleeper_client as sc
+        import trade_values as tv
+        import yahoo_bridge as yb
+        import yahoo_client as yc
+        import yahoo_waivers as yw
+        real = (sc.all_players, sc.current_state, tv.settings_from, tv.fetch,
+                yb.bridge, yc.my_leagues, yc.my_teams, yc.roster_slots,
+                yc.roster, yc.free_agents, yc.league_teams,
+                yw.as_league, yl.byes_for, yl.records_in)
+
+        def squad_of(team_key, week=None):
+            return [{"key": f"{team_key}:{pid}", "name": pid, "slot": "BN"}
+                    for pid in self.SQUADS[team_key]]
+
+        sc.all_players = lambda refresh=False: dict(self.PLAYERS)
+        sc.current_state = lambda: {"season": 2026, "week": 5}
+        tv.settings_from = lambda league: {"teams": 10, "ppr": 0.5,
+                                           "quarterbacks": 1}
+        tv.fetch = lambda *a, **k: (dict(self.VALUES), "a stub")
+        yb.bridge = lambda squad, players: (
+            {w["key"]: w["key"].split(":")[1] for w in squad}, [])
+        yc.my_leagues = lambda: [{"key": "470.l.1", "name": "The Minor League",
+                                  "week": 5, "teams": 10}]
+        yc.my_teams = lambda: [{"key": "t.1", "name": "Mine",
+                                "league": "470.l.1"}]
+        yc.roster_slots = lambda key: ["RB", "WR", "BN"]
+        yc.roster = squad_of
+        yc.free_agents = lambda key, count=50, position=None: []
+        yc.league_teams = lambda key: [{"key": "t.1", "name": "Mine"},
+                                       {"key": "t.2", "name": "Bell Biv Deebo"}]
+        yw.as_league = lambda league, slots: {
+            "league_id": league["key"], "name": league.get("name"),
+            "roster_positions": slots, "total_rosters": 10,
+            "scoring_settings": {"rec": 0.5}, "settings": {}}
+        yl.byes_for = lambda season: {}
+        table = ({"t.1": (3, 2, 0), "t.2": (4, 1, 0)}
+                 if records is None else records)
+        yl.records_in = lambda key: table
+        try:
+            return yl.trade_ideas(5)
+        finally:
+            (sc.all_players, sc.current_state, tv.settings_from, tv.fetch,
+             yb.bridge, yc.my_leagues, yc.my_teams, yc.roster_slots,
+             yc.roster, yc.free_agents, yc.league_teams,
+             yw.as_league, yl.byes_for, yl.records_in) = real
+
+    def test_the_stubs_actually_produce_an_offer(self):
+        """Otherwise every test below passes over an empty list."""
+        got = self.ideas()
+        self.assertEqual(len(got), 1)
+        self.assertTrue(got[0]["offers"], "no offer, so nothing is proved")
+
+    def test_a_league_carries_every_key_a_sleeper_league_does(self):
+        mine = set(self.ideas()[0])
+        sleeper = {"league_id", "league_name", "my_record", "offers",
+                   "shape", "summary", "settings", "values"}
+        self.assertEqual(sleeper - mine, set())
+
+    def test_the_stored_run_can_be_written(self):
+        """The failure the user saw, at the point it actually happened."""
+        import trades
+        got = {"season": 2026, "week": 5, "source": "a stub",
+               "leagues": self.ideas()}
+        written = trades.written_out(got, dict(self.PLAYERS))
+        self.assertEqual(len(written), 1)
+        self.assertTrue(written[0]["offers"])
+
+    def test_the_page_can_draw_a_stored_offer(self):
+        import trades
+        import webapp
+        got = {"season": 2026, "week": 5, "source": "a stub",
+               "leagues": self.ideas()}
+        written = trades.written_out(got, dict(self.PLAYERS))
+        for offer in written[0]["offers"]:
+            self.assertIn("Bell Biv Deebo", webapp.stored_trade_card(offer))
+
+    def test_the_page_can_draw_a_live_offer(self):
+        import webapp
+        got = self.ideas()[0]
+        for offer in got["offers"]:
+            drawn = webapp.trade_card(offer, dict(self.PLAYERS))
+            self.assertIn("Bell Biv Deebo", drawn)
+
+    def test_the_record_reaches_the_offer_and_the_summary(self):
+        got = self.ideas()[0]
+        self.assertEqual(got["my_record"], (3, 2, 0))
+        self.assertEqual(got["offers"][0]["their_record"], (4, 1, 0))
+        self.assertIn("3-2", got["summary"])
+
+    def test_a_league_with_no_standings_reads_as_unplayed(self):
+        """Not as 0-0, which would be a claim about the season."""
+        got = self.ideas(records={})
+        self.assertIn("No games have counted yet", got[0]["summary"])
+        self.assertTrue(got[0]["offers"], "the ideas survive a missing record")
+
+    def test_standings_that_fail_cost_a_paragraph_and_not_the_ideas(self):
+        import contextlib
+        import io
+        import yahoo_client as yc
+        real = yc.standings
+
+        def broken(key):
+            raise RuntimeError("Yahoo said no")
+
+        yc.standings = broken
+        said = io.StringIO()
+        try:
+            with contextlib.redirect_stdout(said):
+                self.assertEqual(yl.records_in("470.l.1"), {})
+        finally:
+            yc.standings = real
+        self.assertIn("Yahoo said no", said.getvalue())
+
+
+class TheDocstringsMatchTheCode(unittest.TestCase):
+    """A comment that describes the version before last is a lie.
+
+    The opponent-only search is gone. Every place that still described it
+    was telling a reader the opposite of what the code does.
+    """
+
+    def test_no_file_still_claims_the_search_is_opponent_only(self):
+        """The test file is left out: it quotes the old wording on purpose,
+        to say what changed and why."""
+        for path in ("yahoo_live.py", "trades.py", "webapp.py"):
+            with self.subTest(path=path):
+                source = open(path).read()
+                self.assertNotIn("against the opponent only", source)
+                self.assertNotIn("against that same opponent", source)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

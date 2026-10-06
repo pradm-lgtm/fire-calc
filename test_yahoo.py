@@ -828,5 +828,73 @@ class ReadingTheLeagueYouPlayIn(unittest.TestCase):
             "0": {"team": [[{"name": "Nameless"}]]}, "count": 1}}]}}
         self.assertEqual(yc.league_teams("470.l.715420"), [])
 
+class ReadingTheStandings(unittest.TestCase):
+    """Who is winning, which is what decides buying from selling.
+
+    Yahoo nests the counts under team_standings.outcome_totals; fields()
+    flattens that into the team fragment, so wins and losses arrive
+    beside the key.
+    """
+
+    def setUp(self):
+        self.real = yc.get
+
+    def tearDown(self):
+        yc.get = self.real
+
+    def serving(self, teams):
+        rows = {str(i): {"team": [
+            [{"team_key": f"470.l.715420.t.{i + 1}"},
+             {"name": f"Team {i + 1}"}],
+            {"team_standings": {"rank": i + 1, "outcome_totals": {
+                "wins": str(5 - i), "losses": str(i), "ties": "0"}}}]}
+            for i in range(teams)}
+        rows["count"] = teams
+        yc.get = lambda path: {"fantasy_content": {"league": [
+            {}, {"standings": [{"teams": rows}]}]}}
+
+    def test_every_team_gets_a_record(self):
+        self.serving(4)
+        got = yc.standings("470.l.715420")
+        self.assertEqual(len(got), 4)
+
+    def test_the_counts_are_numbers_keyed_by_team(self):
+        self.serving(3)
+        got = yc.standings("470.l.715420")
+        self.assertEqual(got["470.l.715420.t.1"], (5, 0, 0))
+        self.assertEqual(got["470.l.715420.t.3"], (3, 2, 0))
+
+    def test_it_asks_the_standings_endpoint(self):
+        self.serving(2)
+        asked = []
+        yc.get = lambda path: (asked.append(path) or
+                               {"fantasy_content": {"league": [{}, {}]}})
+        yc.standings("470.l.715420")
+        self.assertEqual(asked, ["/league/470.l.715420/standings"])
+
+    def test_a_team_with_no_record_is_left_out_not_recorded_as_nil_nil(self):
+        """0-0 is a claim about the season, not an absence of one."""
+        yc.get = lambda path: {"fantasy_content": {"league": [{}, {
+            "standings": [{"teams": {
+                "0": {"team": [[{"team_key": "470.l.715420.t.1"},
+                                {"name": "Unplayed"}]]},
+                "count": 1}}]}]}}
+        self.assertEqual(yc.standings("470.l.715420"), {})
+
+    def test_a_missing_tie_count_is_nought(self):
+        yc.get = lambda path: {"fantasy_content": {"league": [{}, {
+            "standings": [{"teams": {
+                "0": {"team": [[{"team_key": "470.l.715420.t.1"}],
+                               {"team_standings": {"outcome_totals": {
+                                   "wins": "4", "losses": "1"}}}]},
+                "count": 1}}]}]}}
+        self.assertEqual(yc.standings("470.l.715420"),
+                         {"470.l.715420.t.1": (4, 1, 0)})
+
+    def test_nothing_back_is_empty_rather_than_an_exception(self):
+        yc.get = lambda path: {}
+        self.assertEqual(yc.standings("470.l.715420"), {})
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

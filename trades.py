@@ -448,13 +448,15 @@ def board(username, league_filter=None, protect=()):
 
 
 def yahoo_leagues(week, protect=()):
-    """Trade ideas for the Yahoo leagues, against the opponent only.
+    """Trade ideas for the Yahoo leagues, against every team.
 
-    Narrower than the Sleeper half on purpose. Walking every roster in a
-    league looking for a partner is compiling complete statistics for it,
-    which Yahoo's agreement forbids - so these are the team you are
-    playing this week, and the page says so rather than letting them look
-    like the others.
+    The same search as the Sleeper half, and the leagues come back in the
+    same shape, so everything downstream reads one kind of league. An
+    earlier version here searched the week's opponent alone, on a reading
+    of the agreement that yahoo_live's docstring explains and withdraws.
+
+    A Yahoo failure costs the Yahoo ideas and not the Sleeper ones, which
+    is why this catches rather than raises.
     """
     try:
         import yahoo_client as yc

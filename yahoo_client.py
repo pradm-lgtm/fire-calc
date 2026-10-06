@@ -484,6 +484,33 @@ def league_teams(league_key):
     return out
 
 
+def standings(league_key):
+    """{team key: (wins, losses, ties)} for every team in the league.
+
+    The records belong with the trade ideas: whether a manager is winning
+    decides whether he is buying or selling, and an offer built without
+    that is guessing at the one thing he is certain about. Yahoo flattens
+    outcome_totals into the team fragment, so the counts arrive beside
+    the key.
+
+    Teams whose record Yahoo does not give are left out rather than
+    recorded as 0-0, which would read as a team that has not played.
+    """
+    payload = _content(get(f"/league/{league_key}/standings"))
+    out = {}
+    for entry in items(fields_of(payload, "teams") or {}):
+        got = fields(entry.get("team") if isinstance(entry, dict)
+                     and "team" in entry else entry)
+        key = got.get("team_key")
+        if not key:
+            continue
+        wins, losses = as_int(got.get("wins")), as_int(got.get("losses"))
+        if wins is None or losses is None:
+            continue
+        out[key] = (wins, losses, as_int(got.get("ties"), 0) or 0)
+    return out
+
+
 def raw_settings(league_key):
     """Every settings field Yahoo returns, flattened, as strings.
 

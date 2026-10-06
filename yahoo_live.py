@@ -139,11 +139,52 @@ def boards(week=None, verbose=False):
     return out
 
 
-def as_roster(squad, mapping):
-    """A Yahoo squad as the plain id list the trade code reads."""
-    return {"players": [mapping[w["key"]] for w in squad
-                        if mapping.get(w.get("key"))],
-            "starters": [], "settings": {}}
+def as_roster(squad, mapping, record=None):
+    """A Yahoo squad as the roster dict the trade code reads.
+
+    The record goes in under `settings` because that is where the Sleeper
+    half keeps it, and trades.record() is the one reader. A team whose
+    record Yahoo did not give gets no settings at all rather than 0-0,
+    which trades.posture() would read as a season not yet played - and
+    it would be right to, so saying it is better than guessing.
+    """
+    out = {"players": [mapping[w["key"]] for w in squad
+                       if mapping.get(w.get("key"))],
+           "starters": [], "settings": {}}
+    if record:
+        wins, losses, ties = record
+        out["settings"] = {"wins": wins, "losses": losses, "ties": ties}
+    return out
+
+
+def byes_for(season):
+    """{team: bye week}, or {} if the schedule would not load.
+
+    Byes colour the summary and feed no package, so the same rule as the
+    records applies: read them if they read, carry on if they do not.
+    """
+    import nfl_week
+    try:
+        return nfl_week.byes(season) if season else {}
+    except Exception as exc:
+        print(f"  ! bye weeks unread: {type(exc).__name__}: {exc}")
+        return {}
+
+
+def records_in(league_key):
+    """Every team's record, or {} if Yahoo would not say.
+
+    Records make the summary read the season; they are not an input to
+    any package. So a standings call that fails costs a paragraph, not
+    the trade ideas, and this swallows it on purpose.
+    """
+    import yahoo_client as yc
+    try:
+        return yc.standings(league_key)
+    except Exception as exc:
+        print(f"  ! records unread for {league_key}: "
+              f"{type(exc).__name__}: {exc}")
+        return {}
 
 
 def trade_ideas(week=None, protect=(), verbose=False):
@@ -151,6 +192,15 @@ def trade_ideas(week=None, protect=(), verbose=False):
 
     One request per team for their roster, which is what the league
     teams endpoint is served for.
+
+    A league comes out of here in the same shape trades.league_offers
+    gives the Sleeper half, down to the keys on each offer. Everything
+    downstream - the stored run, the page, the terminal - reads both
+    through the same code, so a league that is missing a key does not
+    fail to render, it takes the whole trade run down with it. That is
+    not hypothetical: `their_record` was missing here and written_out
+    raised KeyError on the first Yahoo offer, which lost the Sleeper
+    leagues in the same run.
     """
     import sleeper_client as sc
     import trades
@@ -158,6 +208,8 @@ def trade_ideas(week=None, protect=(), verbose=False):
     import yahoo_waivers as yw
 
     players = sc.all_players()
+    season = (sc.current_state() or {}).get("season")
+    bye_weeks = byes_for(season)
     out = []
     for league in yc.my_leagues():
         key = league["key"]
@@ -181,35 +233,74 @@ def trade_ideas(week=None, protect=(), verbose=False):
             continue
         values = trades.apply_injuries(values, players)
 
-        # Who is genuinely free here, from the endpoint that answers that
-        # - rather than inferred by subtracting every roster in the
-        # league from the player list, which is the sweep we are avoiding.
-        # Who is genuinely free here, from the endpoint that answers it
-        # rather than inferred by subtracting rosters.
+        # Who is genuinely free here, from the endpoint that answers
+        # that, rather than inferred by subtracting every roster in the
+        # league from the player list.
         wire = set(yb.bridge(yc.free_agents(key, count=100),
                              players)[0].values())
         free = trades.free_agents(values, set(values) - wire)
+
+        table = records_in(key)
+        my_record = table.get(mine["key"])
+        my_roster = as_roster(my_squad, my_map, my_record)
 
         found = []
         for other in yc.league_teams(key):
             if other["key"] == mine["key"]:
                 continue
             squad = yc.roster(other["key"], at)
-            theirs = as_roster(squad, yb.bridge(squad, players)[0])
-            for offer in trades.offers(shaped, as_roster(my_squad, my_map),
-                                       theirs, players, values, protect,
-                                       free):
+            their_record = table.get(other["key"])
+            theirs = as_roster(squad, yb.bridge(squad, players)[0],
+                               their_record)
+            for offer in trades.offers(shaped, my_roster, theirs, players,
+                                       values, protect, free):
                 offer["with"] = other.get("name")
+                offer["their_record"] = their_record or (0, 0, 0)
                 found.append(offer)
         found.sort(key=lambda o: (o["my_gain"], o["their_gain"]),
                    reverse=True)
         if verbose:
             print(f"  {league.get('name')}: {len(found)} idea(s) across "
                   f"the league")
+
+        mine_shaped = trades.shape(shaped, my_roster, players, values,
+                                   bye_weeks, at or 1)
         out.append({"league_id": key, "league_name": league.get("name"),
-                    "my_record": "",
+                    "my_record": my_record or (0, 0, 0),
+                    "shape": mine_shaped,
+                    "summary": trades.summary(mine_shaped, players,
+                                              league.get("name")),
+                    "settings": wanted,
+                    "values": values,
                     "offers": found[:trades.TOP_OFFERS * 2]})
     return out
+
+
+def say_offer(offer, players):
+    """One offer in the terms the page uses.
+
+    The gain printed here is the share of your starting lineup, not the
+    raw value units. Those run to four figures on FantasyCalc's scale,
+    so "you +453, them +1601" reads as a trade that robs you - when what
+    it means is that two lineups with different baselines each improved.
+    trades.offers computes both and the page shows the percentage; this
+    printed the raw number and made every idea look like a mistake.
+    """
+    import trades
+    send = ", ".join(trades.short(players, p)
+                     for p in offer["give"]) or "nobody"
+    back = ", ".join(trades.short(players, p)
+                     for p in offer["get"]) or "nobody"
+    wins, losses, ties = offer.get("their_record") or (0, 0, 0)
+    record = f"{wins}-{losses}" + (f"-{ties}" if ties else "")
+    print(f"  with {offer.get('with') or '?'} ({record})")
+    print(f"    send {send}")
+    print(f"    get  {back}")
+    for line in trades.lineup_changes(offer, players):
+        print(f"    {line}")
+    print(f"    your lineup +{offer['my_pct']}%, theirs "
+          f"+{offer['their_pct']}%. "
+          f"{trades.describe(offer, players, {})}")
 
 
 def main():
@@ -231,18 +322,11 @@ def main():
         for got in trade_ideas(args.week, verbose=True):
             print()
             print(got["league_name"])
+            print(f"  {got['summary']}")
             if not got["offers"]:
                 print("  nothing worth proposing")
             for offer in got["offers"][:6]:
-                send = ", ".join(trades.short(players, p)
-                                 for p in offer["give"]) or "nobody"
-                back = ", ".join(trades.short(players, p)
-                                 for p in offer["get"]) or "nobody"
-                print(f"  with {offer.get('with') or '?'}")
-                print(f"    send {send}")
-                print(f"    get  {back}")
-                print(f"    you +{offer['my_gain']}, "
-                      f"them +{offer['their_gain']}")
+                say_offer(offer, players)
     else:
         for got in boards(args.week, verbose=True):
             print()
