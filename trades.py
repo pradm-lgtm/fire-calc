@@ -77,28 +77,58 @@ def best_lineup(player_ids, players, values, slots):
 
 # What an injury does to a player's trade value. A value list is formed
 # from trades made over weeks and lags a fresh injury badly: a receiver who
-# will miss a month is still priced as though he plays this Sunday.
+# will miss the season is still priced as though he plays this Sunday.
+#
+# Only a status that spans more than this week belongs here, and that is
+# the whole of it. A trade is a rest-of-season question - the same question
+# as whether to keep a man on your roster, not whether to start him on
+# Sunday - and waiver_analyzer says it best:
+#
+#     "A star out for one week is still a star; a star on IR is a roster
+#      spot."
+#
+# This file had it wrong in the other direction and took thirty per cent
+# off anyone listed Out. Thirty per cent is enough to change what a roster
+# looks like, and it did: a quarterback out for one week made the position
+# read as a hole, so every single idea in the league became "acquire a
+# quarterback" - one of them sending a first-round back for one. On the
+# other side of the same mistake, a back out for one week read as
+# expendable and was offered around three times.
+#
+# The statuses themselves come from waiver_analyzer. Two lists would be
+# two chances to make this mistake again, and it has been made seven
+# times now.
 INJURY_DISCOUNT = {
-    "ir": 0.45, "pup": 0.45, "sus": 0.5, "susp": 0.5, "out": 0.7,
-    "doubtful": 0.8, "questionable": 0.95,
+    "ir": 0.45, "pup": 0.45, "sus": 0.5, "susp": 0.5,
+    "nfi": 0.45, "dnr": 0.45,
 }
 
 
 def discount_for(player):
+    """What a season-long injury does to what he is worth in a trade.
+
+    A week-scoped status - out, doubtful, questionable - costs nothing
+    here. It says he misses a game, which is a lineup question, and this
+    is not a lineup.
+    """
+    import waiver_analyzer as wa
     status = (player.get("injury_status") or "").strip().lower()
-    for key, factor in INJURY_DISCOUNT.items():
+    if not status:
+        return 1.0
+    for key in wa.SEASON_STATUSES:
         if status.startswith(key):
-            return factor
+            return INJURY_DISCOUNT.get(key, 0.45)
     return 1.0
 
 
 def apply_injuries(values, players):
-    """The same values, marked down for anyone who is hurt.
+    """The same values, marked down for anyone hurt past this week.
 
     Applied to both sides equally, so it does not tilt a deal by itself. It
     changes which players look like a need and which look expendable, which
-    is the part that was wrong: a receiver about to miss a month read as
-    depth at receiver.
+    is why the width of the discount matters as much as its direction: a
+    receiver out for the season must not read as depth at receiver, and a
+    receiver out for a week must not read as a hole there.
     """
     out = {}
     for pid, entry in values.items():
@@ -342,11 +372,7 @@ def offers(league, mine, theirs, players, values, protect=(), free=None):
 
         # What actually changes in your starting eleven, so the cost of
         # sending a starter is visible rather than buried in one number.
-        changes = []
-        for i, slot in enumerate(slots):
-            was, now = my_lineup_before.get(i), my_filled.get(i)
-            if was != now:
-                changes.append({"slot": slot, "out": was, "in": now})
+        changes = lineup_delta(my_lineup_before, my_filled, slots, give)
 
         found.append({
             "give": give, "get": get, "changes": changes,
@@ -473,15 +499,66 @@ def short(players, pid):
     return sc.player_label(players, pid).split(" [")[0] if pid else "nobody"
 
 
+def lineup_delta(before, after, slots, sent=()):
+    """What a trade actually does to your starting lineup.
+
+    Compared man for man, not slot for slot. Two receiver slots hold
+    whoever the optimiser puts in them, so comparing index three with
+    index three reported a reshuffle of the same players as a chain of
+    changes - the same man "in" on one line and "out" on the next:
+
+        WR: Parker Washington in, Chris Olave out
+        WR: Ladd McConkey in, Parker Washington out
+        FLEX: Stefon Diggs in, Ladd McConkey out
+        FLEX: J.K. Dobbins in, Stefon Diggs out
+
+    Four lines, three of them contradicting the line above, for a trade
+    that moved one player. Moving between slots is not a change; joining
+    the lineup, leaving it, or emptying a slot are.
+    """
+    sent = {str(p) for p in sent}
+    was = {p for p in before.values() if p}
+    now = {p for p in after.values() if p}
+    out = []
+
+    # A slot you cannot fill is the worst thing a trade can do to a
+    # lineup, so it is said first and said plainly. The old wording for
+    # it was "TE: nobody in", which buried it.
+    for i, slot in enumerate(slots):
+        if before.get(i) and not after.get(i):
+            out.append({"kind": "empty", "slot": slot})
+    for i, slot in enumerate(slots):
+        pid = after.get(i)
+        if pid and pid not in was:
+            out.append({"kind": "in", "slot": slot, "player": pid})
+    # Whoever stops starting without being traded is the hidden cost. The
+    # man you send is already named on the offer, so naming him again as
+    # "out" reads as a second loss.
+    for i, _slot in enumerate(slots):
+        pid = before.get(i)
+        if pid and pid not in now and pid not in sent:
+            out.append({"kind": "benched", "player": pid})
+    return out
+
+
 def lineup_changes(offer, players):
-    """"QB: Lawrence out, Williams in" for every slot that moves.
+    """The lineup delta as lines to read.
 
     The cost of sending a starter is the man who replaces him, and one
     number for the whole roster hides that entirely.
     """
-    return [f"{c['slot']}: {short(players, c['in'])} in"
-            + (f", {short(players, c['out'])} out" if c["out"] else "")
-            for c in offer["changes"]]
+    said = []
+    for change in offer["changes"]:
+        kind = change.get("kind")
+        if kind == "empty":
+            said.append(f"{change['slot']}: left empty")
+        elif kind == "in":
+            said.append(f"{change['slot']}: "
+                        f"{short(players, change['player'])} in")
+        elif kind == "benched":
+            said.append(f"{short(players, change['player'])} "
+                        "no longer starts")
+    return said
 
 
 def posture(shape_of_team):

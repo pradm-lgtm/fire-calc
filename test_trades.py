@@ -310,19 +310,23 @@ class Output(unittest.TestCase):
 
     def offer(self, **kw):
         base = {"give": ["rb1"], "get": ["wr1"], "tilt": 3, "spots": 0,
-                "changes": [{"slot": "WR", "out": "wr2", "in": "wr1"}]}
+                "changes": [{"kind": "in", "slot": "WR", "player": "wr1"}]}
         base.update(kw)
         return base
 
-    def test_the_lineup_change_names_both_players(self):
+    def test_a_man_joining_the_lineup_is_named_with_his_slot(self):
         self.assertEqual(trades.lineup_changes(self.offer(), self.NAMES),
-                         ["WR: Wanted Man (KC WR) in, "
-                          "Weak Link (NYJ WR) out"])
+                         ["WR: Wanted Man (KC WR) in"])
 
-    def test_a_newly_filled_slot_has_nobody_going_out(self):
-        offer = self.offer(changes=[{"slot": "FLEX", "out": None, "in": "wr1"}])
+    def test_a_slot_left_empty_is_said_plainly(self):
+        offer = self.offer(changes=[{"kind": "empty", "slot": "TE"}])
         self.assertEqual(trades.lineup_changes(offer, self.NAMES),
-                         ["FLEX: Wanted Man (KC WR) in"])
+                         ["TE: left empty"])
+
+    def test_a_man_who_stops_starting_is_named(self):
+        offer = self.offer(changes=[{"kind": "benched", "player": "wr2"}])
+        self.assertEqual(trades.lineup_changes(offer, self.NAMES),
+                         ["Weak Link (NYJ WR) no longer starts"])
 
     def test_a_close_package_reads_as_even(self):
         self.assertIn("about even", trades.describe(self.offer(), self.NAMES, {}))
@@ -372,7 +376,8 @@ class Stored(unittest.TestCase):
                      "give": ["rb1"], "get": ["wr1"], "with": "Their Team",
                      "their_record": (1, 2, 0), "my_pct": 6, "their_pct": 3,
                      "tilt": 4, "spots": 0,
-                     "changes": [{"slot": "WR", "out": "wr2", "in": "wr1"}]}]}]}
+                     "changes": [{"kind": "in", "slot": "WR",
+                                  "player": "wr1"}]}]}]}
 
     def written(self):
         return trades.written_out(self.BOARD, self.PLAYERS)
@@ -394,8 +399,7 @@ class Stored(unittest.TestCase):
 
     def test_the_lineup_change_is_written_out_too(self):
         offer = self.written()[0]["offers"][0]
-        self.assertEqual(offer["changes"],
-                         ["WR: Wanted Man (KC WR) in, Weak Link (NYJ WR) out"])
+        self.assertEqual(offer["changes"], ["WR: Wanted Man (KC WR) in"])
 
     def test_a_stored_run_renders(self):
         html = self.html()
@@ -432,6 +436,197 @@ class Stored(unittest.TestCase):
 
     def test_it_says_byes_are_not_what_offers_are_built_from(self):
         self.assertIn("not for the packages to be built from", self.html())
+
+
+class OneWeekOutIsNotAHole(unittest.TestCase):
+    """The seventh time this project confused two questions.
+
+    waiver_analyzer settled it in writing: "A star out for one week is
+    still a star; a star on IR is a roster spot." Whether a man helps you
+    on Sunday and whether you want him for the rest of the season are
+    different questions, and a trade asks the second.
+
+    This file answered the first. Anyone listed Out lost thirty per cent
+    of his trade value, which was enough to change the shape of a roster:
+    a quarterback out for one week made the position read as a hole, so
+    every single idea in the league became "acquire a quarterback" - one
+    of them sending a first-round running back for one. The same mistake
+    the other way round made a running back out for one week read as
+    expendable, and he was offered around three times in six ideas.
+    """
+
+    def hurt(self, pid, status):
+        players = {k: dict(v) for k, v in PLAYERS.items()}
+        players[pid] = dict(players[pid], injury_status=status)
+        return players
+
+    def worth(self, pid, status):
+        players = self.hurt(pid, status)
+        marked = trades.apply_injuries(values(), players)
+        return marked[pid]["value"]
+
+    def test_a_man_out_for_the_week_keeps_his_value(self):
+        self.assertEqual(self.worth("qb1", "Out"), 5000.0)
+
+    def test_doubtful_and_questionable_too(self):
+        for status in ("Doubtful", "Questionable"):
+            with self.subTest(status=status):
+                self.assertEqual(self.worth("qb1", status), 5000.0)
+
+    def test_a_season_long_injury_still_costs_him(self):
+        for status in ("IR", "PUP", "Sus", "NFI", "DNR"):
+            with self.subTest(status=status):
+                self.assertLess(self.worth("qb1", status), 5000.0)
+
+    def test_the_statuses_are_waiver_analyzers_and_not_a_second_list(self):
+        """Two lists are two chances to make this mistake an eighth time."""
+        import waiver_analyzer as wa
+        for key in trades.INJURY_DISCOUNT:
+            self.assertIn(key, wa.SEASON_STATUSES)
+
+    def test_his_lineup_is_worth_the_same_with_him_out_for_a_week(self):
+        """The mechanism, at the point the discount enters the arithmetic.
+
+        Everything downstream is this number: a lineup marked down for a
+        one-week absence makes any replacement at that position look like
+        a gain.
+        """
+        ids = ["qb1", "rb1", "rb2", "wr2"]
+        slots = trades.starting_slots(LEAGUE)
+        healthy = trades.lineup_value(ids, PLAYERS, values(), slots)
+        players = self.hurt("qb1", "Out")
+        hurt = trades.lineup_value(
+            ids, players, trades.apply_injuries(values(), players), slots)
+        self.assertEqual(healthy, hurt)
+
+    def test_a_quarterback_out_this_week_is_not_a_hole_to_trade_for(self):
+        """The whole league turning into "acquire a quarterback".
+
+        Priced so the discount is the only thing that could flip it: his
+        quarterback is the better of the two at full value and the worse
+        of them once thirty per cent comes off, so under the old discount
+        a downgrade read as an upgrade and the package balanced.
+        """
+        # A backup on their side, so sending their starter does not empty
+        # the slot and sink their own gain.
+        worth = values(qb1=9000, qb2=7000)
+        worth["qb3"] = {"value": 600.0, "position": "QB", "name": "qb3",
+                        "rank": None, "pos_rank": None, "trend": None}
+        players = {k: dict(v) for k, v in PLAYERS.items()}
+        players["qb3"] = {"position": "QB"}
+        players["qb1"]["injury_status"] = "Out"
+        mine = {"roster_id": 1,
+                "players": ["qb1", "rb1", "rb2", "rb3", "wr2", "wr3"]}
+        theirs = {"roster_id": 2, "players": ["qb2", "qb3", "wr1", "wr4"]}
+        marked = trades.apply_injuries(worth, players)
+        found = trades.offers(LEAGUE, mine, theirs, players, marked)
+        self.assertTrue(found, "there is still a trade to find")
+        for offer in found:
+            self.assertNotIn(
+                "qb2", offer["get"],
+                "a quarterback out for one week is not a hole at "
+                "quarterback")
+
+    def test_a_back_out_this_week_is_not_the_one_to_send(self):
+        """The same mistake seen from the other side."""
+        mine = {"roster_id": 1,
+                "players": ["qb1", "rb1", "rb2", "rb3", "wr2", "wr3"]}
+        theirs = {"roster_id": 2, "players": ["qb2", "wr1", "wr4", "rb4"]}
+        players = self.hurt("rb1", "Out")
+        marked = trades.apply_injuries(values(), players)
+        healthy = trades.offers(LEAGUE, mine, theirs, PLAYERS, values())
+        found = trades.offers(LEAGUE, mine, theirs, players, marked)
+        self.assertEqual([o["give"] for o in found],
+                         [o["give"] for o in healthy],
+                         "one week out changed who is expendable")
+
+    def test_the_summary_does_not_call_a_one_week_absence_a_need(self):
+        """"counts as need at that position rather than depth" is a claim
+        about the rest of the season, so only a season injury earns it."""
+        mine = {"roster_id": 1,
+                "players": ["qb1", "rb1", "rb2", "rb3", "wr2", "wr3"]}
+        players = self.hurt("rb1", "Out")
+        got = trades.shape(LEAGUE, mine, players,
+                           trades.apply_injuries(values(), players))
+        self.assertEqual(got["hurt"], [])
+
+    def test_but_a_season_injury_is_still_called_one(self):
+        mine = {"roster_id": 1,
+                "players": ["qb1", "rb1", "rb2", "rb3", "wr2", "wr3"]}
+        players = self.hurt("rb1", "IR")
+        got = trades.shape(LEAGUE, mine, players,
+                           trades.apply_injuries(values(), players))
+        self.assertEqual([pid for pid, _pos, _s in got["hurt"]], ["rb1"])
+
+
+class WhatActuallyChangedInTheLineup(unittest.TestCase):
+    """A reshuffle is not a change, and the old diff said it was.
+
+    Comparing slot index against slot index turned two receivers swapping
+    places into a chain of lines where the same man was "in" on one and
+    "out" on the next. Four lines, three contradicting the line above,
+    for a trade that moved one player.
+    """
+
+    SLOTS = ["QB", "WR", "WR", "FLEX", "FLEX"]
+
+    def test_a_reshuffle_of_the_same_men_is_no_change_at_all(self):
+        before = {0: "qb1", 1: "wr2", 2: "wr3", 3: "rb2", 4: "rb3"}
+        after = {0: "qb1", 1: "wr3", 2: "wr2", 3: "rb3", 4: "rb2"}
+        self.assertEqual(
+            trades.lineup_delta(before, after, self.SLOTS), [])
+
+    def test_a_man_joining_is_reported_once_with_the_slot_he_fills(self):
+        before = {0: "qb1", 1: "wr2", 2: "wr3", 3: "rb2", 4: "rb3"}
+        after = {0: "qb2", 1: "wr3", 2: "wr2", 3: "rb3", 4: "rb2"}
+        got = trades.lineup_delta(before, after, self.SLOTS, sent=["qb1"])
+        self.assertEqual(got, [{"kind": "in", "slot": "QB",
+                                "player": "qb2"}])
+
+    def test_the_man_you_send_is_not_named_a_second_time_as_a_loss(self):
+        before = {0: "qb1", 1: "wr2", 2: "wr3", 3: "rb2", 4: "rb3"}
+        after = {0: "qb1", 1: "wr1", 2: "wr3", 3: "rb2", 4: "rb3"}
+        got = trades.lineup_delta(before, after, self.SLOTS, sent=["wr2"])
+        self.assertEqual([c["kind"] for c in got], ["in"])
+
+    def test_a_starter_pushed_to_the_bench_is_the_hidden_cost_and_is_said(self):
+        before = {0: "qb1", 1: "wr2", 2: "wr3", 3: "rb2", 4: "rb3"}
+        after = {0: "qb1", 1: "wr1", 2: "wr3", 3: "rb2", 4: "rb3"}
+        got = trades.lineup_delta(before, after, self.SLOTS, sent=[])
+        self.assertIn({"kind": "benched", "player": "wr2"}, got)
+
+    def test_an_emptied_slot_is_said_first_and_said_plainly(self):
+        before = {0: "qb1", 1: "wr2", 2: "wr3", 3: "rb2", 4: "rb3"}
+        after = {0: None, 1: "wr2", 2: "wr3", 3: "rb2", 4: "rb3"}
+        got = trades.lineup_delta(before, after, self.SLOTS, sent=["qb1"])
+        self.assertEqual(got[0], {"kind": "empty", "slot": "QB"})
+
+    def test_a_real_offer_never_names_a_man_both_in_and_out(self):
+        """The shape of the bug, asserted against the real search."""
+        mine = {"roster_id": 1,
+                "players": ["qb1", "rb1", "rb2", "rb3", "wr2", "wr3"]}
+        theirs = {"roster_id": 2, "players": ["qb2", "wr1", "wr4", "rb4"]}
+        league = dict(LEAGUE,
+                      roster_positions=["QB", "WR", "WR", "FLEX", "FLEX",
+                                        "BN", "BN"])
+        found = trades.offers(league, mine, theirs, PLAYERS, values())
+        self.assertTrue(found)
+        for offer in found:
+            joined = [c["player"] for c in offer["changes"]
+                      if c["kind"] == "in"]
+            left = [c["player"] for c in offer["changes"]
+                    if c["kind"] == "benched"]
+            self.assertEqual(set(joined) & set(left), set())
+            self.assertEqual(len(joined), len(set(joined)))
+
+    def test_every_change_it_makes_renders_to_a_line(self):
+        """A kind nobody renders is a change the reader never sees."""
+        mine = {"roster_id": 1,
+                "players": ["qb1", "rb1", "rb2", "rb3", "wr2", "wr3"]}
+        theirs = {"roster_id": 2, "players": ["qb2", "wr1", "wr4", "rb4"]}
+        for offer in trades.offers(LEAGUE, mine, theirs, PLAYERS, values()):
+            self.assertEqual(len(trades.lineup_changes(offer, PLAYERS)),
+                             len(offer["changes"]))
 
 
 if __name__ == "__main__":
