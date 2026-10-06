@@ -437,6 +437,16 @@ class Stored(unittest.TestCase):
     def test_it_says_byes_are_not_what_offers_are_built_from(self):
         self.assertIn("not for the packages to be built from", self.html())
 
+    def test_a_league_with_nothing_in_it_says_so_rather_than_sitting_blank(self):
+        """Now a likelier state than it was, since a fraction of a per cent
+        no longer counts as an idea."""
+        quiet = [dict(self.BOARD["leagues"][0], offers=[],
+                      summary="A paragraph.")]
+        quiet[0].pop("shape", None)
+        quiet[0].pop("values", None)
+        said = self.html(leagues=quiet)
+        self.assertIn("worth sending", said)
+
 
 class OneWeekOutIsNotAHole(unittest.TestCase):
     """The seventh time this project confused two questions.
@@ -627,6 +637,84 @@ class WhatActuallyChangedInTheLineup(unittest.TestCase):
         for offer in trades.offers(LEAGUE, mine, theirs, PLAYERS, values()):
             self.assertEqual(len(trades.lineup_changes(offer, PLAYERS)),
                              len(offer["changes"]))
+
+
+class WorthSending(unittest.TestCase):
+    """Better by any margin is not the same as worth a message.
+
+    The gate was my_gain > 0, so an offer that improved the lineup by a
+    third of a per cent was a proposal. Three of five ideas in The Minor
+    League read "your lineup +0%" - each of them true, positive, and no
+    reason to message anybody. A league with little to do should say so
+    rather than fill the space.
+    """
+
+    MINE = {"roster_id": 1,
+            "players": ["qb1", "rb1", "rb2", "rb3", "wr2", "wr3"]}
+    THEIRS = {"roster_id": 2, "players": ["qb2", "wr1", "wr4", "rb4"]}
+
+    def find(self, **kw):
+        return trades.offers(LEAGUE, self.MINE, self.THEIRS, PLAYERS,
+                             values(**kw))
+
+    def test_nothing_it_offers_is_shown_as_no_gain_at_all(self):
+        """The floor is the displayed number, so the two cannot disagree."""
+        for offer in self.find():
+            self.assertGreaterEqual(offer["my_pct"], trades.WORTH_SENDING)
+
+    def test_a_trade_worth_making_still_surfaces(self):
+        self.assertTrue(self.find())
+
+    # A roster deep enough that losing its flex costs almost nothing, and
+    # an opponent with a receiver a shade better than the man he replaces.
+    # Both packages below pass every other gate - fair by value, both
+    # lineups up - and one of them is worth a third of a per cent.
+    THIN_PICKINGS = {
+        "mine": {"roster_id": 1,
+                 "players": ["qb1", "rb1", "rb2", "rb4", "wr2", "wr3"]},
+        "theirs": {"roster_id": 2, "players": ["qb2", "wr1", "rb3"]},
+        "worth": {"qb1": 6000, "rb1": 9000, "rb2": 8000, "rb4": 7950,
+                  "wr2": 7000, "wr3": 6000, "qb2": 5000, "wr1": 7200,
+                  "rb3": 200},
+    }
+
+    def slim(self, floor):
+        real = trades.WORTH_SENDING
+        trades.WORTH_SENDING = floor
+        try:
+            return trades.offers(LEAGUE, self.THIN_PICKINGS["mine"],
+                                 self.THIN_PICKINGS["theirs"], PLAYERS,
+                                 values(**self.THIN_PICKINGS["worth"]))
+        finally:
+            trades.WORTH_SENDING = real
+
+    def test_the_old_gate_called_a_third_of_a_per_cent_an_idea(self):
+        """Without this, the test below proves only that nothing was
+        found - which an over-tight fairness band would also do."""
+        found = self.slim(0)
+        self.assertIn(0, [o["my_pct"] for o in found])
+
+    def test_and_now_it_is_dropped(self):
+        self.assertNotIn(0, [o["my_pct"] for o in self.slim(1)])
+
+    def test_while_the_real_gain_beside_it_survives(self):
+        self.assertEqual([o["give"] for o in self.slim(1)], [["rb4"]])
+
+    def test_the_other_side_gaining_little_is_not_held_against_it(self):
+        """An offer they barely improve on but gain value from is one they
+        may well take, and it is the best kind for you. So the floor is
+        read against your lineup only."""
+        # A strong roster on their side, so a real gain is a small share
+        # of it - which is how several live ideas read "theirs +0%".
+        worth = dict(self.THIN_PICKINGS["worth"], rb3=7000, wr4=7900)
+        theirs = {"roster_id": 2,
+                  "players": ["qb2", "wr1", "rb3", "wr4"]}
+        found = trades.offers(LEAGUE, self.THIN_PICKINGS["mine"], theirs,
+                              PLAYERS, values(**worth))
+        kept = [o for o in found if o["their_pct"] < trades.WORTH_SENDING]
+        self.assertTrue(kept, "an offer worth little to them still stands")
+        for offer in kept:
+            self.assertGreater(offer["their_gain"], 0)
 
 
 if __name__ == "__main__":

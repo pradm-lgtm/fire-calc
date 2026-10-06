@@ -1812,13 +1812,19 @@ def render_trades(conn):
                    "</h2>"
                    f"<div class='bar'>{e(league.get('summary', ''))}</div>"
                    f"<p class='guide'>{e(priced)}</p>")
+        if not league["offers"]:
+            out.append("<p class='empty'>Nothing here moves your lineup "
+                       "enough to be worth sending. Packages that would "
+                       "gain you a fraction of a per cent exist in every "
+                       "league and are not ideas.</p>")
         for offer in league["offers"]:
             out.append(stored_trade_card(offer))
 
     out.append(refresh_trades_button())
     out.append("<p class='foot'>Nothing is ever sent. These are packages "
-               "where your best starting lineup improves and theirs does too, "
-               "which is what makes an offer worth sending rather than merely "
+               "where your best starting lineup improves by at least a whole "
+               "per cent and theirs improves too, which is what makes an "
+               "offer worth sending rather than merely "
                "worth wanting. The paragraph above each league describes the "
                "roster; byes and records are in it for you to read, not for "
                "the packages to be built from.</p>")

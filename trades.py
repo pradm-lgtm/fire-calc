@@ -6,6 +6,10 @@ looks for: packages where your best starting lineup improves and theirs does
 too. Two teams with opposite surpluses can both gain, and finding those pairs
 is arithmetic over rosters you can already see.
 
+Better by any margin is not the same as worth sending, so your side has to
+gain a whole per cent of its starting lineup - see WORTH_SENDING. A league
+with nothing in it says so instead of filling the space.
+
 Everything here is a suggestion. Nothing is ever sent; Sleeper has no write
 API and a trade is not a one-dollar waiver claim.
 
@@ -41,6 +45,13 @@ BENCH = {"BN", "IR", "TAXI"}
 FAIRNESS = 0.25
 
 TOP_OFFERS = 4
+
+# The smallest gain worth putting in front of you, as the whole per cent
+# of your starting lineup that the offer is shown with. Nothing is said
+# about the other side: an offer that barely moves their lineup but sends
+# value their way is one they may well take, and it is the best kind for
+# you.
+WORTH_SENDING = 1
 
 
 def starting_slots(league):
@@ -370,6 +381,16 @@ def offers(league, mine, theirs, players, values, protect=(), free=None):
         if my_gain <= 0 or their_gain <= 0:
             continue
 
+        # Better by any margin at all is not the same as worth sending.
+        # Three of five ideas in one league read "your lineup +0%": true,
+        # positive, and no reason to message anybody. The floor is stated
+        # in the number you are shown, so an offer that survives it can
+        # always say what it is worth, and a league with nothing in it
+        # says that instead of filling the space.
+        my_pct = round(100 * my_gain / my_before) if my_before else 0
+        if my_pct < WORTH_SENDING:
+            continue
+
         # What actually changes in your starting eleven, so the cost of
         # sending a starter is visible rather than buried in one number.
         changes = lineup_delta(my_lineup_before, my_filled, slots, give)
@@ -379,7 +400,7 @@ def offers(league, mine, theirs, players, values, protect=(), free=None):
             # The raw units are FantasyCalc's own scale, where the best
             # player in the game is about ten thousand. A share of your
             # starting lineup is a number that means something.
-            "my_pct": round(100 * my_gain / my_before) if my_before else 0,
+            "my_pct": my_pct,
             "their_pct": (round(100 * their_gain / their_before)
                           if their_before else 0),
             "my_gain": round(my_gain), "their_gain": round(their_gain),
