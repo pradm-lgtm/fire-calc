@@ -225,11 +225,24 @@ def main():
         print("Yahoo is not set up here. python3 yahoo_client.py --ready")
         return 1
     if args.trades:
+        import sleeper_client as sc
+        import trades
+        players = sc.all_players()
         for got in trade_ideas(args.week, verbose=True):
             print()
-            print(f"{got['league_name']} - against {got['opponent']}")
-            for offer in got["offers"][:5]:
-                print(f"  {offer}")
+            print(got["league_name"])
+            if not got["offers"]:
+                print("  nothing worth proposing")
+            for offer in got["offers"][:6]:
+                send = ", ".join(trades.short(players, p)
+                                 for p in offer["give"]) or "nobody"
+                back = ", ".join(trades.short(players, p)
+                                 for p in offer["get"]) or "nobody"
+                print(f"  with {offer.get('with') or '?'}")
+                print(f"    send {send}")
+                print(f"    get  {back}")
+                print(f"    you +{offer['my_gain']}, "
+                      f"them +{offer['their_gain']}")
     else:
         for got in boards(args.week, verbose=True):
             print()

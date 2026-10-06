@@ -208,6 +208,72 @@ class WhatTheAgreementActuallySays(unittest.TestCase):
 
 
 
+class PrintingWhatItFound(unittest.TestCase):
+    """The run worked and the printing crashed.
+
+    Seven ideas in one league and eight in the other, then a KeyError on
+    'opponent' - a key removed when trades stopped being opponent-only
+    and left behind in the code that prints them. A summary line that
+    reads a field the data no longer has is a crash that claims the work
+    failed when it did not.
+    """
+
+    def said(self, boards):
+        import contextlib
+        import io
+        import sleeper_client as sc
+        import sys
+        import yahoo_client as yc
+        real = (yl.trade_ideas, sc.all_players, yc.configured, sys.argv)
+        sc.all_players = lambda refresh=False: {
+            "a": {"full_name": "My Man", "position": "RB", "team": "GB"},
+            "b": {"full_name": "Their Man", "position": "WR",
+                  "team": "BAL"}}
+        yl.trade_ideas = lambda w=None, p=(), verbose=False: boards
+        yc.configured = lambda: True
+        sys.argv = ["yahoo_live.py", "--trades"]
+        out = io.StringIO()
+        try:
+            with contextlib.redirect_stdout(out):
+                yl.main()
+        finally:
+            (yl.trade_ideas, sc.all_players, yc.configured,
+             sys.argv) = real
+        return out.getvalue()
+
+    OFFER = {"give": ["a"], "get": ["b"], "my_gain": 7, "their_gain": 3,
+             "with": "Team Ruhi"}
+
+    def test_it_names_who_the_trade_is_with(self):
+        said = self.said([{"league_name": "L", "offers": [self.OFFER]}])
+        self.assertIn("Team Ruhi", said)
+
+    def test_it_names_both_sides_of_the_deal(self):
+        said = self.said([{"league_name": "L", "offers": [self.OFFER]}])
+        self.assertIn("My Man", said)
+        self.assertIn("Their Man", said)
+
+    def test_it_says_what_each_side_gains(self):
+        said = self.said([{"league_name": "L", "offers": [self.OFFER]}])
+        self.assertIn("you +7", said)
+        self.assertIn("them +3", said)
+
+    def test_a_league_with_nothing_says_so(self):
+        said = self.said([{"league_name": "L", "offers": []}])
+        self.assertIn("nothing worth proposing", said)
+
+    def test_an_offer_with_no_partner_named_does_not_crash(self):
+        bare = {k: v for k, v in self.OFFER.items() if k != "with"}
+        said = self.said([{"league_name": "L", "offers": [bare]}])
+        self.assertIn("My Man", said)
+
+    def test_it_reads_no_field_the_offers_do_not_carry(self):
+        """"opponent" went when trades stopped being opponent-only."""
+        source = open("yahoo_live.py").read()
+        self.assertNotIn("got['opponent']", source)
+        self.assertNotIn('got["opponent"]', source)
+
+
 class TheyReachThePages(unittest.TestCase):
     """A module nothing calls is a module that does not exist."""
 
