@@ -259,9 +259,14 @@ def trade_ideas(week=None, protect=(), verbose=False):
                 found.append(offer)
         found.sort(key=lambda o: (o["my_gain"], o["their_gain"]),
                    reverse=True)
+        # Counted after the cap, because the number in the heading is a
+        # promise about what follows it. It said 8 and showed 6.
+        kept = found[:trades.TOP_OFFERS * 2]
         if verbose:
-            print(f"  {league.get('name')}: {len(found)} idea(s) across "
-                  f"the league")
+            said = f"{len(kept)} idea(s) across the league"
+            if len(found) > len(kept):
+                said += f", the best of {len(found)}"
+            print(f"  {league.get('name')}: {said}")
 
         mine_shaped = trades.shape(shaped, my_roster, players, values,
                                    bye_weeks, at or 1)
@@ -272,7 +277,7 @@ def trade_ideas(week=None, protect=(), verbose=False):
                                               league.get("name")),
                     "settings": wanted,
                     "values": values,
-                    "offers": found[:trades.TOP_OFFERS * 2]})
+                    "offers": kept})
     return out
 
 
@@ -325,7 +330,7 @@ def main():
             print(f"  {got['summary']}")
             if not got["offers"]:
                 print("  nothing worth proposing")
-            for offer in got["offers"][:6]:
+            for offer in got["offers"]:
                 say_offer(offer, players)
     else:
         for got in boards(args.week, verbose=True):

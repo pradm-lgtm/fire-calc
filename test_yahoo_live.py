@@ -429,7 +429,7 @@ class TheSameShapeAsTheSleeperHalf(unittest.TestCase):
     }
     SQUADS = {"t.1": ["rb1", "rb2", "wr1"], "t.2": ["wra", "wrb", "rbx"]}
 
-    def ideas(self, records=None):
+    def ideas(self, records=None, verbose=False):
         """trade_ideas over one stubbed league, with the real trade code."""
         import sleeper_client as sc
         import trade_values as tv
@@ -470,7 +470,7 @@ class TheSameShapeAsTheSleeperHalf(unittest.TestCase):
                  if records is None else records)
         yl.records_in = lambda key: table
         try:
-            return yl.trade_ideas(5)
+            return yl.trade_ideas(5, verbose=verbose)
         finally:
             (sc.all_players, sc.current_state, tv.settings_from, tv.fetch,
              yb.bridge, yc.my_leagues, yc.my_teams, yc.roster_slots,
@@ -482,6 +482,58 @@ class TheSameShapeAsTheSleeperHalf(unittest.TestCase):
         got = self.ideas()
         self.assertEqual(len(got), 1)
         self.assertTrue(got[0]["offers"], "no offer, so nothing is proved")
+
+    def test_the_count_in_the_heading_is_what_it_then_shows(self):
+        """It said "8 idea(s)" and printed 6.
+
+        The heading counted before the cap and the printer cut again at a
+        number of its own. A count beside a list is a promise about the
+        list.
+        """
+        import contextlib
+        import io
+        said = io.StringIO()
+        with contextlib.redirect_stdout(said):
+            got = self.ideas(verbose=True)
+        heading = said.getvalue()
+        self.assertIn(f"{len(got[0]['offers'])} idea(s)", heading)
+
+    def test_it_says_when_it_has_set_some_aside(self):
+        """More found than kept, so the heading says which number is which.
+
+        TOP_OFFERS cannot be used to force this: it caps inside offers()
+        as well, so lowering it starves the search instead of the list.
+        """
+        import contextlib
+        import io
+        import trades
+        real = (trades.offers, trades.TOP_OFFERS)
+        trades.TOP_OFFERS = 1          # a cap of two on the league list
+        trades.offers = lambda *a, **k: [
+            {"give": ["rb1"], "get": ["wr1"], "changes": [],
+             "my_gain": 100 - i, "their_gain": 10, "my_pct": 2,
+             "their_pct": 1, "tilt": 3, "spots": 0} for i in range(5)]
+        said = io.StringIO()
+        try:
+            with contextlib.redirect_stdout(said):
+                got = self.ideas(verbose=True)
+        finally:
+            (trades.offers, trades.TOP_OFFERS) = real
+        self.assertEqual(len(got[0]["offers"]), 2)
+        self.assertIn("2 idea(s)", said.getvalue())
+        self.assertIn("the best of 5", said.getvalue())
+
+    def test_the_printer_shows_every_idea_it_kept(self):
+        import contextlib
+        import io
+        offers = [dict(PrintingWhatItFound.OFFER, with_=n) for n in range(8)]
+        for i, offer in enumerate(offers):
+            offer["with"] = f"Team {i}"
+        said = PrintingWhatItFound.said(
+            self, [{"league_name": "L", "summary": "A paragraph.",
+                    "offers": offers}])
+        for i in range(8):
+            self.assertIn(f"Team {i}", said)
 
     def test_a_league_carries_every_key_a_sleeper_league_does(self):
         mine = set(self.ideas()[0])
