@@ -283,6 +283,29 @@ class Redesign(unittest.TestCase):
         self.assertIn("class='call urgent'", html)
         self.assertIn("class='call close'", html)
 
+    def test_a_trade_idea_does_not_borrow_the_amber_alarm(self):
+        """Amber means something needs doing. A trade idea does not."""
+        import webapp
+        card = webapp.stored_trade_card(
+            {"send": ["A"], "get": ["B"], "with": "Them",
+             "their_record": "1-2", "changes": [], "my_pct": 2,
+             "their_pct": 1, "verdict": "It is about even by value."})
+        self.assertIn("call offer", card)
+        self.assertNotIn("call close", card)
+
+    def test_one_offer_is_not_called_one_offers(self):
+        import store as st
+        import webapp
+        conn = st.connect(":memory:")
+        st.write_trade_run(conn, "2026", 5, "FantasyCalc", [{
+            "league_id": "5", "league_name": "LEHG", "summary": "A paragraph.",
+            "settings": {"teams": 10, "ppr": 0.5, "quarterbacks": 1},
+            "offers": [{"send": ["A"], "get": ["B"], "with": "Them",
+                        "their_record": "1-2", "changes": [], "my_pct": 2,
+                        "their_pct": 1, "verdict": "Even."}]}])
+        said = webapp.render_trades(conn).decode()
+        self.assertIn("1 offer<", said)
+
     def test_the_player_to_start_is_the_row_that_stands_out(self):
         html = self.html()
         card = html[html.index("Start Robinson"):html.index("Close calls")]

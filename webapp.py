@@ -42,25 +42,57 @@ import trades
 from lineup import SLOT_ELIGIBILITY
 
 CSS = """
-/* Colour carries one meaning each. Blue is the only thing you can press,
-   amber and red are the only things that need attention, and everything
-   structural is grey. Two alarms for one fact - a red rule and a red label
-   saying the same thing - is one alarm too many, so urgency lives in the
-   rule and the words, never in both at once. */
+/* Colour carries one meaning each, and brightness does not change that -
+   it only makes each meaning easier to find. Indigo is the only thing you
+   can press, amber and red are the only things that need attention, the
+   position hues name a position and nothing else, and the brand gradient
+   is identity: it appears on the mark, the wordmark, the tab you are on
+   and the loading bar, and never on a status. Two alarms for one fact - a
+   red rule and a red label saying the same thing - is still one alarm too
+   many, so urgency lives in the rule and the words, never in both.
+
+   Depth replaces half the grey. A card used to be told apart from the page
+   by a one-pixel line; now it is lifted off it by a shadow, which is
+   quieter and reads as an object rather than a box. The line stays for
+   dark mode, where shadows do not carry. */
 :root { color-scheme: light dark;
-        --bg:#f6f7f9; --card:#fff; --raise:#fff; --ink:#11141a;
-        --muted:#646d7c; --line:#e4e7ec; --line-2:#d3d8e0;
-        --action:#1d4ed8; --action-ink:#fff;
-        --urgent:#c2321b; --warn:#8a5a00;
-        --ok:#0a7d28; --ok-ink:#fff; --no:#b3261e;
-        --qb:#7c3aed; --rb:#0a7d28; --wr:#1a56db; --te:#c2410c; --def:#475569; }
+        --bg:#f6f9fc; --card:#fff; --raise:#fff; --ink:#0a2540;
+        --muted:#5c6f85; --strong:#425466;
+        --line:#e6ebf1; --line-2:#cfd9e4;
+        --action:#635bff; --action-ink:#fff; --action-soft:#eeedff;
+        --urgent:#df1b41; --urgent-soft:#fff0f3;
+        --warn:#9a6400; --warn-soft:#fff7e8;
+        --ok:#0b875b; --ok-ink:#fff; --ok-soft:#e7f7f0; --no:#df1b41;
+        --qb:#6b4bf0; --qb-bg:#efecff;
+        --rb:#0b875b; --rb-bg:#e4f7ef;
+        --wr:#0b7fd4; --wr-bg:#e4f2fd;
+        --te:#d9480f; --te-bg:#fdece3;
+        --def:#53657d; --def-bg:#eef1f6;
+        --grad:linear-gradient(135deg,#00d4ff 0%,#635bff 48%,#ff5996 100%);
+        --shadow:0 2px 5px -1px rgba(50,50,93,.13),
+                 0 1px 3px -1px rgba(10,37,64,.08);
+        --shadow-lg:0 13px 27px -5px rgba(50,50,93,.16),
+                    0 8px 16px -8px rgba(10,37,64,.14);
+        --shadow-action:0 2px 5px -1px rgba(99,91,255,.38),
+                        0 1px 3px -1px rgba(10,37,64,.2); }
 @media (prefers-color-scheme: dark) {
-  :root { --bg:#0a0c10; --card:#13161c; --raise:#181c24; --ink:#eef1f6;
-          --muted:#8d96a6; --line:#222731; --line-2:#2c323d;
-          --action:#5b8cff; --action-ink:#0a0c10;
-          --urgent:#ff6b5e; --warn:#e3a33a;
-          --ok:#3ddc84; --ok-ink:#06210f; --no:#ff6b5e;
-          --qb:#a78bfa; --rb:#4ade80; --wr:#7aa2f7; --te:#fb923c; --def:#94a3b8; }
+  /* Navy rather than black: the same hue as the ink in daylight, which
+     keeps the brand colours sitting on it instead of glowing off it. */
+  :root { --bg:#070b16; --card:#111827; --raise:#162032; --ink:#e9eff8;
+          --muted:#95a6bd; --strong:#b9c7da;
+          --line:#1e2940; --line-2:#2c3a55;
+          --action:#8b84ff; --action-ink:#070b16; --action-soft:#1b1d42;
+          --urgent:#ff7088; --urgent-soft:#2b1320;
+          --warn:#f0b357; --warn-soft:#2a2010;
+          --ok:#3ddc98; --ok-ink:#05221a; --ok-soft:#0d2a21; --no:#ff7088;
+          --qb:#a996ff; --qb-bg:#1e1b3d;
+          --rb:#4ade9b; --rb-bg:#0d2a21;
+          --wr:#5fb8f5; --wr-bg:#0f2639;
+          --te:#ff9d5c; --te-bg:#2d1a10;
+          --def:#9aaec6; --def-bg:#1a2335;
+          --shadow:0 1px 2px rgba(0,0,0,.5);
+          --shadow-lg:0 12px 28px -8px rgba(0,0,0,.6);
+          --shadow-action:0 2px 8px -2px rgba(139,132,255,.45); }
 }
 * { box-sizing:border-box; -webkit-text-size-adjust:100%; }
 body { margin:0; padding:18px 14px 40px; background:var(--bg); color:var(--ink);
@@ -69,34 +101,52 @@ body { margin:0; padding:18px 14px 40px; background:var(--bg); color:var(--ink);
 
 /* Typography does the structuring. No tracked-out capitals: they read as
    template chrome rather than as information. */
-h1 { font-size:26px; line-height:1.15; margin:0 0 2px; letter-spacing:-.02em; }
-h2 { font-size:13px; font-weight:650; color:var(--muted); margin:28px 0 8px;
+h1 { font-size:29px; line-height:1.1; margin:0 0 3px;
+     letter-spacing:-.03em; font-weight:760; }
+h2 { font-size:13px; font-weight:680; color:var(--strong); margin:28px 0 8px;
      display:flex; justify-content:space-between; align-items:baseline; gap:8px; }
 .sub { color:var(--muted); font-size:13px; margin:0 0 16px; }
 .meta { color:var(--muted); font-size:12px; font-weight:400; }
 .foot { color:var(--muted); font-size:12px; margin:28px 0 0;
         border-top:1px solid var(--line); padding-top:12px; }
 
-.brand { display:flex; align-items:center; gap:8px; font-weight:750;
-         font-size:17px; letter-spacing:-.02em; margin-bottom:14px; }
-.mark { width:24px; height:24px; color:var(--action); flex:none; }
-nav { display:flex; gap:4px; margin-bottom:22px; padding:3px;
-      background:var(--card); border:1px solid var(--line); border-radius:10px; }
-nav a { flex:1; text-align:center; padding:8px; border-radius:7px;
+/* The mark sits in a gradient tile and the wordmark is cut out of the
+   same gradient, so the identity is one object in two places rather than
+   a blue glyph beside black text. */
+.brand { display:flex; align-items:center; gap:10px; font-weight:750;
+         font-size:19px; letter-spacing:-.025em; margin-bottom:16px; }
+.tile { width:30px; height:30px; border-radius:9px; flex:none;
+        background:var(--grad); box-shadow:var(--shadow-action);
+        display:flex; align-items:center; justify-content:center; }
+.mark { width:20px; height:20px; color:#fff; flex:none; }
+/* Named, not ".brand span": the tile is a span inside .brand too, and
+   clipping a background to text it does not have left it blank. */
+.word { background:var(--grad); color:var(--action);
+        -webkit-background-clip:text; background-clip:text;
+        -webkit-text-fill-color:transparent; }
+nav { display:flex; gap:3px; margin-bottom:24px; padding:4px;
+      background:var(--card); border:1px solid var(--line);
+      border-radius:12px; box-shadow:var(--shadow); }
+nav a { flex:1; text-align:center; padding:9px 6px; border-radius:8px;
         font-size:14px; font-weight:600; text-decoration:none;
-        color:var(--muted); }
-nav a.on { background:var(--action); color:var(--action-ink); }
+        color:var(--strong); transition:background .15s ease, color .15s ease; }
+nav a:hover { background:var(--action-soft); color:var(--action); }
+nav a.on, nav a.on:hover { background:var(--grad); color:#fff;
+                           box-shadow:var(--shadow-action); }
 
 /* One card shape, three weights of it. An urgent call is bigger, brighter
    and higher on the page than a marginal one. */
 .call { background:var(--card); border:1px solid var(--line);
         border-radius:14px; padding:16px; margin-bottom:12px;
-        border-left:3px solid var(--line-2); }
+        border-left:4px solid var(--line-2); box-shadow:var(--shadow); }
 .call.urgent { background:var(--raise); border-left-color:var(--urgent);
-               padding:20px; }
+               padding:20px; box-shadow:var(--shadow-lg); }
 .call.close { border-left-color:var(--warn); }
+/* A trade idea is information, not an alarm. It used to borrow the close
+   call's amber rule, which in this palette means something needs doing. */
+.call.offer { border-left-color:var(--line-2); }
 .call.shut { border-left-color:var(--line-2); background:var(--card);
-             padding:14px; opacity:.72; }
+             padding:14px; opacity:.72; box-shadow:none; }
 .call.shut h3 { font-size:16px; font-weight:600; }
 .call h3 { margin:0; font-size:17px; line-height:1.25; letter-spacing:-.01em; }
 .call.urgent h3 { font-size:21px; }
@@ -116,8 +166,8 @@ nav a.on { background:var(--action); color:var(--action-ink); }
 
 /* The recommendation is the point of the card, so it is the one row that
    looks different from the rest. */
-.player.pick { background:var(--bg); border-radius:10px; padding:9px 11px;
-               margin:2px -3px; border-top:0; }
+.player.pick { background:var(--action-soft); border-radius:10px;
+               padding:9px 11px; margin:2px -3px; border-top:0; }
 .player.pick .pname { font-size:17px; font-weight:700; }
 .player.pick .face { width:44px; height:44px; }
 .player.bench-out .pname { color:var(--muted); }
@@ -134,26 +184,46 @@ nav a.on { background:var(--action); color:var(--action-ink); }
             border-top:1px solid var(--line); }
 .done { font-size:12.5px; color:var(--muted); }
 
+/* A button lifts a little when you reach for it and sits back down when
+   you press it. That is the whole of the animation budget. */
 button { min-height:42px; padding:9px 16px; border-radius:9px;
          border:1px solid transparent; font-weight:600; cursor:pointer;
-         font-size:15px; font-family:inherit; touch-action:manipulation; }
-.primary { background:var(--action); color:var(--action-ink); }
-.ghost { background:transparent; color:var(--ink); border-color:var(--line-2); }
+         font-size:15px; font-family:inherit; touch-action:manipulation;
+         transition:transform .12s ease, box-shadow .12s ease,
+                    background .12s ease; }
+button:hover:not([disabled]) { transform:translateY(-1px); }
+button:active:not([disabled]) { transform:translateY(0); }
+.primary { background:var(--action); color:var(--action-ink);
+           box-shadow:var(--shadow-action); }
+.ghost { background:var(--card); color:var(--strong);
+         border-color:var(--line-2); box-shadow:var(--shadow); }
+.ghost:hover { color:var(--action); border-color:var(--action); }
 .link { background:none; border:0; color:var(--muted); font-size:13px;
         padding:4px 0; min-height:0; text-decoration:underline; }
-.approve { background:var(--ok); color:var(--ok-ink); flex:1; }
-.decline { background:transparent; color:var(--no); border-color:var(--line);
+.approve { background:var(--ok); color:var(--ok-ink); flex:1;
+           box-shadow:0 2px 5px -1px rgba(11,135,91,.35); }
+.decline { background:var(--card); color:var(--no); border-color:var(--line-2);
            flex:1; }
+.decline:hover { border-color:var(--no); }
 form.row { display:flex; gap:8px; align-items:center; margin-top:14px;
            flex-wrap:wrap; }
 .bidwrap { display:flex; align-items:center; gap:6px; }
 input[type=number] { width:84px; min-height:44px; padding:10px; font-size:16px;
                      border:1px solid var(--line-2); border-radius:9px;
-                     background:var(--bg); color:var(--ink); }
+                     background:var(--card); color:var(--ink);
+                     font-family:inherit; font-weight:600; }
+input[type=number]:focus { outline:none; border-color:var(--action);
+                     box-shadow:0 0 0 3px var(--action-soft); }
+/* Keyboard focus has to be visible without putting a ring on every mouse
+   click, which is what :focus-visible is for. */
+a:focus-visible, button:focus-visible, summary:focus-visible,
+label:focus-visible { outline:2px solid var(--action); outline-offset:2px;
+                      border-radius:8px; }
 label { font-size:13px; color:var(--muted); }
 
 .fold { background:var(--card); border:1px solid var(--line);
-        border-radius:12px; padding:2px 16px 10px; margin-bottom:10px; }
+        border-radius:12px; padding:2px 16px 10px; margin-bottom:10px;
+        box-shadow:var(--shadow); }
 .fold > summary { display:flex; justify-content:space-between; gap:8px;
                   align-items:baseline; padding:12px 0; cursor:pointer;
                   font-weight:600; list-style:none; }
@@ -165,18 +235,24 @@ label { font-size:13px; color:var(--muted); }
    here is set in tracked-out capitals, which read as template chrome rather
    than as information. */
 .card { background:var(--card); border:1px solid var(--line);
-        border-radius:14px; padding:16px; margin-bottom:12px; }
+        border-radius:14px; padding:16px; margin-bottom:12px;
+        box-shadow:var(--shadow); }
 .headline { display:flex; align-items:baseline; gap:8px; flex-wrap:wrap; }
 .dropline { display:flex; align-items:baseline; gap:8px; flex-wrap:wrap;
             margin-top:7px; }
 .label { color:var(--muted); font-size:12.5px; width:38px; flex:none; }
 .name { font-size:20px; font-weight:700; letter-spacing:-.01em; }
 .name.small { font-size:15px; font-weight:600; color:var(--ink); }
-.pos { font-size:11px; font-weight:700; padding:2px 6px; border-radius:5px;
-       background:var(--line); }
-.pos.QB{color:var(--qb)} .pos.RB{color:var(--rb)}
-.pos.WR{color:var(--wr)} .pos.TE{color:var(--te)}
-.pos.DEF,.pos.K{color:var(--def)}
+/* A position chip is a tinted pill, not grey with coloured letters: the
+   hue is the fastest thing on the page to scan for and it was carrying
+   eleven pixels of it. */
+.pos { font-size:11px; font-weight:700; padding:3px 7px; border-radius:6px;
+       background:var(--def-bg); color:var(--def); letter-spacing:.01em; }
+.pos.QB{color:var(--qb); background:var(--qb-bg)}
+.pos.RB{color:var(--rb); background:var(--rb-bg)}
+.pos.WR{color:var(--wr); background:var(--wr-bg)}
+.pos.TE{color:var(--te); background:var(--te-bg)}
+.pos.DEF,.pos.K{color:var(--def); background:var(--def-bg)}
 .reason { font-size:14px; margin:12px 0 0; }
 .why { color:var(--muted); font-size:12.5px; margin:8px 0 0; }
 .quote { border-left:2px solid var(--line-2); padding-left:10px;
@@ -215,13 +291,13 @@ label { font-size:13px; color:var(--muted); }
            font-weight:600; flex-wrap:wrap; }
 .optwhy { color:var(--muted); font-size:12.5px; }
 .rec { font-size:11px; font-weight:700; color:var(--ok);
-       border:1px solid var(--ok); border-radius:5px; padding:1px 5px; }
+       background:var(--ok-soft); border-radius:6px; padding:2px 6px; }
 
 /* A chain of claims. Nothing else on a card carries an order, because
    nothing else has one. */
 .chain { display:flex; align-items:center; gap:10px; flex-wrap:wrap;
-         margin:-4px 0 12px; padding:8px 11px; border-radius:9px;
-         background:var(--bg); border-left:3px solid var(--line-2); }
+         margin:-4px 0 12px; padding:9px 12px; border-radius:9px;
+         background:var(--def-bg); border-left:3px solid var(--line-2); }
 .chain.fallback { border-left-color:var(--action); }
 .chain.first { border-left-color:var(--ok); }
 .chaintext { margin:0; font-size:12.5px; color:var(--muted); flex:1;
@@ -241,7 +317,8 @@ label { font-size:13px; color:var(--muted); }
 .queue li { margin:3px 0; }
 .queueleague { color:var(--ink); font-weight:600; margin-top:8px; }
 .match { background:var(--card); border:1px solid var(--line);
-         border-radius:14px; padding:16px; margin-bottom:12px; }
+         border-radius:14px; padding:16px; margin-bottom:12px;
+         box-shadow:var(--shadow); }
 .score { display:flex; justify-content:space-between; align-items:baseline;
          gap:10px; padding:10px 0; }
 .score + .score { border-top:1px solid var(--line); }
@@ -251,6 +328,12 @@ label { font-size:13px; color:var(--muted); }
 .pts { font-size:26px; font-weight:700; font-variant-numeric:tabular-nums;
        letter-spacing:-.02em; flex:none; color:var(--muted); }
 .score.up .pts { color:var(--ink); }
+/* Ahead, behind or level is the one thing on this page that is a status,
+   so it is the one thing that takes a status colour. The score itself
+   stays ink: indigo means pressable, and 140.9 is not. */
+.verdict { font-weight:600; }
+.verdict.ahead { color:var(--ok); }
+.verdict.behind { color:var(--urgent); }
 .pts.small { font-size:15px; font-weight:600; color:var(--ink); }
 .projline { display:flex; justify-content:space-between; gap:10px;
             color:var(--muted); font-size:12px; margin:-6px 0 2px; }
@@ -277,24 +360,36 @@ label { font-size:13px; color:var(--muted); }
 .settled.approved { border-color:var(--ok); }
 .settled .name { font-size:17px; }
 .settled .quote, .settled .reason { display:none; }
+/* "Did that work?" should be answerable from across the room, so the
+   outcome is a tinted block in its own colour rather than one coloured
+   line among the grey ones. The note inside it takes the same hue at
+   lower opacity: a grey note on a green field reads as a different
+   thought. */
 .state { display:flex; align-items:baseline; gap:8px; flex-wrap:wrap;
-         font-size:15px; font-weight:650; margin:12px 0 0; }
+         font-size:15px; font-weight:650; margin:14px 0 0;
+         padding:9px 12px; border-radius:10px; background:var(--def-bg);
+         color:var(--strong); }
 .statemark { font-weight:700; }
-.statenote { color:var(--muted); font-size:12.5px; font-weight:400; }
-.state.approved { color:var(--ok); } .state.declined { color:var(--no); }
-.state.submitted { color:var(--action); }
-.state.failed { color:var(--urgent); }
-.state.unconfirmed { color:var(--warn); }
-.state.won { color:var(--ok); } .state.lost { color:var(--muted); }
+.statenote { color:inherit; opacity:.72; font-size:12.5px; font-weight:400; }
+.state.approved { color:var(--ok); background:var(--ok-soft); }
+.state.declined { color:var(--no); background:var(--urgent-soft); }
+.state.submitted { color:var(--action); background:var(--action-soft); }
+.state.failed { color:var(--urgent); background:var(--urgent-soft); }
+.state.unconfirmed { color:var(--warn); background:var(--warn-soft); }
+.state.won { color:var(--ok); background:var(--ok-soft); }
+.state.lost { color:var(--muted); background:var(--def-bg); }
 .trouble { border-color:var(--urgent); }
 .quiet { border-style:dashed; }
-.trouble code { font-size:12.5px; background:var(--bg); padding:2px 5px;
+.trouble { box-shadow:none; background:var(--urgent-soft); }
+.trouble code { font-size:12.5px; background:var(--card); padding:2px 5px;
                 border-radius:5px; }
 .outcome { font-size:13.5px; color:var(--ink); margin:10px 0 0; }
 .empty { color:var(--muted); padding:20px 0; }
 .bar { display:flex; flex-wrap:wrap; gap:4px 14px;
-       background:var(--card); border:1px solid var(--line); border-radius:10px;
-       padding:10px 13px; font-size:13px; color:var(--muted); margin-bottom:10px; }
+       background:var(--card); border:1px solid var(--line);
+       border-left:3px solid var(--action); border-radius:10px;
+       padding:11px 14px; font-size:13px; color:var(--strong);
+       margin-bottom:10px; box-shadow:var(--shadow); }
 .bar strong { color:var(--ink); }
 .warn { color:var(--urgent); font-weight:600; }
 .lname { color:var(--ink); font-size:16px; font-weight:700;
@@ -305,8 +400,19 @@ label { font-size:13px; color:var(--muted); }
 .counts b { color:var(--ink); }
 .locked { font-size:12px; color:var(--muted); margin-left:8px; }
 
-.progress { position:fixed; inset:0 auto auto 0; height:2px; width:0;
-            background:var(--action); z-index:9; transition:width .35s ease; }
+/* The one page somebody who is not you might see. */
+.signin { max-width:350px; margin:12vh auto; padding:26px 24px 24px;
+          box-shadow:var(--shadow-lg); }
+.signin .brand { font-size:22px; margin-bottom:6px; }
+.signin input[type=password] { width:100%; min-height:46px; padding:11px 13px;
+          font-size:16px; font-family:inherit; border:1px solid var(--line-2);
+          border-radius:9px; background:var(--card); color:var(--ink);
+          margin:14px 0 12px; }
+.signin input[type=password]:focus { outline:none; border-color:var(--action);
+          box-shadow:0 0 0 3px var(--action-soft); }
+
+.progress { position:fixed; inset:0 auto auto 0; height:3px; width:0;
+            background:var(--grad); z-index:9; transition:width .35s ease; }
 body.busy .progress { width:82%; transition:width 14s cubic-bezier(0,.8,.2,1); }
 body.busy { cursor:progress; }
 body.busy nav a, body.busy .call, body.busy .fold { opacity:.5; }
@@ -340,17 +446,12 @@ def e(v):
     return html.escape("" if v is None else str(v), quote=True)
 
 
-LOGIN_HTML = """<form method='post' action='/login' class='card'
-      style='max-width:340px;margin:12vh auto'>
-  %s
-  <h1>Spike</h1>
+LOGIN_HTML = """<form method='post' action='/login' class='card signin'>
+  <div class='brand'>%s<span class='word'>Spike</span></div>
   <p class='why'>%s</p>
   <input type='password' name='password' placeholder='Password'
-         autofocus autocomplete='current-password'
-         style='width:100%%;min-height:46px;padding:10px;font-size:16px;
-                border:1px solid var(--line);border-radius:8px;
-                background:var(--bg);color:var(--ink);margin-bottom:10px'>
-  <button class='approve' style='width:100%%'>Sign in</button>
+         autofocus autocomplete='current-password'>
+  <button class='primary wide'>Sign in</button>
 </form>"""
 
 
@@ -1087,29 +1188,43 @@ def short_source(url):
 
 # A football at the moment it is spiked: pointed down, bouncing away. Inline
 # because one request that cannot fail beats an image that can.
+# The ball is white on the gradient tile, so its laces have to be ink:
+# they were the card colour, which was right against an indigo glyph on a
+# white page and invisible the moment the glyph became white.
 LOGO = ("<svg class='mark' viewBox='0 0 32 32' aria-hidden='true'>"
         "<ellipse cx='16' cy='16' rx='7.5' ry='11' fill='currentColor'"
         " transform='rotate(28 16 16)'/>"
-        "<path d='M10.6 21.4 21.4 10.6' stroke='var(--card)'"
+        "<path d='M10.6 21.4 21.4 10.6' stroke='#4b3fd4'"
         " stroke-width='1.6' stroke-linecap='round'/>"
-        "<path d='M13.2 17.4h3.2M15.6 15h3.2' stroke='var(--card)'"
+        "<path d='M13.2 17.4h3.2M15.6 15h3.2' stroke='#4b3fd4'"
         " stroke-width='1.4' stroke-linecap='round'/>"
         "<path d='M25 7c1.6-1.2 3-1.4 4-0.6' stroke='currentColor'"
         " stroke-width='1.6' fill='none' stroke-linecap='round'"
-        " opacity='.45'/></svg>")
+        " opacity='.5'/></svg>")
 
+# A rounded indigo tile with the ball cut out of it, so the tab icon is
+# the same object as the mark on the page. A gradient would be lost at
+# sixteen pixels, so this is the gradient's middle stop.
 FAVICON = ("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg'"
-           " viewBox='0 0 32 32'%3E%3Cellipse cx='16' cy='16' rx='7.5'"
-           " ry='11' fill='%231a56db' transform='rotate(28 16 16)'/%3E"
-           "%3C/svg%3E")
+           " viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='9'"
+           " fill='%23635bff'/%3E%3Cellipse cx='16' cy='16' rx='6.5'"
+           " ry='9.5' fill='%23fff' transform='rotate(28 16 16)'/%3E"
+           "%3Cpath d='M11.5 20.5 20.5 11.5' stroke='%23635bff'"
+           " stroke-width='1.6' stroke-linecap='round'/%3E%3C/svg%3E")
 
 
 def login_page(message):
-    return LOGIN_HTML % (LOGO, e(message))
+    return LOGIN_HTML % (logo_tile(), e(message))
+
+
+def logo_tile():
+    """The mark in its gradient tile, which is how it appears everywhere."""
+    return f"<span class='tile'>{LOGO}</span>"
 
 
 def brand():
-    return f"<div class='brand'>{LOGO}<span>Spike</span></div>"
+    return (f"<div class='brand'>{logo_tile()}"
+            "<span class='word'>Spike</span></div>")
 
 
 def nav(here):
@@ -1716,10 +1831,12 @@ def render_scores(username):
         if end is not None and verdict:
             verdict += (f", projected to {'win' if end > 0 else 'lose'} by "
                         f"{abs(end):g}" if end else ", projected to tie")
+        tone = ("ahead" if ahead else
+                "behind" if margin is not None and margin < 0 else "")
         out.append(
             "<article class='match'>"
             f"<div class='calltop'><div><h3>{e(b['league_name'] or '')}</h3>"
-            f"<p class='why'>{e(verdict)}</p></div></div>"
+            f"<p class='why verdict {tone}'>{e(verdict)}</p></div></div>"
             + scoreline(us, ahead)
             + scoreline(them, margin is not None and margin < 0)
             + "<details class='others'><summary>Both lineups</summary>"
@@ -1743,7 +1860,7 @@ def trade_card(offer, players):
                    for label, who in (("You send", send), ("You get", get)))
     changes = "".join(f"<li>{e(line)}</li>"
                       for line in trades.lineup_changes(offer, players))
-    return ("<article class='call close'>"
+    return ("<article class='call offer'>"
             "<div class='calltop'>"
             f"<div><h3>{e(get)}</h3></div>"
             f"<span class='where'>{e(offer['with'])} &middot; {e(record)}"
@@ -1808,7 +1925,9 @@ def render_trades(conn):
                        "value list has no setting for it, so read quarterback "
                        "prices here as low.")
         out.append(f"<h2><span>{e(league['league_name'] or '')}</span>"
-                   f"<span class='meta'>{len(league['offers'])} offers</span>"
+                   f"<span class='meta'>{len(league['offers'])} "
+                   f"{'offer' if len(league['offers']) == 1 else 'offers'}"
+                   "</span>"
                    "</h2>"
                    f"<div class='bar'>{e(league.get('summary', ''))}</div>"
                    f"<p class='guide'>{e(priced)}</p>")
@@ -1843,7 +1962,7 @@ def stored_trade_card(offer):
                    f"<span>{e(who)}</span></div>"
                    for label, who in (("You send", send), ("You get", get)))
     changes = "".join(f"<li>{e(line)}</li>" for line in offer["changes"])
-    return ("<article class='call close'>"
+    return ("<article class='call offer'>"
             "<div class='calltop'>"
             f"<div><h3>{e(get)}</h3></div>"
             f"<span class='where'>{e(offer['with'])} &middot; "
