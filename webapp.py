@@ -53,9 +53,13 @@ CSS = """
 
    Depth replaces half the grey. A card used to be told apart from the page
    by a one-pixel line; now it is lifted off it by a shadow, which is
-   quieter and reads as an object rather than a box. The line stays for
-   dark mode, where shadows do not carry. */
-:root { color-scheme: light dark;
+   quieter and reads as an object rather than a box.
+
+   Light only, on purpose. Following the phone into dark mode made a page
+   of twenty-two cards read as a wall, and this is a page you skim in
+   daylight on a Tuesday morning. One theme is also one theme to get
+   right. */
+:root { color-scheme: light;
         --bg:#f6f9fc; --card:#fff; --raise:#fff; --ink:#0a2540;
         --muted:#5c6f85; --strong:#425466;
         --line:#e6ebf1; --line-2:#cfd9e4;
@@ -75,25 +79,6 @@ CSS = """
                     0 8px 16px -8px rgba(10,37,64,.14);
         --shadow-action:0 2px 5px -1px rgba(99,91,255,.38),
                         0 1px 3px -1px rgba(10,37,64,.2); }
-@media (prefers-color-scheme: dark) {
-  /* Navy rather than black: the same hue as the ink in daylight, which
-     keeps the brand colours sitting on it instead of glowing off it. */
-  :root { --bg:#070b16; --card:#111827; --raise:#162032; --ink:#e9eff8;
-          --muted:#95a6bd; --strong:#b9c7da;
-          --line:#1e2940; --line-2:#2c3a55;
-          --action:#8b84ff; --action-ink:#070b16; --action-soft:#1b1d42;
-          --urgent:#ff7088; --urgent-soft:#2b1320;
-          --warn:#f0b357; --warn-soft:#2a2010;
-          --ok:#3ddc98; --ok-ink:#05221a; --ok-soft:#0d2a21; --no:#ff7088;
-          --qb:#a996ff; --qb-bg:#1e1b3d;
-          --rb:#4ade9b; --rb-bg:#0d2a21;
-          --wr:#5fb8f5; --wr-bg:#0f2639;
-          --te:#ff9d5c; --te-bg:#2d1a10;
-          --def:#9aaec6; --def-bg:#1a2335;
-          --shadow:0 1px 2px rgba(0,0,0,.5);
-          --shadow-lg:0 12px 28px -8px rgba(0,0,0,.6);
-          --shadow-action:0 2px 8px -2px rgba(139,132,255,.45); }
-}
 * { box-sizing:border-box; -webkit-text-size-adjust:100%; }
 body { margin:0; padding:18px 14px 40px; background:var(--bg); color:var(--ink);
        font:16px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }
@@ -103,7 +88,7 @@ body { margin:0; padding:18px 14px 40px; background:var(--bg); color:var(--ink);
    template chrome rather than as information. */
 h1 { font-size:29px; line-height:1.1; margin:0 0 3px;
      letter-spacing:-.03em; font-weight:760; }
-h2 { font-size:13px; font-weight:680; color:var(--strong); margin:28px 0 8px;
+h2 { font-size:13px; font-weight:680; color:var(--strong); margin:22px 0 7px;
      display:flex; justify-content:space-between; align-items:baseline; gap:8px; }
 .sub { color:var(--muted); font-size:13px; margin:0 0 16px; }
 .meta { color:var(--muted); font-size:12px; font-weight:400; }
@@ -113,6 +98,12 @@ h2 { font-size:13px; font-weight:680; color:var(--strong); margin:28px 0 8px;
 /* The mark sits in a gradient tile and the wordmark is cut out of the
    same gradient, so the identity is one object in two places rather than
    a blue glyph beside black text. */
+.pagetop { display:flex; align-items:flex-start; justify-content:space-between;
+           gap:12px; margin-bottom:10px; }
+.pagetop .sub { margin:0; }
+button.small { min-height:34px; padding:6px 12px; font-size:13px;
+               border-radius:8px; white-space:nowrap; }
+
 .brand { display:flex; align-items:center; gap:10px; font-weight:750;
          font-size:19px; letter-spacing:-.025em; margin-bottom:16px; }
 .tile { width:30px; height:30px; border-radius:9px; flex:none;
@@ -174,6 +165,18 @@ nav a.on, nav a.on:hover { background:var(--grad); color:#fff;
 .player.bench-out .face { filter:grayscale(1); opacity:.65; }
 .tick { font-size:12px; font-weight:700; color:var(--ok); flex:none; }
 .rowlabel { font-size:12.5px; color:var(--muted); margin:14px 0 0; }
+/* Supporting detail, closed. The handle has to earn its line, so it is
+   the attribution - how many people named him, and who - rather than the
+   word "details". */
+.more { margin-top:9px; }
+.more > summary { font-size:12.5px; color:var(--muted); cursor:pointer;
+                  list-style:none; padding:1px 0; display:inline-flex;
+                  align-items:center; gap:5px; }
+.more > summary::-webkit-details-marker { display:none; }
+.more > summary::after { content:"+"; color:var(--muted); font-weight:600; }
+.more[open] > summary::after { content:"−"; }
+.more > summary:hover { color:var(--action); }
+
 .others { margin-top:4px; }
 .others > summary { font-size:13px; color:var(--muted); cursor:pointer;
                     padding:8px 0; list-style:none; }
@@ -235,13 +238,13 @@ label { font-size:13px; color:var(--muted); }
    here is set in tracked-out capitals, which read as template chrome rather
    than as information. */
 .card { background:var(--card); border:1px solid var(--line);
-        border-radius:14px; padding:16px; margin-bottom:12px;
+        border-radius:14px; padding:14px; margin-bottom:10px;
         box-shadow:var(--shadow); }
 .headline { display:flex; align-items:baseline; gap:8px; flex-wrap:wrap; }
 .dropline { display:flex; align-items:baseline; gap:8px; flex-wrap:wrap;
-            margin-top:7px; }
+            margin-top:5px; }
 .label { color:var(--muted); font-size:12.5px; width:38px; flex:none; }
-.name { font-size:20px; font-weight:700; letter-spacing:-.01em; }
+.name { font-size:18px; font-weight:700; letter-spacing:-.015em; }
 .name.small { font-size:15px; font-weight:600; color:var(--ink); }
 /* A position chip is a tinted pill, not grey with coloured letters: the
    hue is the fastest thing on the page to scan for and it was carrying
@@ -253,22 +256,22 @@ label { font-size:13px; color:var(--muted); }
 .pos.WR{color:var(--wr); background:var(--wr-bg)}
 .pos.TE{color:var(--te); background:var(--te-bg)}
 .pos.DEF,.pos.K{color:var(--def); background:var(--def-bg)}
-.reason { font-size:14px; margin:12px 0 0; }
+.reason { font-size:14px; margin:9px 0 0; line-height:1.45; }
 .why { color:var(--muted); font-size:12.5px; margin:8px 0 0; }
 .quote { border-left:2px solid var(--line-2); padding-left:10px;
-         margin:12px 0 0; color:var(--ink); font-size:13.5px;
-         font-style:italic; }
+         margin:8px 0 2px; color:var(--strong); font-size:13.5px;
+         font-style:italic; line-height:1.45; }
 .quote.muted { border-left-style:dashed; font-style:normal;
                color:var(--muted); font-size:13px; }
 
 /* The bid and the button that spends it stay in one block, and the button
    says the number that is in the box. */
-.bidrow { display:flex; align-items:center; gap:12px; flex-wrap:wrap;
-          margin-top:16px; }
+.bidrow { display:flex; align-items:center; gap:8px; flex-wrap:wrap;
+          margin-top:12px; }
 .bidwrap { display:flex; align-items:center; gap:7px; }
 .bidwrap > span:first-child { font-size:13px; color:var(--muted); }
 .of { font-size:13px; color:var(--muted); }
-.guide { color:var(--muted); font-size:12.5px; margin-left:auto; }
+.guide { color:var(--muted); font-size:12.5px; }
 .acts { display:flex; gap:8px; margin-top:10px; }
 
 /* Who goes, stated plainly and changed in place. A native select was
@@ -295,19 +298,16 @@ label { font-size:13px; color:var(--muted); }
 
 /* A chain of claims. Nothing else on a card carries an order, because
    nothing else has one. */
-.chain { display:flex; align-items:center; gap:10px; flex-wrap:wrap;
-         margin:-4px 0 12px; padding:9px 12px; border-radius:9px;
-         background:var(--def-bg); border-left:3px solid var(--line-2); }
-.chain.fallback { border-left-color:var(--action); }
-.chain.first { border-left-color:var(--ok); }
-.chaintext { margin:0; font-size:12.5px; color:var(--muted); flex:1;
-             min-width:190px; }
-.chaintext b { color:var(--ink); font-weight:650; }
-.chain form { display:flex; gap:6px; }
-.movebtn { min-height:32px; padding:5px 10px; font-size:12.5px;
-           font-weight:600; border:1px solid var(--line-2); border-radius:8px;
-           background:var(--card); color:var(--ink); font-family:inherit;
-           cursor:pointer; }
+/* A footnote about where this claim sits in the queue. It was a boxed
+   banner with a boxed button inside it, taking as much of the card as the
+   claim the card is about. */
+.chain { margin:0 0 9px; font-size:12.5px; color:var(--muted);
+         line-height:1.5; }
+.chain b { font-weight:650; }
+.chain.first b { color:var(--ok); }
+.chain.fallback b { color:var(--warn); }
+.chain form { display:inline; }
+.chain .link { margin-left:10px; }
 
 .panel { border-color:var(--action); }
 .paneltop { margin:0; font-size:16px; font-weight:650; }
@@ -423,12 +423,8 @@ button[disabled] { opacity:.6; cursor:progress; }
   h1 { font-size:23px; }
   .call.urgent h3 { font-size:19px; }
   .call, .call.urgent { padding:14px; }
-  .bidwrap { width:100%; }
-  input[type=number] { flex:1; width:auto; }
+  input[type=number] { width:72px; }
   .approve, .decline { flex:1 1 45%; }
-  /* The analyst range drops under the bid box rather than being squeezed
-     beside it, where it wraps to two words a line. */
-  .guide { margin-left:0; width:100%; }
   .chaintext { min-width:0; }
 }
 """
@@ -517,12 +513,12 @@ def render(conn):
         if tally.get(k))
 
     out = [nav("/"),
+           "<div class='pagetop'><div>"
            f"<h1>Waiver proposals</h1>"
            f"<div class='sub'>Week {e(run['week'])} &middot; filed "
-           f"{e(said_ago(age_of(run)))} &middot; nothing is submitted until "
-           f"you approve it</div>"
-           f"<div class='counts'>{counts}</div>",
-           refresh_button("Re-check waivers")]
+           f"{e(said_ago(age_of(run)))}</div></div>"
+           + refresh_button("Re-check") + "</div>"
+           f"<div class='counts'>{counts}</div>"]
 
     out.append(stale_warning(run))
     out.append(quiet_leagues(run))
@@ -557,6 +553,12 @@ def render(conn):
         for r in items:
             out.append(card(r, marks.get(r["id"])))
         out.append("</details>")
+    # The reassurance used to sit under the heading, where it was read on
+    # every visit and wrapped the header onto two lines. It is true once.
+    out.append("<p class='foot'>Nothing is submitted until you approve it, "
+               "and approving only queues a claim — it is placed in your "
+               "league when you press the button at the top of the page. The "
+               "bid is yours to change before you approve.</p>")
     return page("".join(out), "Spike — waivers")
 
 
@@ -735,12 +737,12 @@ def league_heading(conn, lid, lname, items, waiting, live):
 
     fallbacks = claim_order.blockers(live)
     if fallbacks:
+        # The cards themselves say which ones are fallbacks and what they
+        # are waiting on. This only has to say that the total above is an
+        # overstatement, which is a clause, not a sentence.
         one = len(fallbacks) == 1
-        bar += ("<span>" + (
-            "one of these is a fallback and only runs if the claim above it "
-            "fails" if one else
-            f"{len(fallbacks)} of these are fallbacks, each running only if "
-            "the claim above it fails") + ", so the real cost is lower</span>")
+        bar += ("<span>" + ("1 fallback" if one else f"{len(fallbacks)} "
+                            "fallbacks") + ", so less in practice</span>")
 
     return (f"<h2><span class='lname'>{e(lname)}</span>"
             f"<span class='meta'>{len(waiting)} to review</span></h2>"
@@ -928,25 +930,32 @@ def reason_line(r, options):
 def chain_banner(r, mark):
     """Say what this claim competes with, and offer to change the order."""
     if mark["role"] == "first":
-        text = ("<b>First choice.</b> A claim below falls back to this one "
-                "if it fails.")
+        text = "<b>First choice</b> &mdash; a claim below falls back to this"
     else:
         above, why = mark["blocker"]
         who = strip_paren(above["add_player_name"])
         cost = f" at {above['bid']}" if above["bid"] is not None else ""
-        text = (f"<b>Fallback.</b> Runs only if <b>{e(who)}{e(cost)}</b> "
-                f"fails, because {e(why)}.")
+        text = (f"<b>Fallback</b> &mdash; runs only if {e(who)}{e(cost)} "
+                f"fails, because {e(why)}")
     moves = ""
     if mark["up"] or mark["down"]:
         moves = ("<form method='post' action='/order'>"
                  f"<input type='hidden' name='id' value='{e(r['id'])}'>"
-                 + ("<button class='movebtn' name='dir' value='up'>"
-                    "Move up</button>" if mark["up"] else "")
-                 + ("<button class='movebtn' name='dir' value='down'>"
-                    "Move down</button>" if mark["down"] else "")
+                 + ("<button class='link' name='dir' value='up'>"
+                    "move up</button>" if mark["up"] else "")
+                 + ("<button class='link' name='dir' value='down'>"
+                    "move down</button>" if mark["down"] else "")
                  + "</form>")
-    return (f"<div class='chain {e(mark['role'])}'>"
-            f"<p class='chaintext'>{text}</p>{moves}</div>")
+    # One line, not a boxed banner with a boxed button in it. The ordering
+    # is a footnote about this claim, and it was taking as much room as the
+    # claim.
+    #
+    # A div, not a p: this carries a form, and a p may not. The parser
+    # closes the paragraph at the form tag, so the buttons fell out of the
+    # element entirely - unstyled, unspaced and on a line of their own -
+    # while the stylesheet went on describing a paragraph they were no
+    # longer in.
+    return (f"<div class='chain {e(mark['role'])}'>{text}{moves}</div>")
 
 
 def evidence(r):
@@ -976,24 +985,34 @@ def evidence(r):
     # would want to know when weighing the claim.
     if not (r["consensus"] or 0):
         if (r["add_position"] or "").upper() == "DEF":
-            how = ("Picked on this week's matchup and next week's, not on "
-                   "anybody's write-up.")
+            short, long = ("Picked on the matchup, not a write-up.",
+                           "Defenses are chosen on who they play this week "
+                           "and next, because almost nobody writes them up.")
         else:
-            how = ("No analyst named him. He is here because he is the best "
-                   "player actually free in this league, on Sleeper's "
-                   "overall rank and how many leagues are adding him.")
-        return f"<p class='why'>{e(how)}</p>"
+            short, long = ("Nobody named him.",
+                           "He is here because he is the best player actually "
+                           "free in this league, on Sleeper's overall rank and "
+                           "how many leagues are adding him.")
+        return ("<details class='more'>"
+                f"<summary>{e(short)}</summary>"
+                f"<p class='quote muted'>{e(long)}</p></details>")
     named = e(f"Named by {r['consensus']} analyst"
               f"{'s' if (r['consensus'] or 0) != 1 else ''}")
     if src_txt:
         named += f" &middot; {e(src_txt)}"
     quote = r["quote"] or ""
-    if ex.about(quote, r["add_player_name"]):
-        body = f"<blockquote class='quote'>{e(quote)}</blockquote>"
-    else:
-        body = ("<p class='quote muted'>Limited recent coverage &mdash; he is "
-                "on the lists, but nobody wrote him up.</p>")
-    return body + f"<p class='why'>{named}</p>"
+    if not ex.about(quote, r["add_player_name"]):
+        # Nothing to open. A line saying nobody wrote him up is the whole
+        # of what there is, so it stays on the card.
+        return (f"<p class='why'>{named} &mdash; but nobody wrote him up.</p>")
+    # Folded. Across twenty-two cards the quote was four lines of somebody
+    # clearing his throat on each of them, and what you need to decide is
+    # who comes in, who goes out and for how much. The handle carries the
+    # part that is signal on its own: how many people named him, and who.
+    return ("<details class='more'>"
+            f"<summary>{named}</summary>"
+            f"<blockquote class='quote'>{e(quote)}</blockquote>"
+            "</details>")
 
 
 def bids_money(r):
@@ -1025,16 +1044,16 @@ def decide_form(r):
     if r["bid_low"] is not None and r["bid_high"] is not None:
         span = (f"{r['bid_low']}" if r["bid_low"] == r["bid_high"]
                 else f"{r['bid_low']} to {r['bid_high']}")
-        guide = f"Analysts bid {span}"
+        guide = f"analysts bid {span}"
     else:
-        guide = "No analyst put a number on him"
+        guide = "no analyst put a number on him"
     return ("<div class='bidrow'>"
             "<label class='bidwrap'><span>Bid</span>"
             f"<input type='number' name='bid' form='f{e(r['id'])}'"
             f" inputmode='numeric' min='0' max='{e(r['max_bid'] or 100)}'"
             f" data-bid data-league='{e(r['league_id'])}' value='{e(bid)}'>"
             f"<span class='of'>of {e(r['max_bid'] or 100)}</span></label>"
-            f"<span class='guide'>{e(guide)}</span></div>"
+            f"<span class='guide'>&middot; {e(guide)}</span></div>"
             "<div class='acts'>"
             f"<button class='approve' form='f{e(r['id'])}' name='action'"
             f" value='approve' data-approve>Approve at "
@@ -1301,9 +1320,13 @@ def refresh_waivers(conn, db_path):
 
 
 def refresh_button(label):
-    return (f"<form method='post' action='/waivers/refresh'>"
-            f"<button class='ghost' style='width:100%;margin-bottom:12px'>"
-            f"{e(label)}</button></form>")
+    """Secondary, and sized like it.
+
+    It was a full-width bar directly under the heading, which gave the
+    one thing on the page you rarely press the best space on it.
+    """
+    return ("<form method='post' action='/waivers/refresh'>"
+            f"<button class='ghost small'>{e(label)}</button></form>")
 
 
 # Marks a message that is worth saying but is not a failure. The check

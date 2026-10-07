@@ -186,7 +186,7 @@ class Stored(unittest.TestCase):
         st.add_fallback(conn, ids[0])
         html = webapp.render(conn).decode()
         self.assertIn("Fallback", html)
-        self.assertIn("Runs only if", html)
+        self.assertIn("runs only if", html)
 
     def test_only_claims_in_a_chain_are_given_an_order(self):
         # Bids decide who wins a player, so a claim competing with nothing
@@ -208,7 +208,7 @@ class Stored(unittest.TestCase):
     def test_the_move_buttons_say_what_they_do(self):
         conn, _run, ids = self.build()
         st.add_fallback(conn, ids[0])
-        self.assertIn("Move up", webapp.render(conn).decode())
+        self.assertIn("move up", webapp.render(conn).decode())
 
     def test_the_submit_panel_shows_the_running_order(self):
         conn, _run, ids = self.build({"bid": 12}, {"bid": 4})

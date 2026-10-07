@@ -503,6 +503,91 @@ class SubmitButton(unittest.TestCase):
         self.assertIsNone(st.pending_submit_request(conn))
 
 
+class ValidNesting(unittest.TestCase):
+    """A paragraph may not hold a form, and the browser does not argue.
+
+    The claim-order footnote was moved into a <p> that still carried the
+    reorder form. The parser closes the paragraph at the form tag, so the
+    buttons landed outside the element entirely - unstyled, unspaced, on a
+    line of their own - while the stylesheet went on describing a paragraph
+    they were no longer in. Every test passed and the page was wrong.
+
+    So this reads the pages the way a browser does rather than the way the
+    source looks.
+    """
+
+    # What a <p> is closed by, per the HTML parsing rules.
+    BLOCKS = {"form", "div", "p", "ul", "ol", "li", "table", "details",
+              "blockquote", "article", "section", "h1", "h2", "h3", "pre",
+              "hr", "header", "footer", "nav", "figure"}
+
+    def offenders(self, markup):
+        from html.parser import HTMLParser
+
+        found = []
+
+        class Walk(HTMLParser):
+            def __init__(self):
+                super().__init__()
+                self.open_p = False
+
+            def handle_starttag(self, tag, attrs):
+                if tag == "p":
+                    self.open_p = True
+                elif tag in ValidNesting.BLOCKS and self.open_p:
+                    found.append(tag)
+                    self.open_p = False
+
+            def handle_endtag(self, tag):
+                if tag == "p":
+                    self.open_p = False
+
+        Walk().feed(markup)
+        return found
+
+    def waivers(self):
+        import store as st
+        conn = st.connect(":memory:")
+        run = st.start_run(conn, "2026", 4, ["page"])
+        common = dict(league_id="2", league_name="LEHG", max_bid=33)
+        # Two claims cutting the same man, which is what puts a claim-order
+        # footnote - and its form - on the card.
+        for n, who in enumerate(("First Man", "Second Man"), start=1):
+            st.add_proposal(conn, run, add_player_id=str(n),
+                            add_player_name=who, add_position="RB",
+                            drop_player_id="9", drop_player_name="Spare Man",
+                            drop_position="TE", bid=n, rank=n, priority=n,
+                            consensus=1, sources=["https://espn.com/x"],
+                            rationale="a reason", **common)
+        return webapp.render(conn).decode()
+
+    def test_the_claim_order_footnote_keeps_its_form(self):
+        html = self.waivers()
+        self.assertIn("class='chain", html)
+        self.assertEqual(self.offenders(html), [])
+
+    def test_the_check_would_have_caught_it(self):
+        """Otherwise an empty list proves only that the parser ran."""
+        self.assertEqual(
+            self.offenders("<p class='chain'>text<form><button>x</button>"
+                           "</form></p>"),
+            ["form"])
+
+    def test_every_page_nests_validly(self):
+        import store as st
+        conn = st.connect(":memory:")
+        st.start_lineup_check(conn, "2026", 4, ["page"])
+        for name, markup in (
+                ("waivers", self.waivers()),
+                ("lineup", webapp.render_lineup(conn).decode()),
+                ("trades", webapp.render_trades(conn).decode()),
+                ("login", webapp.page(
+                    webapp.login_page("Enter the password."), "Spike")
+                    .decode())):
+            with self.subTest(page=name):
+                self.assertEqual(self.offenders(markup), [])
+
+
 class Stylesheet(unittest.TestCase):
     """The stylesheet is a Python string, which is a trap.
 

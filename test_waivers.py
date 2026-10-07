@@ -69,19 +69,20 @@ class Card(unittest.TestCase):
         return webapp.render(conn).decode()
 
     def test_no_write_up_says_so_instead_of_quoting_furniture(self):
-        self.assertIn("Limited recent coverage", self.build())
+        self.assertIn("nobody wrote him up", self.build())
 
     def test_a_stored_listing_is_refused_at_the_page_too(self):
         # The quote was taken before the extractor learned to reject this,
         # and it is still in the database.
         html = self.build({"quote": LISTING})
         self.assertNotIn("popular searches", html)
-        self.assertIn("Limited recent coverage", html)
+        self.assertIn("nobody wrote him up", html)
 
     def test_a_quote_about_somebody_else_is_refused(self):
         html = self.build({"quote": "Alec Pierce cleared concussion protocol "
                                     "and should be rostered everywhere."})
-        self.assertIn("Limited recent coverage", html)
+        self.assertNotIn("Alec Pierce cleared", html)
+        self.assertIn("nobody wrote him up", html)
 
     def test_a_real_write_up_is_shown(self):
         self.assertIn("eight targets", self.build({"quote": WRITEUP}))
@@ -94,11 +95,11 @@ class Card(unittest.TestCase):
                       self.build())
 
     def test_the_analyst_range_is_shown(self):
-        self.assertIn("Analysts bid 3 to 11", self.build())
+        self.assertIn("analysts bid 3 to 11", self.build())
 
     def test_no_analyst_number_is_admitted_rather_than_invented(self):
         html = self.build({"bid_low": None, "bid_high": None})
-        self.assertIn("No analyst put a number on him", html)
+        self.assertIn("no analyst put a number on him", html)
 
     def test_the_budget_line_counts_every_pending_bid(self):
         # The number you need before approving three bids in one league is
@@ -116,7 +117,7 @@ class Card(unittest.TestCase):
 
     def test_the_refresh_reads_as_a_refresh(self):
         html = self.build()
-        self.assertIn("Re-check waivers", html)
+        self.assertIn("Re-check", html)
         self.assertNotIn("Work them out again", html)
 
 
@@ -216,14 +217,13 @@ class Drops(unittest.TestCase):
         # Whichever is higher in the queue takes him, so the one below only
         # lands if it fails and the budget total above is the worst case.
         body = self.body({}, {})
-        self.assertIn("one of these is a fallback and only runs if the "
-                      "claim above it fails", body)
+        self.assertIn("1 fallback, so less in practice", body)
         self.assertIn("Fallback", body)
 
     def test_distinct_drops_are_not_flagged(self):
         body = self.body({}, {"drop_player_id": "d2",
                               "drop_player_name": "Alec Pierce (IND WR)"})
-        self.assertNotIn("is a fallback", body)
+        self.assertNotIn("fallback, so less in practice", body)
         self.assertNotIn("Fallback", body)
 
 
